@@ -76,6 +76,7 @@ Future<ReplaySummary> replayCapsule({
   required ReplayStrategy strategy,
   required int settleTimeoutMs,
   required bool strictNetwork,
+  bool idleCompression = true,
   String? buildSha,
 }) async {
   final m = loaded.capsule.manifest;
@@ -94,6 +95,7 @@ Future<ReplaySummary> replayCapsule({
         attempt: i,
         kind: kind.name,
         strictNetwork: strictNetwork,
+        idleCompression: idleCompression,
       ),
       budget,
     );
@@ -107,7 +109,10 @@ Future<ReplaySummary> replayCapsule({
 }
 
 String _attemptLine(ReplayKind kind, ReplayReport r) {
-  final secs = dim('${(r.durationMs / 1000).toStringAsFixed(1)}s');
+  final skipped = r.compressedMs > 0
+      ? ' (${(r.compressedMs / 1000).toStringAsFixed(1)}s idle skipped)'
+      : '';
+  final secs = dim('${(r.durationMs / 1000).toStringAsFixed(1)}s$skipped');
   final label = switch (r.outcome) {
     ReplayOutcome.reproduced => kind == ReplayKind.replay ? green('REPRODUCED') : red('STILL FAILS'),
     ReplayOutcome.notReproduced => kind == ReplayKind.replay ? yellow('NOT REPRODUCED') : green('PASS'),

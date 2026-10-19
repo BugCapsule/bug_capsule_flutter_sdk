@@ -92,11 +92,21 @@ class FakeReplay implements ReplayContext {
   ReplaySettings settings = const ReplaySettings();
   final List<String> divergences = [];
   int served = 0;
+  int work = 0;
+  int activities = 0;
 
   @override
   void diverge(String type, String detail) => divergences.add('$type $detail');
   @override
   void fixtureServed() => served++;
+  @override
+  void Function() beginWork() {
+    work++;
+    return () => work--;
+  }
+
+  @override
+  void activity() => activities++;
 }
 
 Future<Dio> dioWith(ReproDio repro, ReproSession session, HttpClientAdapter server) async {
@@ -170,5 +180,26 @@ void main() {
       dio.get<Object?>('/down'),
       throwsA(isA<DioException>().having((e) => e.type, 'type', DioExceptionType.connectionTimeout)),
     );
+  });
+
+  test('a replayed response counts as work for its whole recorded latency', () async {
+    const event = ReproEvent(seq: 1, t: 0, type: EventTypes.http, data: {
+      'key': 'GET api.test/slow',
+      'occurrence': 0,
+      'status': 200,
+      'durationMs': 200,
+      'responseHeaders': {'content-type': 'application/json'},
+      'responseBody': {'ok': true},
+      'bodyEncoding': 'json',
+    });
+    final replay = FakeReplay(const [event]);
+    final dio = await dioWith(ReproDio(), FakeSession(replay: replay), CountingServer());
+    final watch = Stopwatch()..start();
+    final response = dio.get<Map<String, Object?>>('/slow');
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(replay.work, 1);
+    expect((await response).data, {'ok': true});
+    expect(watch.elapsedMilliseconds, greaterThanOrEqualTo(200));
+    expect(replay.work, 0);
   });
 }
