@@ -54,7 +54,7 @@ anchor. Replay maps `t` back to wall time with
 | `session.durationMs` | int | From anchor to capsule creation. |
 | `failure` | object \| null | See below. Null for a manual capture with no assertion. |
 | `eligibility.status` | `eligible` \| `partial` \| `ineligible` | Computed on device. |
-| `eligibility.missing` | `[{dependency, reason}]` | Every dependency that blocks full eligibility. |
+| `eligibility.missing` | `[{dependency, reason, blocking?}]` | Every gap. `blocking: true` makes the capsule ineligible (e.g. no failure assertion); other gaps make it partial. |
 | `integrations` | string[] | e.g. `["bloc","dio","go_router","shared_preferences"]` |
 | `stats` | `{eventCount, droppedEvents, checkpointKind}` | |
 | `labels` | map<string,string> | Free-form tags (QA note, ticket id, ...). |
@@ -85,6 +85,7 @@ characters. Stack traces are informative only (debug and release frames differ).
   "kind": "launch | periodic",
   "t": -412,
   "wallClockMs": 1760870000000,
+  "afterSeq": 0,
   "data": {
     "shared_preferences": { "onboarding_done": {"type": "bool", "value": true} },
     "go_router": { "location": "/cart" },
@@ -100,6 +101,9 @@ characters. Stack traces are informative only (debug and release frames differ).
 * A **periodic** checkpoint (default every 30 s) additionally carries
   serialized BLoC states and the current route. It is used when the session
   is longer than the retained window.
+
+`afterSeq` is the sequence number of the last event recorded before the
+checkpoint; the capsule's events are exactly those with a greater `seq`.
 
 Each key of `data` belongs to one integration; the integration that wrote it
 is the only one that reads it.
