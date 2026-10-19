@@ -143,7 +143,7 @@ Production capture works, but it is the riskiest mode. Before rollout:
 
 ## Known limitations (v0.1)
 
-- Replay runs in **real time** (a 60 s session takes 60 s to replay); idle-time compression is not implemented yet.
+- Replay keeps recorded timing, except that idle gaps between inputs longer than 1.5 s shrink to about 0.3 s when the recording and the replayed app are both idle (no pending response, no recent BLoC activity, no pressed pointer; running animations get up to 2 s to finish). Recorded network latency is never shortened. `--no-compress-idle` replays in real time. App `Timer`s are not tracked, so a timer whose effect is not recorded (say, a plain `setState`) can be skipped over; use `--no-compress-idle` if replay depends on one.
 - `DateTime.now()`, `Timer`s and animations are not virtualized; only `clock.now()` and `Repro.random` are deterministic.
 - Platform channels, native SDKs (Firebase, maps, payments), WebSockets and the `http` package are not captured. Bugs that depend on them are partial at best.
 - BLoC state injection from periodic checkpoints matches instances by creation order (`CartBloc#0`). BLoCs that dispatch events in their constructor can overwrite restored state. Launch-checkpoint replay (the default for sessions within the 5-minute window) re-executes the session instead and avoids this.

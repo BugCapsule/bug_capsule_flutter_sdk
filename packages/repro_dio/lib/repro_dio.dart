@@ -280,8 +280,13 @@ class _ReproAdapter implements HttpClientAdapter {
     if (lookup == null) {
       replay.diverge('network.unrecorded', key);
       if (!replay.settings.strictNetwork) {
-        return _inner.fetch(
-            options, requestBytes == null ? null : Stream.value(requestBytes), cancelFuture);
+        final done = replay.beginWork();
+        try {
+          return await _inner.fetch(
+              options, requestBytes == null ? null : Stream.value(requestBytes), cancelFuture);
+        } finally {
+          done();
+        }
       }
       throw DioException.connectionError(
         requestOptions: options,
@@ -293,11 +298,17 @@ class _ReproAdapter implements HttpClientAdapter {
     replay.fixtureServed();
 
     // Keep the recorded latency so response ordering (and races) replay.
-    final delay = Future<void>.delayed(Duration(milliseconds: fixture.durationMs));
-    if (cancelFuture != null) {
-      await Future.any([delay, cancelFuture]);
-    } else {
-      await delay;
+    // While it runs, idle compression leaves the replay clock alone.
+    final done = replay.beginWork();
+    try {
+      final delay = Future<void>.delayed(Duration(milliseconds: fixture.durationMs));
+      if (cancelFuture != null) {
+        await Future.any([delay, cancelFuture]);
+      } else {
+        await delay;
+      }
+    } finally {
+      done();
     }
 
     final error = fixture.error;

@@ -172,6 +172,7 @@ class ReproBloc extends ReproIntegration {
   }
 
   void _onEvent(Bloc<Object?, Object?> bloc, Object? event) {
+    _session.replay?.activity();
     if (!_session.isRecording) return;
     final registration = _registration(bloc);
     final toJson = registration?.eventToJson;
@@ -185,6 +186,7 @@ class ReproBloc extends ReproIntegration {
   }
 
   void _onChange(BlocBase<Object?> bloc, Change<Object?> change) {
+    _session.replay?.activity();
     if (!_session.isRecording) return;
     final registration = _registration(bloc);
     Object? data;
@@ -205,6 +207,7 @@ class ReproBloc extends ReproIntegration {
   }
 
   void _onError(BlocBase<Object?> bloc, Object error, StackTrace stackTrace) {
+    _session.replay?.activity();
     _session.record(EventTypes.blocError, {
       'bloc': bloc.runtimeType.toString(),
       'key': _keyOf(bloc),
