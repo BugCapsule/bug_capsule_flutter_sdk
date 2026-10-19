@@ -39,6 +39,15 @@ abstract interface class ReplayContext {
 
   /// Counts a network response served from the capsule.
   void fixtureServed();
+
+  /// Marks work in progress that idle compression must not skip over, such
+  /// as a response waiting out its recorded latency. Call the returned
+  /// function once the work ends.
+  void Function() beginWork();
+
+  /// Notes that the app did something (e.g. a BLoC event), so idle
+  /// compression waits for it to settle.
+  void activity();
 }
 
 /// Extension point for libraries the app uses.

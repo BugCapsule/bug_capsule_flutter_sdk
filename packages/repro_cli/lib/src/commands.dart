@@ -109,6 +109,9 @@ void _addLaunchOptions(ArgParser p) {
     ..addOption('settle', defaultsTo: '8', help: 'Seconds to wait for the failure after the last input.')
     ..addFlag('lenient-network',
         negatable: false, help: 'Send unrecorded requests to the real network instead of failing them.')
+    ..addFlag('compress-idle',
+        defaultsTo: true,
+        help: 'Skip long idle gaps between inputs (recorded network latency is always kept).')
     ..addFlag('verbose', abbr: 'v', negatable: false, help: 'Show build and device output.');
 }
 
@@ -185,6 +188,7 @@ class ReplayCommand extends Command<int> {
         strategy: ReplayStrategy.values.byName(args['strategy'] as String),
         settleTimeoutMs: (double.parse(args['settle'] as String) * 1000).round(),
         strictNetwork: !(args['lenient-network'] as bool),
+        idleCompression: args['compress-idle'] as bool,
         buildSha: buildSha,
       );
       printSummary(summary, loaded.capsule);
@@ -383,6 +387,7 @@ class _RegressRun extends Command<int> {
           strategy: ReplayStrategy.values.byName(args['strategy'] as String),
           settleTimeoutMs: (double.parse(args['settle'] as String) * 1000).round(),
           strictNetwork: !(args['lenient-network'] as bool),
+          idleCompression: args['compress-idle'] as bool,
           buildSha: sha,
         );
         final String result;
