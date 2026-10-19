@@ -138,6 +138,12 @@ class CapsuleStore {
   final Directory root;
   static const maxSavedCaptures = 20;
 
+  /// Written by `repro run` to start the next launch in replay mode.
+  static Future<File> replayRequestFile() async {
+    final support = await getApplicationSupportDirectory();
+    return File('${support.path}/repro/replay_request.json');
+  }
+
   Directory get _captures => Directory('${root.path}/captures');
   Directory get _outbox => Directory('${root.path}/outbox');
   File get _configFile => File('${root.path}/remote_config.json');

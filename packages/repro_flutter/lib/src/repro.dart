@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -212,11 +213,12 @@ class _Runtime with WidgetsBindingObserver implements ReproSession {
 
   Future<void> start(FutureOr<void> Function() appRunner) async {
     final binding = WidgetsFlutterBinding.ensureInitialized();
-    final replayUrl = config.replayUrl ?? _replayUrlFromEnvironment();
+    final replayUrl = config.replayUrl ?? await _replayUrlFromEnvironment();
     if (replayUrl != null) {
       if (kReleaseMode) {
-        debugPrint('[repro] ignoring REPRO_REPLAY_URL: replay is disabled in release builds');
+        debugPrint('[repro] ignoring replay request: replay is disabled in release builds');
       } else {
+        debugPrint('[repro] replay mode: $replayUrl');
         await _startReplay(replayUrl, appRunner, binding);
         return;
       }
@@ -224,11 +226,28 @@ class _Runtime with WidgetsBindingObserver implements ReproSession {
     await _startCapture(appRunner, binding);
   }
 
-  static String? _replayUrlFromEnvironment() {
+  /// Replay requests come from (in order): the `REPRO_REPLAY_URL`
+  /// dart-define, the process environment, or a one-shot request file the
+  /// CLI drops into the app's sandbox (`<support>/repro/replay_request.json`),
+  /// which works on simulators where environment variables don't reach the app.
+  static Future<String?> _replayUrlFromEnvironment() async {
     const fromDefine = String.fromEnvironment(ReplayProtocol.envUrl);
     if (fromDefine.isNotEmpty) return fromDefine;
     final fromEnv = Platform.environment[ReplayProtocol.envUrl];
-    return fromEnv == null || fromEnv.isEmpty ? null : fromEnv;
+    if (fromEnv != null && fromEnv.isNotEmpty) return fromEnv;
+    if (kReleaseMode) return null;
+    try {
+      final file = await CapsuleStore.replayRequestFile();
+      if (!await file.exists()) return null;
+      final json = jsonDecode(await file.readAsString()) as Map;
+      await file.delete();
+      final createdAt = DateTime.tryParse('${json['createdAt']}');
+      if (createdAt == null || DateTime.now().difference(createdAt).inMinutes > 10) return null;
+      return json['url'] as String?;
+    } catch (e) {
+      debugPrint('[repro] could not read replay request: $e');
+      return null;
+    }
   }
 
   Future<void> _startCapture(FutureOr<void> Function() appRunner, WidgetsBinding binding) async {
@@ -450,7 +469,7 @@ class _Runtime with WidgetsBindingObserver implements ReproSession {
         stateSchemaVersion: config.stateSchemaVersion,
         platform: PlatformInfo(
           os: Platform.operatingSystem,
-          osVersion: Platform.operatingSystemVersion,
+          osVersion: _osVersion(),
           locale: Platform.localeName,
           screenWidth: logical.width,
           screenHeight: logical.height,
@@ -624,6 +643,15 @@ class _Runtime with WidgetsBindingObserver implements ReproSession {
       }));
     });
     await appRunner();
+  }
+
+  /// "Version 27.0 (Build 24A434)" -> "27.0 (24A434)".
+  static String _osVersion() {
+    final raw = Platform.operatingSystemVersion;
+    final version = RegExp(r'\d+(\.\d+)+').firstMatch(raw)?.group(0);
+    final build = RegExp(r'Build ([^)\s]+)').firstMatch(raw)?.group(1);
+    if (version == null) return raw;
+    return build == null ? version : '$version ($build)';
   }
 
   void dispose() {

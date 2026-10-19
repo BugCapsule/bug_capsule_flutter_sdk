@@ -18,7 +18,7 @@ void printInspect(Capsule c, {int timeline = 40, bool json = false}) {
         '${m.app.flavor != null ? ' [${m.app.flavor}]' : ''}')
     ..writeln('  source     ${m.gitSha == null ? yellow('no git SHA') : m.gitSha!}'
         '${m.dirty == true ? yellow(' (dirty)') : ''}')
-    ..writeln('  platform   ${m.platform.os} ${m.platform.osVersion.split(' ').first}  '
+    ..writeln('  platform   ${m.platform.os} ${m.platform.osVersion}  '
         '${m.platform.screenWidth.toStringAsFixed(0)}×${m.platform.screenHeight.toStringAsFixed(0)} @${m.platform.pixelRatio}x  '
         '${dim('dart ${m.platform.dartVersion}')}')
     ..writeln('  sdk        ${m.sdkName} ${m.sdkVersion}  ${dim('integrations: ${m.integrations.join(', ')}')}')
@@ -66,7 +66,8 @@ void printInspect(Capsule c, {int timeline = 40, bool json = false}) {
     for (final h in http) {
       final d = h.data;
       final status = d['error'] != null ? red('ERR') : '${d['status']}';
-      stdout.writeln('  ${_t(h.t).padLeft(8)}  ${'${d['method']}'.padRight(6)} '
+      final sent = h.t - (d['durationMs'] as int? ?? 0);
+      stdout.writeln('  ${_t(sent).padLeft(8)}  ${'${d['method']}'.padRight(6)} '
           '${_path('${d['url']}').padRight(28)} $status  ${dim('${d['durationMs']}ms ${d['bodyEncoding']}')}');
     }
   }
