@@ -8,6 +8,7 @@ export 'src/codec.dart';
 export 'src/event.dart';
 export 'src/failure.dart';
 export 'src/flight_recorder.dart';
+export 'src/idle_compression.dart';
 export 'src/ids.dart';
 export 'src/network.dart';
 export 'src/redaction.dart';

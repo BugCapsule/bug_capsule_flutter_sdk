@@ -29,6 +29,7 @@ class ReplaySettings {
     this.attempt = 1,
     this.kind = 'replay',
     this.strictNetwork = true,
+    this.idleCompression = true,
   });
 
   factory ReplaySettings.fromJson(Map<String, Object?> j) => ReplaySettings(
@@ -37,6 +38,7 @@ class ReplaySettings {
         attempt: j['attempt'] as int? ?? 1,
         kind: j['kind'] as String? ?? 'replay',
         strictNetwork: j['strictNetwork'] as bool? ?? true,
+        idleCompression: j['idleCompression'] as bool? ?? true,
       );
 
   final ReplayStrategy strategy;
@@ -53,12 +55,17 @@ class ReplaySettings {
   /// Lenient: it goes to the real network.
   final bool strictNetwork;
 
+  /// Shorten long idle gaps between inputs (see `IdleCompressor`). Recorded
+  /// network latency is always kept.
+  final bool idleCompression;
+
   Map<String, Object?> toJson() => {
         'strategy': strategy.name,
         'settleTimeoutMs': settleTimeoutMs,
         'attempt': attempt,
         'kind': kind,
         'strictNetwork': strictNetwork,
+        'idleCompression': idleCompression,
       };
 }
 
@@ -115,6 +122,8 @@ class ReplayReport {
     this.divergences = const [],
     this.eventsDispatched = 0,
     this.fixturesServed = 0,
+    this.compressedMs = 0,
+    this.gapsCompressed = 0,
     this.buildGitSha,
     this.message,
   });
@@ -138,6 +147,8 @@ class ReplayReport {
         ],
         eventsDispatched: j['eventsDispatched'] as int? ?? 0,
         fixturesServed: j['fixturesServed'] as int? ?? 0,
+        compressedMs: j['compressedMs'] as int? ?? 0,
+        gapsCompressed: j['gapsCompressed'] as int? ?? 0,
         buildGitSha: j['buildGitSha'] as String?,
         message: j['message'] as String?,
       );
@@ -152,6 +163,11 @@ class ReplayReport {
   final List<Divergence> divergences;
   final int eventsDispatched;
   final int fixturesServed;
+
+  /// Recorded idle time skipped by idle compression; [durationMs] plus this
+  /// is roughly the real-time length of the replay.
+  final int compressedMs;
+  final int gapsCompressed;
   final String? buildGitSha;
   final String? message;
 
@@ -166,6 +182,8 @@ class ReplayReport {
         'divergences': [for (final d in divergences) d.toJson()],
         'eventsDispatched': eventsDispatched,
         'fixturesServed': fixturesServed,
+        'compressedMs': compressedMs,
+        'gapsCompressed': gapsCompressed,
         'buildGitSha': buildGitSha,
         'message': message,
       };

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:repro_core/repro_core.dart';
 
@@ -59,13 +60,18 @@ class ReplayChannel {
 
 /// Drives a replay: dispatches recorded input at recorded times, watches
 /// for the original failure, and builds the [ReplayReport].
+///
+/// With [ReplaySettings.idleCompression], long idle gaps between inputs are
+/// skipped (see [IdleCompressor]); the replay clock then runs ahead of real
+/// time by [_skippedMs].
 class ReplayEngine implements ReplayContext {
   ReplayEngine({
     required this.capsule,
     required this.settings,
     required this.actions,
     required this.buildGitSha,
-  }) : fixtures = FixtureStore(capsule.events);
+  })  : fixtures = FixtureStore(capsule.events),
+        _idle = IdleCompressor(capsule.events);
 
   @override
   final Capsule capsule;
@@ -83,6 +89,11 @@ class ReplayEngine implements ReplayContext {
   final Map<int, Offset> _lastPointerPosition = {};
   int _fixturesServed = 0;
   int _dispatched = 0;
+  final IdleCompressor _idle;
+  int _skippedMs = 0;
+  int _gapsCompressed = 0;
+  int _work = 0;
+  int _lastActivityMs = 0;
   ReplayStrategy _strategy = ReplayStrategy.auto;
 
   /// Wall time (epoch ms) the replay clock returns before [start].
@@ -90,20 +101,55 @@ class ReplayEngine implements ReplayContext {
   final Stopwatch _sinceRestore = Stopwatch()..start();
 
   /// Virtual wall clock: the recorded checkpoint time plus elapsed replay
-  /// time, so `clock.now()` sees the same dates as during capture.
-  DateTime now() =>
-      DateTime.fromMillisecondsSinceEpoch(_baseWallClockMs + _sinceRestore.elapsedMilliseconds);
+  /// time (skipped idle time included), so `clock.now()` sees the same dates
+  /// as during capture.
+  DateTime now() => DateTime.fromMillisecondsSinceEpoch(
+      _baseWallClockMs + _sinceRestore.elapsedMilliseconds + _skippedMs);
 
-  int elapsed() => _clock.elapsedMilliseconds;
+  /// Replay clock in recorded milliseconds since [run] started.
+  int elapsed() => _clock.elapsedMilliseconds + _skippedMs;
 
   @override
   void diverge(String type, String detail) {
-    final t = _clock.isRunning ? _clock.elapsedMilliseconds : null;
+    final t = _clock.isRunning ? elapsed() : null;
     if (_divergences.length < 200) _divergences.add(Divergence(type, detail, t: t));
   }
 
   @override
   void fixtureServed() => _fixturesServed++;
+
+  @override
+  void Function() beginWork() {
+    _work++;
+    activity();
+    var ended = false;
+    return () {
+      if (ended) return;
+      ended = true;
+      _work--;
+      activity();
+    };
+  }
+
+  @override
+  void activity() => _lastActivityMs = _clock.elapsedMilliseconds;
+
+  /// How long running animations may hold up idle compression after the
+  /// last activity: long enough for a route transition, short enough that an
+  /// endless one (a blinking cursor, a spinner) does not pin replay to real
+  /// time.
+  static const _maxAnimationWaitMs = 2000;
+
+  int get _quietMs => _clock.elapsedMilliseconds - _lastActivityMs;
+
+  /// Work the app is still doing: pending responses, pressed pointers and
+  /// recently started animations.
+  int get _busy {
+    final scheduler = SchedulerBinding.instance;
+    final animating = scheduler.transientCallbackCount > 0 || scheduler.hasScheduledFrame;
+    final settling = animating && _quietMs < _maxAnimationWaitMs;
+    return _work + _lastPointerPosition.length + (settling ? 1 : 0);
+  }
 
   void onFailure(FailureRecord failure) {
     final expected = capsule.manifest.failure;
@@ -161,15 +207,32 @@ class ReplayEngine implements ReplayContext {
     ];
 
     var lastT = 0;
+    var previous = base;
     for (final event in toDispatch) {
       if (_reproduced.isCompleted) break;
       final due = event.t - base;
       lastT = due;
-      final wait = due - _clock.elapsedMilliseconds;
-      if (wait > 0) {
-        await Future.any([Future<void>.delayed(Duration(milliseconds: wait)), _reproduced.future]);
-        if (_reproduced.isCompleted) break;
+      final idleSince = settings.idleCompression ? _idle.idleSince(previous, event.t) : null;
+      previous = event.t;
+      while (!_reproduced.isCompleted) {
+        final wait = due - elapsed();
+        if (wait <= 0) break;
+        if (idleSince != null &&
+            _idle.maySkip(
+              now: elapsed() + base,
+              idleSince: idleSince,
+              busy: _busy,
+              quietMs: _quietMs,
+            )) {
+          _skippedMs += wait;
+          _gapsCompressed++;
+          break;
+        }
+        // Inside a compressible gap, re-check idleness every 50 ms.
+        final step = idleSince == null || wait < 50 ? wait : 50;
+        await Future.any([Future<void>.delayed(Duration(milliseconds: step)), _reproduced.future]);
       }
+      if (_reproduced.isCompleted) break;
       _dispatch(event);
     }
 
@@ -178,7 +241,7 @@ class ReplayEngine implements ReplayContext {
       final failureDue = expected == null ? 0 : expected.t - base;
       final deadline = (failureDue > lastT ? failureDue : lastT) +
           (expected == null ? 1500 : settings.settleTimeoutMs);
-      final remaining = deadline - _clock.elapsedMilliseconds;
+      final remaining = deadline - elapsed();
       if (remaining > 0) {
         observed = await _reproduced.future
             .timeout(Duration(milliseconds: remaining), onTimeout: () => _notObserved);
@@ -208,6 +271,8 @@ class ReplayEngine implements ReplayContext {
       divergences: List.of(_divergences),
       eventsDispatched: _dispatched,
       fixturesServed: _fixturesServed,
+      compressedMs: _skippedMs,
+      gapsCompressed: _gapsCompressed,
       buildGitSha: buildGitSha,
     );
   }
@@ -248,6 +313,7 @@ class ReplayEngine implements ReplayContext {
           WidgetsBinding.instance.handleAppLifecycleStateChanged(state);
       }
       _dispatched++;
+      activity();
     } catch (e) {
       diverge('dispatch.error', '${event.type}: $e');
     }
