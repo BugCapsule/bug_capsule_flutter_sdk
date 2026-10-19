@@ -63,8 +63,8 @@ class ReproConfig {
   final Duration window;
   final int maxEvents;
 
-  /// Fraction of production sessions that record. QA and debug always
-  /// record. The backend `sampleRate` overrides this when available.
+  /// Maximum fraction of production sessions that record. QA and debug
+  /// always record. The backend `sampleRate` can lower it, never raise it.
   final double productionSampleRate;
   final bool autoCaptureOnFailure;
   final int maxCapsulesPerSession;

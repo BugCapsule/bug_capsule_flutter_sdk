@@ -300,7 +300,10 @@ class _Runtime with WidgetsBindingObserver implements ReproSession {
     if (!config.enabled) return false;
     if (remote != null && !remote.enabled) return false;
     if (config.mode != CaptureMode.production) return true;
-    final rate = remote?.sampleRate ?? config.productionSampleRate;
+    // The app's cap bounds the backend: remote config can lower sampling
+    // without a release, but never raise it above what the app shipped with.
+    final remoteRate = remote?.sampleRate ?? 1.0;
+    final rate = remoteRate < config.productionSampleRate ? remoteRate : config.productionSampleRate;
     return Random().nextDouble() < rate;
   }
 
