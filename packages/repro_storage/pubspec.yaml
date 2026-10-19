@@ -1,0 +1,19 @@
+name: repro_storage
+description: SharedPreferences integration for Repro — allowlisted snapshot and restore of persisted state.
+version: 0.1.0
+repository: https://github.com/draz26648/repro_flutter_sdk
+resolution: workspace
+
+environment:
+  sdk: ^3.9.0
+  flutter: ">=3.35.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.5.0
+  repro_flutter: ^0.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

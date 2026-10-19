@@ -1,0 +1,25 @@
+.dart_tool/
+build/
+.packages
+pubspec_overrides.yaml
+*.iml
+.idea/
+.vscode/
+coverage/
+.DS_Store
+# Flutter platform build outputs
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/android/.gradle/
+**/android/local.properties
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+# Local capsules
+*.repro
+!**/test/fixtures/*.repro

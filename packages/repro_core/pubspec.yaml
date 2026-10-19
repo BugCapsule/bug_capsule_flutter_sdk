@@ -1,0 +1,11 @@
+name: repro_core
+description: Capsule model, flight recorder, codec, redaction and network matching for Repro. Pure Dart.
+version: 0.1.0
+repository: https://github.com/draz26648/repro_flutter_sdk
+resolution: workspace
+
+environment:
+  sdk: ^3.9.0
+
+dev_dependencies:
+  test: ^1.25.0

@@ -1,0 +1,19 @@
+name: repro_dio
+description: Dio integration for Repro — transport-level network capture and deterministic replay with endpoint normalization.
+version: 0.1.0
+repository: https://github.com/draz26648/repro_flutter_sdk
+resolution: workspace
+
+environment:
+  sdk: ^3.9.0
+  flutter: ">=3.35.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  dio: ^5.9.0
+  repro_flutter: ^0.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
