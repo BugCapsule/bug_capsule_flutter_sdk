@@ -254,11 +254,10 @@ class _ReproAdapter implements HttpClientAdapter {
     )..redirects = response.redirects;
   }
 
-  void _record(ReproSession session, int t, Map<String, Object?> data) {
-    // `t` is when the request started; record it there so ordering reflects
-    // send order. Network events are diagnostic and served by key.
-    session.record(EventTypes.http, {...data, 'sentAtMs': t});
-  }
+  /// Recorded when the exchange completes, so the event's `t` is the
+  /// response time; the request was sent at `t - durationMs`.
+  void _record(ReproSession session, int t, Map<String, Object?> data) =>
+      session.record(EventTypes.http, data);
 
   Map<String, Object?> _errorJson(Object e) => {
         'type': e is DioException ? e.type.name : 'connectionError',

@@ -147,7 +147,8 @@ is the only one that reads it.
 }
 ```
 
-`t` is when the request was sent; the response arrived at `t + durationMs`.
+The event is recorded when the exchange completes: `t` is when the response
+(or error) arrived, and the request was sent at `t - durationMs`.
 `key` is the normalized request key (see *Network matching*); `occurrence` is
 the 0-based count of earlier requests with the same key.
 

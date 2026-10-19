@@ -175,13 +175,8 @@ class IosSimulatorLauncher implements AppLauncher {
       ReplayServer server, List<int> capsule, ReplaySettings settings, Duration timeout) async {
     final result = server.arm(capsule, settings);
     await Process.run('xcrun', ['simctl', 'terminate', _udid, _bundleId]);
-    final launch = await Process.run(
-      'xcrun',
-      ['simctl', 'launch', _udid, _bundleId],
-      environment: {
-        'SIMCTL_CHILD_${ReplayProtocol.envUrl}': 'http://127.0.0.1:${server.port}',
-      },
-    );
+    await _writeReplayRequest('http://127.0.0.1:${server.port}');
+    final launch = await Process.run('xcrun', ['simctl', 'launch', _udid, _bundleId]);
     if (launch.exitCode != 0) {
       throw StateError('simctl launch failed: ${launch.stderr}');
     }
@@ -191,6 +186,17 @@ class IosSimulatorLauncher implements AppLauncher {
     } finally {
       await Process.run('xcrun', ['simctl', 'terminate', _udid, _bundleId]);
     }
+  }
+
+  /// Drops `replay_request.json` into the app's data container; the SDK
+  /// reads and deletes it on the next launch (debug builds only).
+  Future<void> _writeReplayRequest(String url) async {
+    final res = await Process.run('xcrun', ['simctl', 'get_app_container', _udid, _bundleId, 'data']);
+    if (res.exitCode != 0) throw StateError('cannot locate app container: ${res.stderr}');
+    final dir = Directory('${'${res.stdout}'.trim()}/Library/Application Support/repro')
+      ..createSync(recursive: true);
+    File('${dir.path}/replay_request.json').writeAsStringSync(
+        jsonEncode({'url': url, 'createdAt': DateTime.now().toIso8601String()}));
   }
 
   @override
