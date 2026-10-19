@@ -1,0 +1,19 @@
+name: repro_bloc
+description: BLoC/Cubit integration for Repro — records transitions and snapshots/restores registered state.
+version: 0.1.0
+repository: https://github.com/draz26648/repro_flutter_sdk
+resolution: workspace
+
+environment:
+  sdk: ^3.9.0
+  flutter: ">=3.35.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  bloc: ^9.0.0
+  repro_flutter: ^0.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

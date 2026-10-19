@@ -1,0 +1,19 @@
+name: repro_workspace
+publish_to: none
+description: Repro Flutter SDK monorepo (pub workspace).
+
+environment:
+  sdk: ^3.9.0
+
+workspace:
+  - packages/repro_core
+  - packages/repro_flutter
+  - packages/repro_bloc
+  - packages/repro_dio
+  - packages/repro_go_router
+  - packages/repro_storage
+  - packages/repro_cli
+  - example/repro_demo
+
+dev_dependencies:
+  lints: ^6.0.0
