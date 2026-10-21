@@ -153,7 +153,12 @@ class ReproBloc extends ReproIntegration {
 
     final replay = _session.replay;
     final saved = _restoreData[key];
-    if (replay == null || saved is! Map) return;
+    if (replay == null || saved == null) return;
+    if (saved is! Map || saved['state'] is! Map) {
+      // Redacted on device (e.g. a `TokenCubit`), or not serializable.
+      replay.diverge('bloc.unrestored', '$key: state was not captured');
+      return;
+    }
     final registration = _registration(bloc);
     if (registration == null) {
       replay.diverge('bloc.unrestored', '$key has no ReproState serializer');
@@ -211,7 +216,7 @@ class ReproBloc extends ReproIntegration {
     _session.record(EventTypes.blocError, {
       'bloc': bloc.runtimeType.toString(),
       'key': _keyOf(bloc),
-      'error': '$error',
+      'error': _session.redactor.scrubText('$error'),
     });
     if (treatErrorsAsFailures) _session.reportError(error, stackTrace);
   }

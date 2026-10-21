@@ -10,12 +10,23 @@
 /// // after creating the router:
 /// reproRouter.attach(router);
 /// ```
+///
+/// Locations are redacted the same way in `route` events and in checkpoint
+/// snapshots: sensitive query and fragment parameters are replaced (see
+/// `Redactor.redactUri`). Secrets in path segments (`/reset/<token>`) need
+/// [ReproGoRouter.sanitizeLocation].
 library;
 
 import 'package:go_router/go_router.dart';
 import 'package:repro_flutter/repro_flutter.dart';
 
 class ReproGoRouter extends ReproIntegration {
+  /// [sanitizeLocation] runs after built-in redaction, for events and
+  /// checkpoints alike, e.g. `(l) => l.replaceAll(RegExp(r'/reset/[^/?]+'), '/reset/:token')`.
+  ReproGoRouter({this.sanitizeLocation});
+
+  final String Function(String location)? sanitizeLocation;
+
   GoRouter? _router;
   ReproSession? _session;
   String? _restoredLocation;
@@ -48,17 +59,24 @@ class ReproGoRouter extends ReproIntegration {
     final session = _session;
     if (session == null || !session.isRecording) return;
     session.record(EventTypes.route, {
-      'location': session.redactor.redactUri(Uri.parse(location)).toString(),
+      'location': _redact(session, config.uri),
       if (config.extra != null) 'extra': config.extra.runtimeType.toString(),
     });
+  }
+
+  /// One redaction path for events and checkpoints.
+  String _redact(ReproSession session, Uri uri) {
+    final location = session.redactor.redactUri(uri).toString();
+    return sanitizeLocation?.call(location) ?? location;
   }
 
   @override
   Object? snapshot(CheckpointKind kind) {
     final config = _router?.routerDelegate.currentConfiguration;
-    if (config == null || config.isEmpty) return null;
+    final session = _session;
+    if (config == null || config.isEmpty || session == null) return null;
     return {
-      'location': config.uri.toString(),
+      'location': _redact(session, config.uri),
       'hasExtra': config.extra != null,
     };
   }
@@ -67,6 +85,10 @@ class ReproGoRouter extends ReproIntegration {
   Future<void> restore(Object? data, ReproSession session) async {
     if (data is Map && data['location'] is String) {
       _restoredLocation = data['location'] as String;
+      if (_restoredLocation!.contains(Redactor.placeholder) ||
+          _restoredLocation!.contains(Uri.encodeQueryComponent(Redactor.placeholder))) {
+        session.replay?.diverge('route.redacted', 'restored location has redacted parameters');
+      }
       if (data['hasExtra'] == true) {
         session.replay?.diverge('route.extra', 'route extra object at $_restoredLocation is not restored');
       }

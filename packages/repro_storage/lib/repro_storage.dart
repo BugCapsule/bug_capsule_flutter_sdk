@@ -42,9 +42,28 @@ class ReproSharedPreferences extends ReproIntegration {
         out[key] = {'type': _typeOf(value), 'value': Redactor.placeholder};
         continue;
       }
-      out[key] = {'type': _typeOf(value), 'value': value};
+      // Values are redacted too: a JSON string under an innocent key
+      // (`auth_state`) can hold a token.
+      final redacted = switch (value) {
+        String() => session.redactor.redactJson(value),
+        List() => [for (final v in value) session.redactor.redactJson('$v')],
+        _ => value,
+      };
+      if (redacted is String && redacted != value ||
+          redacted is List && value is List && !_sameList(redacted, value)) {
+        _redacted.add(key);
+      }
+      out[key] = {'type': _typeOf(value), 'value': redacted};
     }
     return out;
+  }
+
+  static bool _sameList(List<Object?> a, List<Object?> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if ('${a[i]}' != '${b[i]}') return false;
+    }
+    return true;
   }
 
   static String _typeOf(Object? value) => switch (value) {
@@ -65,9 +84,15 @@ class ReproSharedPreferences extends ReproIntegration {
     if (data is! Map) return;
     for (final entry in data.entries) {
       final key = entry.key as String;
+      if (entry.value is! Map) {
+        // The whole entry was redacted (sensitive key): nothing to restore.
+        session.replay?.diverge('storage.redacted', key);
+        continue;
+      }
       final item = (entry.value as Map).cast<String, Object?>();
       final value = item['value'];
-      if (value == Redactor.placeholder) {
+      if (value == Redactor.placeholder ||
+          (value is String && value.contains(Redactor.placeholder))) {
         session.replay?.diverge('storage.redacted', key);
       }
       switch (item['type']) {
