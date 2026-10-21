@@ -59,7 +59,7 @@ anchor. Replay maps `t` back to wall time with
 | `failure` | object \| null | See below. Null for a manual capture with no assertion. |
 | `eligibility.status` | `eligible` \| `partial` \| `ineligible` | Computed on device. |
 | `eligibility.missing` | `[{dependency, reason, blocking?}]` | Every gap. `blocking: true` makes the capsule ineligible (e.g. no failure assertion); other gaps make it partial. |
-| `integrations` | string[] | e.g. `["bloc","dio","go_router","shared_preferences"]` |
+| `integrations` | string[] | e.g. `["bloc","dio","go_router","shared_preferences"]`; also `riverpod`, `notifier`, `getx`, `mobx`, `http` (package:http) |
 | `stats` | `{eventCount, droppedEvents, checkpointKind}` | |
 | `labels` | map<string,string> | Free-form tags (QA note, ticket id, ...). Values are scrubbed like free text. |
 | `redaction` | `{extraKeys: string[], extraHeaders: string[]}`? | Redaction rules used on top of the defaults (app config and remote config). Replay applies the same rules so request keys computed from redacted bodies match. Omitted when empty. |
@@ -94,7 +94,11 @@ characters. Stack traces are informative only (debug and release frames differ).
   "data": {
     "shared_preferences": { "onboarding_done": {"type": "bool", "value": true} },
     "go_router": { "location": "/cart" },
-    "bloc": { "CartBloc#0": {"type": "CartBloc", "state": {...}, "stateType": "CartLoaded"} }
+    "bloc": { "CartBloc#0": {"type": "CartBloc", "state": {...}, "stateType": "CartLoaded"} },
+    "riverpod": { "cart#0": {"provider": "cart", "state": {...}, "stateType": "Cart"} },
+    "notifier": { "auth#0": {"type": "AuthModel", "state": {...}} },
+    "getx": { "cart.items#0": {"type": "RxList<CartItem>", "state": {...}} },
+    "mobx": { "login#0": {"type": "LoginStore", "state": {...}} }
   }
 }
 ```
@@ -132,6 +136,14 @@ is the only one that reads it.
 | `bloc.event` | `{bloc, key, event, data?}` | no |
 | `bloc.state` | `{bloc, key, state, data?}` | no |
 | `bloc.error` | `{bloc, key, error}` | no |
+| `riverpod.add` / `riverpod.update` | `{provider, key, state, data?}` (`state` is the value's type) | no |
+| `riverpod.error` | `{provider, key, error}` | no |
+| `riverpod.dispose` | `{provider, key}` | no |
+| `notifier.create` / `getx.create` / `mobx.create` | `{type, key}` tracked object | no |
+| `notifier.change` / `getx.change` / `mobx.change` | `{type, key, data?}` | no |
+| `mobx.observable` | `{name, type, value?}` observable write (`value` only for primitives) | no |
+| `mobx.action` | `{name}` | no |
+| `mobx.error` | `{reaction, error}` | no |
 | `http` | see below | served as fixture |
 | `log` | `{level, message}` | no |
 | `failure` | same shape as `manifest.failure` | no (it is the assertion) |
@@ -158,7 +170,9 @@ is the only one that reads it.
 }
 ```
 
-The event is recorded when the exchange completes: `t` is when the response
+Every HTTP client integration (Dio, package:http) records this same shape
+and computes the same key for the same request, so the fixture store does
+not depend on the client. The event is recorded when the exchange completes: `t` is when the response
 (or error) arrived, and the request was sent at `t - durationMs`.
 `key` is the normalized request key (see *Network matching*); `occurrence` is
 the 0-based count of earlier requests with the same key.
@@ -189,7 +203,7 @@ Redaction happens on device, before anything is written, and applies the
 same way to events and to checkpoint data:
 
 * **By name.** Values whose key matches the deny list are replaced with
-  `[REDACTED]` anywhere in bodies, storage, BLoC state, action payloads,
+  `[REDACTED]` anywhere in bodies, storage, BLoC / Riverpod / notifier / GetX / MobX state, action payloads,
   custom integration data and checkpoints. Names are normalized (lowercase,
   no `_` `-` `.` or spaces); `password`, `passwd`, `token`, `secret`,
   `apikey`, `authorization`, `cookie`, `cardnumber`, `creditcard`,
@@ -219,11 +233,14 @@ free-form notes), secrets under innocuous key names that do not match a
 pattern, binary bodies, or state an integration chose not to describe. Apps
 close these gaps with `redactKeys`, `redactPatterns`, `beforeRecord` /
 `beforeCheckpoint` hooks, integration options (`BugCapsuleDio.exclude`,
-`BugCapsuleGoRouter.sanitizeLocation`, storage allow/deny prefixes, BLoC
-serializers that project state), and by disabling body capture remotely.
+`BugCapsuleHttp.exclude`, `BugCapsuleGoRouter.sanitizeLocation`, storage
+allow/deny prefixes, state-management serializers that project state), and by disabling body capture remotely.
 
 Replay reports placeholders it has to replay as `text.redacted`,
-`storage.redacted`, `route.redacted` or `bloc.unrestored` divergences.
+`storage.redacted`, `route.redacted`, `bloc.unrestored`,
+`riverpod.unrestored`, `notifier.unrestored`, `getx.unrestored` or
+`mobx.unrestored` divergences. MobX observable writes are redacted by the
+observable's field name (`_LoginStore.password`).
 
 ## Eligibility
 

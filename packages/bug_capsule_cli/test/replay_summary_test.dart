@@ -36,6 +36,8 @@ class ScriptedLauncher implements AppLauncher {
   @override
   LaunchOptions get options => throw UnimplementedError();
   @override
+  String get target => 'scripted';
+  @override
   Future<void> prepare(ReplayServer server) async {}
   @override
   Future<ReplayReport> attempt(

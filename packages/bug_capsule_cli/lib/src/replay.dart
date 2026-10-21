@@ -100,27 +100,33 @@ Future<ReplaySummary> replayCapsule({
   required bool strictNetwork,
   bool idleCompression = true,
   String? buildSha,
+  String? runtime,
+  Duration? attemptTimeout,
 }) async {
   final m = loaded.capsule.manifest;
   final reports = <ReplayReport>[];
-  final budget = Duration(
-    milliseconds: m.session.durationMs + settleTimeoutMs + 45000,
-  );
+  final budget = attemptTimeout ??
+      Duration(
+        milliseconds: m.session.durationMs + settleTimeoutMs + 45000,
+      );
   for (var i = 1; i <= attempts; i++) {
     stdout.write('  ${kind.name} ${dim('#$i')}  ');
-    final report = await launcher.attempt(
-      server,
-      loaded.bytes,
-      ReplaySettings(
-        strategy: strategy,
-        settleTimeoutMs: settleTimeoutMs,
-        attempt: i,
-        kind: kind.name,
-        strictNetwork: strictNetwork,
-        idleCompression: idleCompression,
-      ),
-      budget,
+    final settings = ReplaySettings(
+      strategy: strategy,
+      settleTimeoutMs: settleTimeoutMs,
+      attempt: i,
+      kind: kind.name,
+      strictNetwork: strictNetwork,
+      idleCompression: idleCompression,
+      runtime: runtime,
     );
+    ReplayReport report;
+    try {
+      report = await launcher.attempt(server, loaded.bytes, settings, budget);
+    } catch (e) {
+      // A launch failure is an attempt that proves nothing, never a pass.
+      report = errorReport(settings, 'attempt failed to run: ${e is StateError ? e.message : e}');
+    }
     reports.add(report);
     stdout.writeln(_attemptLine(kind, report));
     if (report.outcome == ReplayOutcome.incompatible || report.outcome == ReplayOutcome.noAssertion) {
@@ -129,6 +135,26 @@ Future<ReplaySummary> replayCapsule({
   }
   return ReplaySummary(kind, reports, buildSha, requestedAttempts: attempts);
 }
+
+/// The verdict for a capsule that cannot run in this project's runtime,
+/// without launching anything.
+ReplaySummary incompatibleSummary(ReplayKind kind, int attempts, String why, {String? runtime}) =>
+    ReplaySummary(
+      kind,
+      [
+        ReplayReport(
+          outcome: ReplayOutcome.incompatible,
+          attempt: 1,
+          durationMs: 0,
+          strategy: ReplayStrategy.auto,
+          divergences: [Divergence('runtime.mismatch', why)],
+          message: why,
+          runtime: runtime,
+        ),
+      ],
+      null,
+      requestedAttempts: attempts,
+    );
 
 String _attemptLine(ReplayKind kind, ReplayReport r) {
   final skipped = r.compressedMs > 0

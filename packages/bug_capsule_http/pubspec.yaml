@@ -1,0 +1,19 @@
+name: bug_capsule_http
+description: package:http integration for BugCapsule — transport-level network capture and deterministic replay for http, Chopper and other http.Client based APIs.
+version: 0.1.0
+repository: https://github.com/draz26648/bug_capsule_flutter_sdk
+resolution: workspace
+
+environment:
+  sdk: ^3.9.0
+  flutter: ">=3.35.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.5.0
+  bug_capsule_flutter: ^0.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
