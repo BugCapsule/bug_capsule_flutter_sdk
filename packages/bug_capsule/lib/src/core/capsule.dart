@@ -275,6 +275,7 @@ class CapsuleManifest {
     this.redactionHeaders = const [],
     this.runtime,
     this.capabilities = const {},
+    this.monitoring,
   });
 
   factory CapsuleManifest.fromJson(Map<String, Object?> j) {
@@ -284,6 +285,7 @@ class CapsuleManifest {
     final failure = j['failure'] as Map?;
     final redaction = (j['redaction'] as Map?)?.cast<String, Object?>() ?? const {};
     final runtime = j['runtime'] as Map?;
+    final monitoring = j['monitoring'] as Map?;
     return CapsuleManifest(
       capsuleId: j['capsuleId'] as String,
       createdAt: DateTime.parse(j['createdAt'] as String),
@@ -314,6 +316,7 @@ class CapsuleManifest {
         for (final e in ((j['capabilities'] as Map?) ?? const {}).entries)
           '${e.key}': e.value as String,
       },
+      monitoring: monitoring == null ? null : CapsuleMonitoring.fromJson(monitoring.cast<String, Object?>()),
     );
   }
 
@@ -350,6 +353,10 @@ class CapsuleManifest {
   /// Values: `supported`, `partial`, `unsupported`.
   final Map<String, String> capabilities;
 
+  /// The monitoring `event` sent for this capsule's failure (monitoring-v1
+  /// §4.3), linking the capsule to an issue. Null when monitoring was off.
+  final CapsuleMonitoring? monitoring;
+
   /// The capturing runtime, inferred for capsules without `runtime`.
   String get runtimeName => runtime?.name ?? RuntimeInfo.infer(sdkName);
 
@@ -376,6 +383,31 @@ class CapsuleManifest {
           'redaction': {'extraKeys': redactionKeys, 'extraHeaders': redactionHeaders},
         if (runtime != null) 'runtime': runtime!.toJson(),
         if (capabilities.isNotEmpty) 'capabilities': capabilities,
+        if (monitoring != null) 'monitoring': monitoring!.toJson(),
+      };
+}
+
+/// `manifest.monitoring = {eventId, traceId?, release, environment}`.
+class CapsuleMonitoring {
+  const CapsuleMonitoring({required this.eventId, this.traceId, this.release, this.environment});
+
+  factory CapsuleMonitoring.fromJson(Map<String, Object?> j) => CapsuleMonitoring(
+        eventId: j['eventId'] as String,
+        traceId: j['traceId'] as String?,
+        release: j['release'] as String?,
+        environment: j['environment'] as String?,
+      );
+
+  final String eventId;
+  final String? traceId;
+  final String? release;
+  final String? environment;
+
+  Map<String, Object?> toJson() => {
+        'eventId': eventId,
+        'traceId': ?traceId,
+        'release': ?release,
+        'environment': ?environment,
       };
 }
 
