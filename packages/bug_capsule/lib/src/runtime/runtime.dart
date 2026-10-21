@@ -4,7 +4,7 @@ library;
 
 export '../core/core.dart';
 
-export 'backend.dart' show OutboxLimits, BugCapsuleTransport, UploadResult, UploadStatus;
+export 'backend.dart' show OutboxLimits, BugCapsuleTransport, EnvelopeTransport, UploadResult, UploadStatus;
 export 'config.dart';
 export 'integration.dart';
 export 'overlay.dart';
@@ -12,3 +12,8 @@ export 'state_tracker.dart';
 export 'remote_config.dart'
     show ConfigFetchFailed, ConfigFetchResult, ConfigFetched, RemoteCaptureConfig;
 export 'bug_capsule.dart';
+export 'monitoring/feedback.dart';
+export 'monitoring/navigation.dart';
+export 'monitoring/options.dart';
+export 'monitoring/scope.dart' show Scope;
+export 'monitoring/tracing.dart' show BugCapsuleSpan, BugCapsuleTransaction;

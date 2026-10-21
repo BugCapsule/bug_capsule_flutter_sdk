@@ -14,6 +14,12 @@ class RemoteCaptureConfig {
     required this.redactKeys,
     required this.configTtlSeconds,
     required this.fetchedAtMs,
+    this.monitoringEnabled = true,
+    this.errorSampleRate = 1.0,
+    this.tracesSampleRate,
+    this.sessionTracking = true,
+    this.maxBreadcrumbs = 100,
+    this.tracePropagationTargets,
   });
 
   /// Parses the `/v1/sdk/config` body (or the cache file). Throws
@@ -28,6 +34,12 @@ class RemoteCaptureConfig {
     final rate = field<num>('sampleRate')?.toDouble() ?? 1;
     final ttl = field<int>('configTtlSeconds') ?? 300;
     final maxBytes = field<int>('maxCapsuleBytes') ?? 5 * 1024 * 1024;
+    double rateOf(String key, double fallback) {
+      final v = field<num>(key)?.toDouble() ?? fallback;
+      return v.isNaN ? 0 : v.clamp(0, 1).toDouble();
+    }
+
+    final targets = field<List<Object?>>('tracePropagationTargets');
     return RemoteCaptureConfig(
       enabled: field<bool>('enabled') ?? true,
       sampleRate: rate.isNaN ? 0 : rate.clamp(0, 1).toDouble(),
@@ -36,6 +48,12 @@ class RemoteCaptureConfig {
       redactKeys: [for (final k in field<List<Object?>>('redactKeys') ?? const []) '$k'],
       configTtlSeconds: ttl.clamp(0, 86400),
       fetchedAtMs: fetchedAtMs ?? field<int>('fetchedAtMs') ?? 0,
+      monitoringEnabled: field<bool>('monitoringEnabled') ?? true,
+      errorSampleRate: rateOf('errorSampleRate', 1),
+      tracesSampleRate: j['tracesSampleRate'] == null ? null : rateOf('tracesSampleRate', 0),
+      sessionTracking: field<bool>('sessionTracking') ?? true,
+      maxBreadcrumbs: (field<int>('maxBreadcrumbs') ?? 100).clamp(0, 100),
+      tracePropagationTargets: targets == null ? null : [for (final t in targets) '$t'],
     );
   }
 
@@ -49,6 +67,22 @@ class RemoteCaptureConfig {
   /// Wall clock (epoch ms) of the successful fetch this config came from.
   final int fetchedAtMs;
 
+  /// Monitoring (monitoring-v1 §10). `false`: no envelopes are sent;
+  /// capsules are unaffected.
+  final bool monitoringEnabled;
+
+  /// Share of error events sent (fatal and capsule-linked events always are).
+  final double errorSampleRate;
+
+  /// Replaces the app's `tracesSampleRate` when the app has no
+  /// `tracesSampler`. Null when the backend did not send it.
+  final double? tracesSampleRate;
+  final bool sessionTracking;
+  final int maxBreadcrumbs;
+
+  /// Replaces the app's list when set.
+  final List<String>? tracePropagationTargets;
+
   Map<String, Object?> toJson() => {
         'enabled': enabled,
         'sampleRate': sampleRate,
@@ -57,6 +91,12 @@ class RemoteCaptureConfig {
         'redactKeys': redactKeys,
         'configTtlSeconds': configTtlSeconds,
         'fetchedAtMs': fetchedAtMs,
+        'monitoringEnabled': monitoringEnabled,
+        'errorSampleRate': errorSampleRate,
+        'tracesSampleRate': tracesSampleRate,
+        'sessionTracking': sessionTracking,
+        'maxBreadcrumbs': maxBreadcrumbs,
+        'tracePropagationTargets': tracePropagationTargets,
       };
 }
 
@@ -236,6 +276,7 @@ class RemoteConfigController {
         redactKeys: c?.redactKeys ?? const [],
         configTtlSeconds: c?.configTtlSeconds ?? 0,
         fetchedAtMs: c?.fetchedAtMs ?? 0,
+        monitoringEnabled: false,
       );
 
   Duration _jitter(Duration d) =>

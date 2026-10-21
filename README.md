@@ -22,6 +22,7 @@ import 'package:bug_capsule/bug_capsule.dart';
 | Part | What it does |
 |---|---|
 | Runtime | `BugCapsule.init`, capture (touches, lifecycle, errors, checkpoints), upload, kill switch, replay engine, QA overlay |
+| Monitoring | Error events, release health (sessions), tracing (screens, app start, frames, HTTP spans, `traceparent`), user feedback form ([monitoring-v1](https://github.com/draz26648/bug_capsule_backend/blob/main/docs/monitoring-v1.md)) |
 | Core | Capsule model ([spec v1](spec/capsule-v1.md)), flight recorder, codec, redaction, network matching |
 | `BugCapsuleBloc` | BLoC/Cubit transitions, state snapshots and restore |
 | `BugCapsuleRiverpod` | Riverpod 3 provider activity, state snapshots and restore |
@@ -32,7 +33,7 @@ import 'package:bug_capsule/bug_capsule.dart';
 | `BugCapsuleHttp` | The same for `package:http` clients (also covers Chopper and other `http.Client` based APIs) |
 | `BugCapsuleGoRouter` | Navigation capture and route restore |
 | `BugCapsuleSharedPreferences` | SharedPreferences snapshot/restore (allowlist) |
-| `bugcapsule` CLI | `bugcapsule inspect / run / verify / regress / list / pull / push / share / capture` |
+| `bugcapsule` CLI | `bugcapsule inspect / run / verify / regress / list / pull / push / share / capture / symbols` |
 
 [`example/bug_capsule_demo`](example/bug_capsule_demo) is a shop app with planted "cannot reproduce" bugs.
 
@@ -157,6 +158,95 @@ flutter build ipa --dart-define=BUGCAPSULE_GIT_SHA=$(git rev-parse HEAD) --dart-
 
 Every capsule reports its **eligibility** (`eligible` / `partial` / `ineligible`) and lists exactly which dependency is missing (no git SHA, no failure assertion, response bodies not captured, BLoC without a serializer, …). Ineligible capsules are kept but never counted toward the reproduction rate.
 
+## Monitoring: errors, release health, tracing, feedback
+
+A capsule is a heavy recording of one failure. Next to capsules the SDK sends
+the light, high-volume signals of
+[monitoring-v1](https://github.com/draz26648/bug_capsule_backend/blob/main/docs/monitoring-v1.md):
+error events (grouped into issues), sessions (crash-free rates per release),
+transactions (performance) and user feedback, as envelopes to
+`POST /v1/envelope` with the same ingest key. It is on by default. Every item
+goes through the capsule redaction rules on the device before it is queued.
+
+```dart
+void main() => BugCapsule.runZonedGuarded(() => BugCapsule.init(
+      config: BugCapsuleConfig(
+        appId: 'com.shop.app',                 // release defaults to com.shop.app@1.4.0+52
+        appVersion: '1.4.0',
+        appBuild: '52',
+        backend: const BugCapsuleBackendConfig(url: '...', ingestKey: 'bci_...'),
+        monitoring: MonitoringOptions(
+          tracesSampleRate: 0.2,                       // default: the backend's rate, else 0
+          tracePropagationTargets: ['api.shop.com'],  // URLs that get traceparent / baggage
+          beforeSend: (event, hint) => event,          // last look; return null to drop
+        ),
+      ),
+      integrations: [bugCapsuleDio, bugCapsuleRouter],
+      appRunner: () => runApp(const MyApp()),
+    ));
+```
+
+What happens without more code:
+
+| Signal | How |
+|---|---|
+| Errors | `FlutterError.onError` (`flutter_error`), `PlatformDispatcher.onError` (`platform_dispatcher`), uncaught errors of the main isolate and zone errors under `BugCapsule.runZonedGuarded` (`uncaught`). Unhandled errors are `fatal` (`crashOnUnhandled`). One error sent through several handlers is sent once; the same error repeating (say, in `build` every frame) is sent at most 10 times a minute. |
+| Stack traces | Parsed into frames, oldest call first; `inApp` for your package (detected from the caller of `BugCapsule.init`, or `inAppIncludes`). AOT builds with `--split-debug-info` send `instructionAddr` frames and an `elf` debug image with the build id; `--obfuscate` builds add a `dart_obfuscation` image from `--dart-define=BUGCAPSULE_OBFUSCATION_ID`. The backend symbolicates both with the files from `bugcapsule symbols upload`. |
+| Breadcrumbs | Derived from the flight recorder's events: routes, actions, HTTP exchanges, lifecycle, logs, errors and state changes (nothing is instrumented twice). |
+| Capsules | When a capsule is written for a failure, its event carries `capsuleId` and the capsule carries `manifest.monitoring.eventId`, so the issue lists the capsules that replay it. |
+| Sessions | One per foreground run; a new one after 30 s in the background. `crashed` after a fatal event, `abnormal` when the app was killed in the foreground (detected at the next launch). |
+| Screens | `navigation` transactions named after the route pattern (`/product/:id`) from `BugCapsuleGoRouter`, or `BugCapsuleNavigatorObserver` for `Navigator` apps, with `time_to_initial_display` and slow / frozen frame counts. |
+| App start | An `app.start.cold` transaction from `BugCapsule.init` to the first rasterized frame. |
+| HTTP | `http.client` spans for `BugCapsuleDio` and `BugCapsuleHttp` requests under the active span, and `traceparent` / `baggage` headers for `tracePropagationTargets`. The headers are added for the transport only: capsules record your headers, request keys never include headers, and replay adds none. |
+
+```dart
+BugCapsule.setUser(const MonitoringUser(id: 'u_123', segment: 'pro'));
+BugCapsule.setTag('tenant', 'acme');
+BugCapsule.captureException(error, stackTrace: stack, tags: {'flow': 'checkout'});
+BugCapsule.captureMessage('payment provider slow', level: EventLevel.warning);
+BugCapsule.withScope((scope) { scope.setFingerprint(['checkout-timeout']); BugCapsule.captureException(e); });
+
+await BugCapsule.startSpan('load cart', 'task', (span) async {   // active for its zone
+  span.startChild('db', description: 'read cart').finish();
+  await dio.get('/cart');                                          // child http.client span
+});
+
+// User feedback: a form, a sheet, or your own UI.
+showBugCapsuleFeedback(context, eventId: BugCapsule.lastEventId());
+BugCapsuleFeedbackForm(onSubmitted: (id) => Navigator.pop(context));
+await BugCapsule.captureFeedback(message: 'Checkout did nothing', email: 'ana@example.com');
+// Shake to report, with the accelerometer of the sensor plugin you use (e.g. sensors_plus):
+BugCapsuleShakeToReport(accelerometer: accelerometerEventStream().map((e) => [e.x, e.y, e.z]), child: child);
+```
+
+In QA mode submitting feedback also writes a capsule (`captureCapsuleWithFeedback`).
+`getTraceparent()` / `getBaggage()` serve custom HTTP clients and
+`continueTrace(traceparent, baggage)` joins an incoming trace;
+`flush()`, `close()`, `startSession()` / `endSession()` and
+`addIsolateErrorListener(isolate)` cover the rest of the API.
+
+The backend can change `monitoringEnabled`, `errorSampleRate`,
+`tracesSampleRate`, `sessionTracking`, `maxBreadcrumbs` and
+`tracePropagationTargets` in the remote config; the kill switch stops
+monitoring too. Envelopes wait in their own outbox (30 envelopes / 5 MiB /
+7 days, `MonitoringOptions.outboxLimits`) with the capsule outbox's backoff
+and `Retry-After` handling, and are sent only once a remote config fetch has
+succeeded. `MonitoringOptions.disabled` turns all of it off.
+
+Release builds with symbols:
+
+```bash
+OBF_ID=$(bugcapsule symbols new-id)
+flutter build apk --release --obfuscate --split-debug-info=build/symbols \
+  --extra-gen-snapshot-options=--save-obfuscation-map=build/obfuscation.json \
+  --dart-define=BUGCAPSULE_OBFUSCATION_ID=$OBF_ID
+bugcapsule symbols upload --split-debug-info build/symbols \
+  --obfuscation-map build/obfuscation.json --obfuscation-id $OBF_ID --release com.shop.app@1.4.0+52
+```
+
+Native crashes, ANRs and app hangs in plugins are reported by the BugCapsule
+Android and iOS SDKs, not from Dart.
+
 ## The CLI
 
 ```bash
@@ -171,6 +261,7 @@ bugcapsule verify <id> -n 5                       # replay on your working tree;
 bugcapsule regress add <id> && bugcapsule regress run  # keep it as a regression test (exit 1 on failure, for CI)
 bugcapsule share <id>                             # expiring public link
 bugcapsule capture --on | --off | --sample-rate 0.05   # remote kill switch and production sampling
+bugcapsule symbols upload --split-debug-info build/symbols  # debug files for symbolication (secret key)
 ```
 
 ### Other runtimes (CLI 0.3)
@@ -257,6 +348,7 @@ Production capture works, but it is the riskiest mode. Before rollout:
 7. **Isolation.** If storage, an integration's setup or anything else in capture setup fails, the app starts without capture. SDK errors are never thrown into the app's error handlers or callbacks.
 8. **Performance.** Measure cold start, frame times and memory on a low-end Android device with and without BugCapsule ([plan](docs/release-and-device-test-plan.md)). Pointer and HTTP capture and redaction run on the UI isolate; capsule encoding runs in a background isolate.
 9. **Release builds never enter replay mode** (`BUGCAPSULE_REPLAY_URL` and replay request files are ignored when `kReleaseMode`).
+10. **Monitoring.** On by default, independent of capsule sampling: every production session sends sessions and (sampled) error events. Set `errorSampleRate` / `tracesSampleRate` and `tracePropagationTargets` deliberately, check `beforeSend` output, upload symbols for every release build, and know that `monitoringEnabled: false` in the remote config stops it without touching capsules.
 
 ## Known limitations (v0.2)
 
@@ -270,6 +362,7 @@ Production capture works, but it is the riskiest mode. Before rollout:
 - The Android path (`flutter run` + `adb reverse`) is implemented but has not been exercised end to end yet.
 - Redaction is pattern based. It does not recognise personal data that is not a credential (names, emails, addresses) or secrets in URL paths; use the hooks above.
 - A request whose server answers before the request body was fully sent is keyed without its body hash; replay may then report it as unrecorded.
+- Monitoring: app start is measured from `BugCapsule.init` (the first Dart code) to the first frame, not from process start, and only cold starts are reported. State-management breadcrumbs appear only in sessions that record a capsule (route, action, HTTP, lifecycle, log and error breadcrumbs always do). Trace headers are added only while a span is active (a screen transaction or `startSpan`). `enableUserInteractionTracing` covers `BugCapsule.action` callbacks only. Device model and manufacturer are not collected from Dart (no device-info dependency).
 - Capsules captured by SDK 0.1 with body capture off were keyed without body hashes; replaying them with 0.2 reports those requests as unrecorded.
 
 ## Upgrading to 0.4 (one package)

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../core/core.dart';
 
 import 'backend.dart' show OutboxLimits;
+import 'monitoring/options.dart';
 
 /// Where capsules are uploaded and remote capture config comes from.
 class BugCapsuleBackendConfig {
@@ -45,6 +46,7 @@ class BugCapsuleConfig {
     this.ignoreError,
     this.labels = const {},
     this.replayUrl,
+    this.monitoring = const MonitoringOptions(),
   })  : _mode = mode,
         _gitSha = gitSha,
         _showOverlay = showOverlay;
@@ -111,6 +113,11 @@ class BugCapsuleConfig {
 
   /// Replay source for tests. Apps normally get it from `BUGCAPSULE_REPLAY_URL`.
   final String? replayUrl;
+
+  /// Error events, release health, tracing and feedback (monitoring-v1).
+  /// On by default; `MonitoringOptions.disabled` turns it off. [enabled]
+  /// false turns it off too.
+  final MonitoringOptions monitoring;
 
   /// `BUGCAPSULE_MODE` dart-define, else debug for debug builds and production
   /// for release builds.
