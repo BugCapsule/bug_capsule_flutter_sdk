@@ -4,6 +4,11 @@ import 'dart:io';
 
 import 'package:bug_capsule_core/bug_capsule_core.dart';
 
+import 'launchers/android.dart';
+import 'launchers/ios.dart';
+import 'launchers/web.dart';
+import 'processes.dart';
+import 'project_config.dart';
 import 'replay_server.dart';
 import 'term.dart';
 
@@ -61,19 +66,46 @@ Future<Device> pickDevice(String? query) async {
 class LaunchOptions {
   const LaunchOptions({
     required this.projectDir,
-    required this.target,
-    required this.device,
-    required this.dartDefines,
+    this.target = 'lib/main.dart',
+    this.device,
+    this.dartDefines = const {},
     this.flavor,
     this.verbose = false,
+    this.runtime = 'flutter',
+    this.config,
+    this.deviceQuery,
+    this.buildSha,
+    this.dirty = false,
+    this.artifacts = const {},
   });
 
   final String projectDir;
   final String target;
-  final Device device;
+
+  /// The Flutter device (flutter runtime only; native launchers pick their
+  /// device in [AppLauncher.prepare] from [deviceQuery]).
+  final Device? device;
   final Map<String, String> dartDefines;
   final String? flavor;
   final bool verbose;
+
+  /// `flutter`, `android`, `ios` or `web`.
+  final String runtime;
+  final ProjectConfig? config;
+
+  /// `--device`: id or name substring.
+  final String? deviceQuery;
+
+  /// Commit the build is made from (embedded so the app can report it).
+  final String? buildSha;
+  final bool dirty;
+
+  /// Prebuilt artifacts given on the command line, by name: `apk`,
+  /// `test-apk`, `xctestrun`, `app-url`. When present the launcher skips its
+  /// build and uses them as they are.
+  final Map<String, String> artifacts;
+
+  ProjectConfig get projectConfig => config ?? ProjectConfig.load(projectDir);
 
   List<String> get defineArgs => [
         for (final e in dartDefines.entries) '--dart-define=${e.key}=${e.value}',
@@ -82,12 +114,22 @@ class LaunchOptions {
 }
 
 /// Starts the app in replay mode once per attempt.
+///
+/// Every attempt arms the [ReplayServer] ([ReplayServer.arm]), hands the
+/// armed URL to the app, waits for the report within the timeout, and closes
+/// the attempt so that a late report is rejected.
 abstract class AppLauncher {
-  static AppLauncher forOptions(LaunchOptions options) => options.device.isIosSimulator
-      ? IosSimulatorLauncher(options)
-      : FlutterRunLauncher(options);
+  static AppLauncher forOptions(LaunchOptions options) => switch (options.runtime) {
+        'android' => AndroidLauncher(options),
+        'ios' => IosNativeLauncher(options),
+        'web' => WebLauncher(options),
+        _ => options.device!.isIosSimulator ? IosSimulatorLauncher(options) : FlutterRunLauncher(options),
+      };
 
   LaunchOptions get options;
+
+  /// Human-readable target (device, simulator, browser) once prepared.
+  String get target => options.device?.toString() ?? options.runtime;
 
   /// Builds and installs once.
   Future<void> prepare(ReplayServer server);
@@ -98,17 +140,22 @@ abstract class AppLauncher {
   Future<void> dispose();
 }
 
-ReplayReport _timeoutReport(ReplaySettings settings, String message) => ReplayReport(
+/// An attempt that produced no report.
+ReplayReport errorReport(ReplaySettings settings, String message) => ReplayReport(
       outcome: ReplayOutcome.error,
       attempt: settings.attempt,
       durationMs: 0,
       strategy: settings.strategy,
       message: message,
+      attemptId: settings.attemptId,
+      runtime: settings.runtime,
     );
+
+ReplayReport _timeoutReport(ReplaySettings settings, String message) => errorReport(settings, message);
 
 Future<void> _run(String exe, List<String> args,
     {String? workingDirectory, required bool verbose, String? label}) async {
-  final p = await Process.start(exe, args, workingDirectory: workingDirectory, runInShell: true);
+  final p = await Processes.start(exe, args, workingDirectory: workingDirectory, runInShell: true);
   final out = StringBuffer();
   final subs = [
     p.stdout.transform(utf8.decoder).listen((s) {
@@ -139,7 +186,10 @@ class IosSimulatorLauncher implements AppLauncher {
   final LaunchOptions options;
   late String _bundleId;
 
-  String get _udid => options.device.id;
+  String get _udid => options.device!.id;
+
+  @override
+  String get target => options.device.toString();
 
   @override
   Future<void> prepare(ReplayServer server) async {
@@ -173,17 +223,18 @@ class IosSimulatorLauncher implements AppLauncher {
   @override
   Future<ReplayReport> attempt(
       ReplayServer server, List<int> capsule, ReplaySettings settings, Duration timeout) async {
-    final result = server.arm(capsule, settings);
-    await Process.run('xcrun', ['simctl', 'terminate', _udid, _bundleId]);
-    await _writeReplayRequest('http://127.0.0.1:${server.port}');
-    final launch = await Process.run('xcrun', ['simctl', 'launch', _udid, _bundleId]);
-    if (launch.exitCode != 0) {
-      throw StateError('simctl launch failed: ${launch.stderr}');
-    }
+    final armed = server.arm(capsule, settings);
     try {
-      return await result.timeout(timeout,
-          onTimeout: () => _timeoutReport(settings, 'no result within ${timeout.inSeconds}s'));
+      await Process.run('xcrun', ['simctl', 'terminate', _udid, _bundleId]);
+      await _writeReplayRequest(armed.url);
+      final launch = await Process.run('xcrun', ['simctl', 'launch', _udid, _bundleId]);
+      if (launch.exitCode != 0) {
+        throw StateError('simctl launch failed: ${launch.stderr}');
+      }
+      return await armed.report.timeout(timeout,
+          onTimeout: () => _timeoutReport(armed.settings, 'no result within ${timeout.inSeconds}s'));
     } finally {
+      armed.close();
       await Process.run('xcrun', ['simctl', 'terminate', _udid, _bundleId]);
     }
   }
@@ -212,28 +263,36 @@ class FlutterRunLauncher implements AppLauncher {
   final LaunchOptions options;
 
   @override
+  String get target => options.device.toString();
+
+  @override
   Future<void> prepare(ReplayServer server) async {
-    if (options.device.isAndroid) {
+    final device = options.device!;
+    if (device.isAndroid) {
       // Lets the emulator reach the host's loopback replay server.
-      await _run('adb', ['-s', options.device.id, 'reverse', 'tcp:${server.port}', 'tcp:${server.port}'],
+      await _run('adb', ['-s', device.id, 'reverse', 'tcp:${server.port}', 'tcp:${server.port}'],
           verbose: options.verbose, label: 'adb reverse');
+      Processes.onCleanup(() async {
+        await Process.run('adb', ['-s', device.id, 'reverse', '--remove', 'tcp:${server.port}']);
+      });
     }
   }
 
   @override
   Future<ReplayReport> attempt(
       ReplayServer server, List<int> capsule, ReplaySettings settings, Duration timeout) async {
-    final result = server.arm(capsule, settings);
-    final process = await Process.start(
+    final armed = server.arm(capsule, settings);
+    final result = armed.report;
+    final process = await Processes.start(
       'flutter',
       [
         'run',
         '-d',
-        options.device.id,
+        options.device!.id,
         '--debug',
         '-t',
         options.target,
-        '--dart-define=${ReplayProtocol.envUrl}=http://127.0.0.1:${server.port}',
+        '--dart-define=${ReplayProtocol.envUrl}=${armed.url}',
         ...options.defineArgs,
       ],
       workingDirectory: options.projectDir,
@@ -243,7 +302,7 @@ class FlutterRunLauncher implements AppLauncher {
     void onLine(String line) {
       log.writeln(line);
       if (options.verbose) stdout.writeln(line);
-      server.offerStdoutLine(line);
+      server.offerLine(armed, line);
     }
 
     final subs = [
@@ -258,6 +317,7 @@ class FlutterRunLauncher implements AppLauncher {
           .timeout(timeout + const Duration(minutes: 3),
               onTimeout: () => _timeoutReport(settings, 'no result in time'));
     } finally {
+      armed.close();
       process.stdin.writeln('q');
       await process.exitCode.timeout(const Duration(seconds: 10), onTimeout: () {
         process.kill();

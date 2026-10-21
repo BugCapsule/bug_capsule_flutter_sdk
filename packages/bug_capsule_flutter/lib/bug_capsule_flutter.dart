@@ -8,6 +8,7 @@ export 'src/backend.dart' show OutboxLimits, BugCapsuleTransport, UploadResult, 
 export 'src/config.dart';
 export 'src/integration.dart';
 export 'src/overlay.dart';
+export 'src/state_tracker.dart';
 export 'src/remote_config.dart'
     show ConfigFetchFailed, ConfigFetchResult, ConfigFetched, RemoteCaptureConfig;
 export 'src/bug_capsule.dart';

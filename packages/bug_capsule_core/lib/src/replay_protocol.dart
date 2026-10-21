@@ -6,6 +6,13 @@ import 'failure.dart';
 /// ([ReplaySettings] JSON), and receives `POST /result` ([ReplayReport] JSON).
 /// The app learns the base URL from `BUGCAPSULE_REPLAY_URL` (dart-define or
 /// process environment). Release builds never enter replay mode.
+///
+/// Since CLI 0.3 the base URL carries a per-attempt token
+/// (`http://127.0.0.1:<port>/a/<token>`), so the paths above are relative to
+/// it. The server answers only the armed attempt: requests for another token
+/// get 404 and reports after the attempt closed get 410 (stale). Apps that
+/// echo [ReplaySettings.attemptId] in their report are also checked against
+/// it. See `spec/runtimes-v1.md`.
 abstract final class ReplayProtocol {
   static const envUrl = 'BUGCAPSULE_REPLAY_URL';
   static const capsulePath = '/capsule';
@@ -30,6 +37,8 @@ class ReplaySettings {
     this.kind = 'replay',
     this.strictNetwork = true,
     this.idleCompression = true,
+    this.attemptId,
+    this.runtime,
   });
 
   factory ReplaySettings.fromJson(Map<String, Object?> j) => ReplaySettings(
@@ -39,6 +48,8 @@ class ReplaySettings {
         kind: j['kind'] as String? ?? 'replay',
         strictNetwork: j['strictNetwork'] as bool? ?? true,
         idleCompression: j['idleCompression'] as bool? ?? true,
+        attemptId: j['attemptId'] as String?,
+        runtime: j['runtime'] as String?,
       );
 
   final ReplayStrategy strategy;
@@ -59,6 +70,12 @@ class ReplaySettings {
   /// network latency is always kept.
   final bool idleCompression;
 
+  /// Identifies the attempt (CLI 0.3+). Apps echo it in [ReplayReport.attemptId].
+  final String? attemptId;
+
+  /// Runtime the CLI launched (`flutter`, `android`, `ios`, `web`).
+  final String? runtime;
+
   Map<String, Object?> toJson() => {
         'strategy': strategy.name,
         'settleTimeoutMs': settleTimeoutMs,
@@ -66,6 +83,8 @@ class ReplaySettings {
         'kind': kind,
         'strictNetwork': strictNetwork,
         'idleCompression': idleCompression,
+        if (attemptId != null) 'attemptId': attemptId,
+        if (runtime != null) 'runtime': runtime,
       };
 }
 
@@ -127,6 +146,8 @@ class ReplayReport {
     this.gapsCompressed = 0,
     this.buildGitSha,
     this.message,
+    this.attemptId,
+    this.runtime,
   });
 
   factory ReplayReport.fromJson(Map<String, Object?> j) => ReplayReport(
@@ -153,6 +174,8 @@ class ReplayReport {
         gapsCompressed: j['gapsCompressed'] as int? ?? 0,
         buildGitSha: j['buildGitSha'] as String?,
         message: j['message'] as String?,
+        attemptId: j['attemptId'] as String?,
+        runtime: j['runtime'] as String?,
       );
 
   final ReplayOutcome outcome;
@@ -178,6 +201,34 @@ class ReplayReport {
   final String? buildGitSha;
   final String? message;
 
+  /// Echo of [ReplaySettings.attemptId]; null from SDKs that predate it.
+  final String? attemptId;
+
+  /// Runtime that ran the attempt.
+  final String? runtime;
+
+  /// Same report with [divergences] appended (e.g. by a runner that saw
+  /// requests escape the app's network hooks).
+  ReplayReport withDivergences(List<Divergence> extra) => ReplayReport(
+        outcome: outcome,
+        attempt: attempt,
+        durationMs: durationMs,
+        strategy: strategy,
+        expectedSignature: expectedSignature,
+        observed: observed,
+        otherFailures: otherFailures,
+        divergences: [...divergences, ...extra],
+        eventsDispatched: eventsDispatched,
+        eventsExpected: eventsExpected,
+        fixturesServed: fixturesServed,
+        compressedMs: compressedMs,
+        gapsCompressed: gapsCompressed,
+        buildGitSha: buildGitSha,
+        message: message,
+        attemptId: attemptId,
+        runtime: runtime,
+      );
+
   Map<String, Object?> toJson() => {
         'outcome': outcome.wire,
         'attempt': attempt,
@@ -194,5 +245,7 @@ class ReplayReport {
         'gapsCompressed': gapsCompressed,
         'buildGitSha': buildGitSha,
         'message': message,
+        if (attemptId != null) 'attemptId': attemptId,
+        if (runtime != null) 'runtime': runtime,
       };
 }

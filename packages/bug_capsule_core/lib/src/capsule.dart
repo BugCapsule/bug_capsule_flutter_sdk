@@ -173,6 +173,52 @@ class PlatformInfo {
       };
 }
 
+/// The runtime that captured a capsule (v1 extension, SDK 0.3+). Capsules
+/// written before it existed have no `runtime`; [RuntimeInfo.infer] derives
+/// one from the SDK name.
+class RuntimeInfo {
+  const RuntimeInfo({required this.name, this.version, this.language, this.frameworks = const []});
+
+  factory RuntimeInfo.fromJson(Map<String, Object?> j) => RuntimeInfo(
+        name: j['name'] as String,
+        version: j['version'] as String?,
+        language: j['language'] as String?,
+        frameworks: [for (final f in (j['frameworks'] as List?) ?? const []) f as String],
+      );
+
+  /// `flutter`, `android`, `ios` or `web`. Other values are allowed and
+  /// mean a runtime this reader does not know.
+  final String name;
+
+  /// Runtime version, e.g. the Dart version, Android API level, iOS
+  /// version or browser version.
+  final String? version;
+
+  /// `dart`, `kotlin`, `swift`, `javascript`.
+  final String? language;
+
+  /// UI frameworks the SDK saw, e.g. `compose`, `views`, `uikit`, `swiftui`, `react`.
+  final List<String> frameworks;
+
+  static const knownRuntimes = {'flutter', 'android', 'ios', 'web'};
+
+  /// The runtime of a capsule without a `runtime` field, from `sdk.name`.
+  static String infer(String sdkName) => switch (sdkName) {
+        'bug_capsule_flutter' => 'flutter',
+        'bugcapsule-android' => 'android',
+        'bugcapsule-ios' => 'ios',
+        '@bugcapsule/web' => 'web',
+        _ => 'flutter',
+      };
+
+  Map<String, Object?> toJson() => {
+        'name': name,
+        if (version != null) 'version': version,
+        if (language != null) 'language': language,
+        if (frameworks.isNotEmpty) 'frameworks': frameworks,
+      };
+}
+
 class SessionInfo {
   const SessionInfo({
     required this.id,
@@ -227,6 +273,8 @@ class CapsuleManifest {
     this.labels = const {},
     this.redactionKeys = const [],
     this.redactionHeaders = const [],
+    this.runtime,
+    this.capabilities = const {},
   });
 
   factory CapsuleManifest.fromJson(Map<String, Object?> j) {
@@ -235,6 +283,7 @@ class CapsuleManifest {
     final stats = (j['stats'] as Map?)?.cast<String, Object?>() ?? const {};
     final failure = j['failure'] as Map?;
     final redaction = (j['redaction'] as Map?)?.cast<String, Object?>() ?? const {};
+    final runtime = j['runtime'] as Map?;
     return CapsuleManifest(
       capsuleId: j['capsuleId'] as String,
       createdAt: DateTime.parse(j['createdAt'] as String),
@@ -260,6 +309,11 @@ class CapsuleManifest {
       redactionHeaders: [
         for (final k in (redaction['extraHeaders'] as List?) ?? const []) k as String,
       ],
+      runtime: runtime == null ? null : RuntimeInfo.fromJson(runtime.cast<String, Object?>()),
+      capabilities: {
+        for (final e in ((j['capabilities'] as Map?) ?? const {}).entries)
+          '${e.key}': e.value as String,
+      },
     );
   }
 
@@ -288,6 +342,17 @@ class CapsuleManifest {
   final List<String> redactionKeys;
   final List<String> redactionHeaders;
 
+  /// Null for capsules written before the field existed; see [runtimeName].
+  final RuntimeInfo? runtime;
+
+  /// What the capturing SDK can record and replay, e.g.
+  /// `{"input.pointer.replay": "supported", "lifecycle.replay": "partial"}`.
+  /// Values: `supported`, `partial`, `unsupported`.
+  final Map<String, String> capabilities;
+
+  /// The capturing runtime, inferred for capsules without `runtime`.
+  String get runtimeName => runtime?.name ?? RuntimeInfo.infer(sdkName);
+
   Map<String, Object?> toJson() => {
         'capsuleId': capsuleId,
         'createdAt': createdAt.toUtc().toIso8601String(),
@@ -309,6 +374,8 @@ class CapsuleManifest {
         'labels': labels,
         if (redactionKeys.isNotEmpty || redactionHeaders.isNotEmpty)
           'redaction': {'extraKeys': redactionKeys, 'extraHeaders': redactionHeaders},
+        if (runtime != null) 'runtime': runtime!.toJson(),
+        if (capabilities.isNotEmpty) 'capabilities': capabilities,
       };
 }
 

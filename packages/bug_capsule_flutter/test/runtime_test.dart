@@ -235,6 +235,10 @@ void main() {
     // Still a valid, decodable capsule with the failure and the evidence.
     final capsule = CapsuleCodec.decode(await result.file.readAsBytes());
     expect(capsule.manifest.failure!.message, contains('[REDACTED]'));
+    // Runtime metadata (spec runtimes-v1 §2).
+    expect(capsule.manifest.runtime?.name, 'flutter');
+    expect(capsule.manifest.runtimeName, 'flutter');
+    expect(capsule.manifest.capabilities['input.pointer.replay'], 'supported');
     expect(capsule.checkpoint.data['custom'], isNotNull);
     expect(capsule.eventsOfType('custom.event'), hasLength(1));
     expect(capsule.manifest.labels['apiKey'], '[REDACTED]');
