@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:clock/clock.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:bug_capsule_flutter/bug_capsule_flutter.dart';
+import 'package:bug_capsule/bug_capsule.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ------------------------------------------------------------------- models

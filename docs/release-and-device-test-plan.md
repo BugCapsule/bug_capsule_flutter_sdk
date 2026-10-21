@@ -5,18 +5,18 @@ covers versus what needs a person with devices.
 
 ## What CI covers (every pull request)
 
-| Check | Where |
+| Check | Where (`packages/bug_capsule/`) |
 |---|---|
-| Analyzer clean on every package and the demo | `ci.yml` analyze |
-| Capsule model, codec, structural validator, shared fixtures (valid and malformed) | `bug_capsule_core` tests |
-| Redaction: free text, embedded JSON, URLs, headers, failure messages | `bug_capsule_core` tests |
-| Verdict rules: mixed, incomplete, zero attempts, missing assertions, material divergences | `bug_capsule_core`, `bug_capsule_cli` tests |
-| CLI output, exit codes and backend payload agree | `bug_capsule_cli` tests |
-| Startup isolation (storage failure, integration setup failure, capture disabled) | `bug_capsule_flutter` runtime tests |
-| Remote config TTL/backoff/resume/scoping on a fake clock; kill switch during capture and upload; sampling; late body/redaction changes | `bug_capsule_flutter` tests |
-| Outbox quotas, eviction, crash leftovers, corrupt files, disk errors, concurrent enqueue/flush | `bug_capsule_flutter` tests |
-| Dio streaming: first chunk before completion, bounded retention, bodies off, cancellation, errors, long-lived streams, uploads with progress, key consistency | `bug_capsule_dio` tests |
-| Route redaction in events and checkpoints; storage and BLoC redaction and restore divergences | integration package tests |
+| Analyzer clean on the package and the demo | `ci.yml` analyze |
+| Capsule model, codec, structural validator, shared fixtures (valid and malformed) | `test/core` |
+| Redaction: free text, embedded JSON, URLs, headers, failure messages | `test/core` |
+| Verdict rules: mixed, incomplete, zero attempts, missing assertions, material divergences | `test/core`, `test/cli` |
+| CLI output, exit codes and backend payload agree | `test/cli` |
+| Startup isolation (storage failure, integration setup failure, capture disabled) | `test/runtime` |
+| Remote config TTL/backoff/resume/scoping on a fake clock; kill switch during capture and upload; sampling; late body/redaction changes | `test/runtime` |
+| Outbox quotas, eviction, crash leftovers, corrupt files, disk errors, concurrent enqueue/flush | `test/runtime` |
+| Dio streaming: first chunk before completion, bounded retention, bodies off, cancellation, errors, long-lived streams, uploads with progress, key consistency | `test/integrations` |
+| Route redaction in events and checkpoints; storage and BLoC redaction and restore divergences | `test/integrations` |
 | Demo app boots under BugCapsule and writes a decodable, redacted capsule | `example/bug_capsule_demo` test |
 
 Weekly and on demand (`workflow_dispatch`): release builds of the demo app for
