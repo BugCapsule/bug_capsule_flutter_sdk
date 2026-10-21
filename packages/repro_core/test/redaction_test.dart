@@ -169,6 +169,15 @@ void main() {
     expect(uri.toString(), 'https://x.io/a');
   });
 
+  test('very long request keys are shortened deterministically', () {
+    final keys = RequestKeyBuilder();
+    final uri = Uri.parse('https://x.io/a?q=${'v' * 20000}');
+    final a = keys.keyFor('GET', uri, null);
+    expect(a.length, lessThanOrEqualTo(RequestKeyBuilder.maxKeyLength));
+    expect(keys.keyFor('GET', uri, null), a);
+    expect(keys.keyFor('GET', Uri.parse('https://x.io/a?q=${'w' * 20000}'), null), isNot(a));
+  });
+
   test('extend adds rules', () {
     final extended = Redactor().extend(keys: ['tenantId']);
     expect(extended.isSensitiveKey('tenant_id'), isTrue);

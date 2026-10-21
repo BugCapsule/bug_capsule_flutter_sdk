@@ -86,8 +86,15 @@ class RequestKeyBuilder {
     if (query.isNotEmpty) buffer.write('?${query.join('&')}');
     final normalizedBody = _normalizeBody(body, rule);
     if (normalizedBody != null) buffer.write('#${_hash(_canonicalJson(normalizedBody))}');
-    return buffer.toString();
+    final key = buffer.toString();
+    // Capsule readers accept keys up to 10,000 characters; shorten very long
+    // URLs deterministically so capture and replay still agree.
+    return key.length <= maxKeyLength
+        ? key
+        : '${key.substring(0, maxKeyLength - 20)}~${_hash(key)}';
   }
+
+  static const maxKeyLength = 8000;
 
   Object? _normalizeBody(Object? body, EndpointRule? rule) {
     if (body == null) return null;
