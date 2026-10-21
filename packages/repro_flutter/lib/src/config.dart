@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:repro_core/repro_core.dart';
 
+import 'backend.dart' show OutboxLimits;
+
 /// Where capsules are uploaded and remote capture config comes from.
 class ReproBackendConfig {
   const ReproBackendConfig({required this.url, required this.ingestKey});
@@ -34,6 +36,11 @@ class ReproConfig {
     this.maxBodyBytes = 256 * 1024,
     this.redactKeys = const [],
     this.redactHeaders = const [],
+    this.redactPatterns = const [],
+    this.beforeRecord,
+    this.beforeCheckpoint,
+    this.outboxLimits = const OutboxLimits(),
+    this.maxStaleConfig = const Duration(days: 7),
     bool? showOverlay,
     this.ignoreError,
     this.labels = const {},
@@ -72,6 +79,30 @@ class ReproConfig {
   final int maxBodyBytes;
   final List<String> redactKeys;
   final List<String> redactHeaders;
+
+  /// Extra free-text patterns replaced with `[REDACTED]` wherever text is
+  /// recorded (messages, logs, text bodies, string values), e.g. internal
+  /// account ids: `[RegExp(r'ACCT-\d{8}')]`.
+  final List<RegExp> redactPatterns;
+
+  /// Last look at every recorded event, after built-in redaction. Return the
+  /// data to keep (possibly modified), or null to drop the event. If it
+  /// throws, the event is dropped.
+  final Map<String, Object?>? Function(String type, Map<String, Object?> data)? beforeRecord;
+
+  /// Last look at each integration's checkpoint snapshot, after built-in
+  /// redaction. Return null to leave the integration out of the checkpoint
+  /// (replay then reports it as not restored). If it throws, the snapshot is
+  /// dropped.
+  final Object? Function(String integration, Object? data)? beforeCheckpoint;
+
+  /// Bounds on capsules waiting for upload (see `OutboxLimits`).
+  final OutboxLimits outboxLimits;
+
+  /// How old the last fetched remote config may be for uploads to proceed
+  /// when the backend cannot be reached. A cached kill switch applies however
+  /// old it is.
+  final Duration maxStaleConfig;
   final bool? _showOverlay;
 
   /// Return true for errors that should not count as failures.
