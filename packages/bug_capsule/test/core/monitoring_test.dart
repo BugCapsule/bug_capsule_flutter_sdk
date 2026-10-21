@@ -60,7 +60,7 @@ void main() {
     test('AOT non-symbolic traces become instructionAddr frames plus an elf image', () {
       final stack = parseDartStack(aotTrace);
       expect(stack.native, isTrue);
-      expect([for (final f in stack.frames) f.instructionAddr], ['0x7b3c7f5e83', '0x7b3c7f5f3b']);
+      expect([for (final f in stack.frames) f.instructionAddr], ['0x7b3c7f5e82', '0x7b3c7f5f3b']);
       expect(stack.frames.every((f) => f.function == null && f.imageAddr == '0x7b3c5e4000'), isTrue);
       expect(stack.debugImages.single, {
         'type': 'elf',
@@ -70,6 +70,20 @@ void main() {
         'imageAddr': '0x7b3c5e4000',
         'arch': 'arm64',
       });
+    });
+
+    test('AOT frames: the crashing frame keeps its PC, callers point into the call (return address - 1)', () {
+      const trace = '''
+build_id: '0123456789abcdef0123456789abcdef'
+isolate_dso_base: 100000000, vm_dso_base: 0
+    #00 abs 0000000100001000 virt 0000000000001000 _kDartSnapshotText+0x1000
+    #01 abs 0000000100002000 virt 0000000000002000 _kDartSnapshotText+0x2000
+<asynchronous suspension>
+    #02 abs 0000000100003000 virt 0000000000003000 _kDartSnapshotText+0x3000
+''';
+      final frames = parseDartStack(trace).frames;
+      // Oldest call first: #02, #01, then the crashing #00 last.
+      expect([for (final f in frames) f.instructionAddr], ['0x100002fff', '0x100001fff', '0x100001000']);
     });
 
     test('AOT traces without isolate_dso_base derive it from abs - virt; iOS uses App.framework', () {
