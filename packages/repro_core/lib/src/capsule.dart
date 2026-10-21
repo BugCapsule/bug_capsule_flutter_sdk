@@ -225,6 +225,8 @@ class CapsuleManifest {
     this.dirty,
     this.failure,
     this.labels = const {},
+    this.redactionKeys = const [],
+    this.redactionHeaders = const [],
   });
 
   factory CapsuleManifest.fromJson(Map<String, Object?> j) {
@@ -232,6 +234,7 @@ class CapsuleManifest {
     final sdk = (j['sdk'] as Map?)?.cast<String, Object?>() ?? const {};
     final stats = (j['stats'] as Map?)?.cast<String, Object?>() ?? const {};
     final failure = j['failure'] as Map?;
+    final redaction = (j['redaction'] as Map?)?.cast<String, Object?>() ?? const {};
     return CapsuleManifest(
       capsuleId: j['capsuleId'] as String,
       createdAt: DateTime.parse(j['createdAt'] as String),
@@ -253,6 +256,10 @@ class CapsuleManifest {
       labels: {
         for (final e in ((j['labels'] as Map?) ?? const {}).entries) '${e.key}': e.value as String,
       },
+      redactionKeys: [for (final k in (redaction['extraKeys'] as List?) ?? const []) k as String],
+      redactionHeaders: [
+        for (final k in (redaction['extraHeaders'] as List?) ?? const []) k as String,
+      ],
     );
   }
 
@@ -275,6 +282,12 @@ class CapsuleManifest {
   final CheckpointKind checkpointKind;
   final Map<String, String> labels;
 
+  /// Redaction keys/headers the capture used beyond the defaults (from the
+  /// app config and remote config). Replay applies the same rules, so that
+  /// request keys computed from redacted bodies match the recording.
+  final List<String> redactionKeys;
+  final List<String> redactionHeaders;
+
   Map<String, Object?> toJson() => {
         'capsuleId': capsuleId,
         'createdAt': createdAt.toUtc().toIso8601String(),
@@ -294,6 +307,8 @@ class CapsuleManifest {
           'checkpointKind': checkpointKind.name,
         },
         'labels': labels,
+        if (redactionKeys.isNotEmpty || redactionHeaders.isNotEmpty)
+          'redaction': {'extraKeys': redactionKeys, 'extraHeaders': redactionHeaders},
       };
 }
 
