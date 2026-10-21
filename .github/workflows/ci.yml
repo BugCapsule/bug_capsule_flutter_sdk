@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '0 3 * * 1' # weekly release-build smoke test
+  workflow_dispatch:
 
 jobs:
   analyze-and-test:
@@ -20,9 +23,48 @@ jobs:
           for p in packages/* example/repro_demo; do
             (cd "$p" && flutter analyze --no-pub) || exit 1
           done
+      # Pure Dart: capsule model, codec, validator + shared fixtures,
+      # redaction, verdict rules.
       - name: repro_core tests
         working-directory: packages/repro_core
         run: dart test
-      - name: repro_dio tests
-        working-directory: packages/repro_dio
+      # Verdicts, exit codes and backend payloads of run / verify / regress.
+      - name: repro_cli tests
+        working-directory: packages/repro_cli
+        run: dart test
+      # Runtime isolation, remote config + kill switch, outbox, integrations.
+      - name: Flutter package tests
+        run: |
+          for p in repro_flutter repro_dio repro_bloc repro_go_router repro_storage; do
+            (cd "packages/$p" && flutter test --no-pub) || exit 1
+          done
+      - name: Demo app widget smoke test
+        working-directory: example/repro_demo
         run: flutter test --no-pub
+
+  # Release builds of the demo app: capture compiles in, replay is disabled,
+  # and the SDK does not break a release build. Signing and device runs are
+  # manual (see docs/release-and-device-test-plan.md).
+  release-build-android:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter pub get
+      - working-directory: example/repro_demo
+        run: flutter build apk --release --dart-define=REPRO_GIT_SHA=${{ github.sha }}
+
+  release-build-ios:
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter pub get
+      - working-directory: example/repro_demo
+        run: flutter build ios --release --no-codesign --dart-define=REPRO_GIT_SHA=${{ github.sha }}
