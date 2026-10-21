@@ -270,6 +270,7 @@ class ReplayEngine implements ReplayContext {
       otherFailures: List.of(_otherFailures),
       divergences: List.of(_divergences),
       eventsDispatched: _dispatched,
+      eventsExpected: toDispatch.length,
       fixturesServed: _fixturesServed,
       compressedMs: _skippedMs,
       gapsCompressed: _gapsCompressed,
@@ -302,7 +303,7 @@ class ReplayEngine implements ReplayContext {
         case EventTypes.text:
           final id = event.data['id'] as String;
           final value = event.data['value'] as String? ?? '';
-          if (value == Redactor.placeholder) diverge('text.redacted', id);
+          if (value.contains(Redactor.placeholder)) diverge('text.redacted', id);
           if (!actions.setText(id, value)) {
             diverge('text.untracked', id);
             return;

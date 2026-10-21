@@ -205,19 +205,8 @@ class ReplayCommand extends Command<int> {
     final creds = Credentials.load();
     if (id == null || creds?.secretKey == null) return;
     try {
-      await BackendClient(creds!).createRun(id, {
-        'kind': s.kind.name,
-        'outcome': s.wireOutcome,
-        'attempts': s.attempts,
-        'reproductions': s.reproductions,
-        'gitSha': s.buildSha,
-        'device': device.toString(),
-        'durationMs': s.durationMs,
-        'details': {
-          'reports': [for (final r in s.reports) r.toJson()],
-        },
-      });
-      stdout.writeln(dim('Recorded on backend capsule $id'));
+      await BackendClient(creds!).createRun(id, s.runPayload(device: device.toString()));
+      stdout.writeln(dim('Recorded on backend capsule $id (${s.wireOutcome})'));
     } catch (e) {
       stdout.writeln(yellow('! could not record result on backend: $e'));
     }
@@ -391,28 +380,32 @@ class _RegressRun extends Command<int> {
           buildSha: sha,
         );
         final String result;
-        if (s.incompatible) {
-          // Schema changed without a migration: stale, not flaky.
-          t['status'] = 'stale';
-          result = 'stale';
-        } else if (s.errored) {
-          result = 'error';
-          failed++;
-        } else if (s.reproductions == 0) {
-          result = 'pass';
-        } else if (s.reproductions == s.attempts) {
-          result = 'fail';
-          failed++;
-        } else {
-          t['status'] = 'quarantined';
-          result = 'flaky';
+        switch (s.verdict) {
+          case Verdict.incompatible:
+            // Schema changed without a migration: stale, not flaky.
+            t['status'] = 'stale';
+            result = 'stale';
+          case Verdict.fixed:
+            result = 'pass';
+          case Verdict.flaky:
+            t['status'] = 'quarantined';
+            result = 'flaky';
+          case Verdict.stillFailing:
+            result = 'fail';
+            failed++;
+          case Verdict.inconclusive || Verdict.reproduced || Verdict.notReproduced:
+            // A regression test only passes on a valid run without the failure.
+            result = 'inconclusive';
+            failed++;
         }
         t['lastRun'] = {
           'at': DateTime.now().toUtc().toIso8601String(),
           'result': result,
-          'attempts': s.attempts,
+          'attempts': s.requestedAttempts,
+          'validAttempts': s.evaluation.validAttempts,
           'reproductions': s.reproductions,
           'gitSha': sha,
+          if (s.evaluation.reasons.isNotEmpty) 'reasons': s.evaluation.reasons.take(10).toList(),
         };
         stdout.writeln('  → ${result == 'pass' ? green(result) : result == 'fail' ? red(result) : yellow(result)}');
       }

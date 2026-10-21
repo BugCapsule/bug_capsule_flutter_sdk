@@ -14,3 +14,4 @@ export 'src/ids.dart';
 export 'src/network.dart';
 export 'src/redaction.dart';
 export 'src/replay_protocol.dart';
+export 'src/verdict.dart';
