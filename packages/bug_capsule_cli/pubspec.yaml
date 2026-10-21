@@ -1,0 +1,18 @@
+name: bug_capsule_cli
+description: The bugcapsule command line — inspect, replay, verify and manage capsules.
+version: 0.1.0
+repository: https://github.com/draz26648/bug_capsule_flutter_sdk
+resolution: workspace
+
+environment:
+  sdk: ^3.9.0
+
+executables:
+  bugcapsule: bugcapsule
+
+dependencies:
+  args: ^2.6.0
+  bug_capsule_core: ^0.1.0
+
+dev_dependencies:
+  test: ^1.25.0

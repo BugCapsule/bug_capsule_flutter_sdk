@@ -1,16 +1,16 @@
 {
- "description": "A real capsule written by repro_flutter 0.1.0 (demo app).",
+ "description": "A real capsule written by bug_capsule_flutter 0.1.0 (demo app).",
  "expect": "valid",
  "document": {
-  "format": "repro.capsule",
+  "format": "bugcapsule.capsule",
   "specVersion": 1,
   "manifest": {
    "capsuleId": "e73f5ad0-60f7-4cc5-b6b3-b232d86bb6db",
    "createdAt": "2026-10-19T09:39:26.690164Z",
    "mode": "qa",
    "app": {
-    "id": "dev.repro.repro_demo",
-    "name": "Repro Shop",
+    "id": "com.bugcapsule.bug_capsule_demo",
+    "name": "BugCapsule Shop",
     "version": "1.0.0",
     "build": "1",
     "flavor": null
@@ -20,7 +20,7 @@
     "dirty": false
    },
    "sdk": {
-    "name": "repro_flutter",
+    "name": "bug_capsule_flutter",
     "version": "0.1.0"
    },
    "stateSchemaVersion": 1,
@@ -186,10 +186,10 @@
     "type": "http",
     "data": {
      "id": 0,
-     "key": "GET shop.repro.dev/api/cart",
+     "key": "GET shop.bugcapsule.com/api/cart",
      "occurrence": 0,
      "method": "GET",
-     "url": "https://shop.repro.dev/api/cart",
+     "url": "https://shop.bugcapsule.com/api/cart",
      "requestHeaders": {},
      "requestBody": null,
      "requestEncoding": "json",
@@ -203,7 +203,7 @@
       "items": [
        {
         "sku": "cap",
-        "name": "Repro cap",
+        "name": "BugCapsule cap",
         "price": 18.0,
         "qty": 2
        },
@@ -239,7 +239,7 @@
       "items": [
        {
         "sku": "cap",
-        "name": "Repro cap",
+        "name": "BugCapsule cap",
         "price": 18.0,
         "qty": 2
        },
@@ -387,7 +387,7 @@
       "items": [
        {
         "sku": "cap",
-        "name": "Repro cap",
+        "name": "BugCapsule cap",
         "price": 18.0,
         "qty": 2
        },
@@ -416,10 +416,10 @@
     "type": "http",
     "data": {
      "id": 1,
-     "key": "GET shop.repro.dev/api/cart",
+     "key": "GET shop.bugcapsule.com/api/cart",
      "occurrence": 1,
      "method": "GET",
-     "url": "https://shop.repro.dev/api/cart",
+     "url": "https://shop.bugcapsule.com/api/cart",
      "requestHeaders": {},
      "requestBody": null,
      "requestEncoding": "json",

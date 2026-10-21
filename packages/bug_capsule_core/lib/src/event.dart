@@ -1,0 +1,51 @@
+/// Event types defined by capsule spec v1.
+abstract final class EventTypes {
+  static const lifecycle = 'lifecycle';
+  static const pointer = 'pointer';
+  static const action = 'action';
+  static const text = 'text';
+  static const route = 'route';
+  static const blocCreate = 'bloc.create';
+  static const blocClose = 'bloc.close';
+  static const blocEvent = 'bloc.event';
+  static const blocState = 'bloc.state';
+  static const blocError = 'bloc.error';
+  static const http = 'http';
+  static const log = 'log';
+  static const failure = 'failure';
+
+  /// Event types the replay driver dispatches back into the app.
+  static const replayable = {lifecycle, pointer, action, text};
+}
+
+/// One recorded event. [t] is milliseconds relative to the session anchor
+/// once the capsule is written; inside the recorder it is milliseconds since
+/// recording started.
+class BugCapsuleEvent {
+  const BugCapsuleEvent({
+    required this.seq,
+    required this.t,
+    required this.type,
+    this.data = const {},
+  });
+
+  factory BugCapsuleEvent.fromJson(Map<String, Object?> json) => BugCapsuleEvent(
+        seq: json['seq'] as int,
+        t: json['t'] as int,
+        type: json['type'] as String,
+        data: (json['data'] as Map?)?.cast<String, Object?>() ?? const {},
+      );
+
+  final int seq;
+  final int t;
+  final String type;
+  final Map<String, Object?> data;
+
+  BugCapsuleEvent shift(int offsetMs) =>
+      BugCapsuleEvent(seq: seq, t: t - offsetMs, type: type, data: data);
+
+  Map<String, Object?> toJson() => {'seq': seq, 't': t, 'type': type, 'data': data};
+
+  @override
+  String toString() => 'BugCapsuleEvent($seq, ${t}ms, $type)';
+}

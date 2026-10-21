@@ -21,7 +21,7 @@
     "dirty": false
    },
    "sdk": {
-    "name": "repro_flutter",
+    "name": "bug_capsule_flutter",
     "version": "0.2.0"
    },
    "stateSchemaVersion": 1,
