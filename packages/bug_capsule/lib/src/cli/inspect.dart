@@ -77,7 +77,12 @@ void printInspect(Capsule c, {int timeline = 40, bool json = false}) {
     stdout.writeln(bold('Network'));
     for (final h in http) {
       final d = h.data;
-      final status = d['error'] != null ? red('ERR') : '${d['status']}';
+      // `pending`: still in flight when the capsule was written; replay holds it open.
+      final status = d['pending'] == true
+          ? yellow('pending')
+          : d['error'] != null
+              ? red('ERR')
+              : '${d['status']}';
       final sent = h.t - (d['durationMs'] as int? ?? 0);
       stdout.writeln('  ${_t(sent).padLeft(8)}  ${'${d['method']}'.padRight(6)} '
           '${_path('${d['url']}').padRight(28)} $status  ${dim('${d['durationMs']}ms ${d['bodyEncoding']}')}');

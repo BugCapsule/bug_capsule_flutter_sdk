@@ -1,7 +1,7 @@
 {
   "format": "bugcapsule.conformance",
   "version": 1,
-  "generatedBy": "bug_capsule_core/tool/generate_conformance.dart",
+  "generatedBy": "packages/bug_capsule/tool/generate_conformance.dart",
   "description": "Failure signatures: <kind>:<type>:<normalized first line of the message>.",
   "cases": [
     {

@@ -1,8 +1,8 @@
 {
   "format": "bugcapsule.conformance",
   "version": 1,
-  "generatedBy": "bug_capsule_core/tool/generate_conformance.dart",
-  "description": "Attempt classification and batch verdicts (bug_capsule_core evaluateRun). Divergence types not listed in \"expectedDivergences\" are material.",
+  "generatedBy": "packages/bug_capsule/tool/generate_conformance.dart",
+  "description": "Attempt classification and batch verdicts (lib/src/core/verdict.dart evaluateRun). Divergence types not listed in \"expectedDivergences\" are material.",
   "expectedDivergences": [
     "build.gitSha",
     "network.unused",
