@@ -2,7 +2,7 @@
  "description": "Only required fields; optional objects omitted or null.",
  "expect": "valid",
  "document": {
-  "format": "repro.capsule",
+  "format": "bugcapsule.capsule",
   "specVersion": 1,
   "manifest": {
    "capsuleId": "c0ffee00-0000-4000-8000-000000000002",

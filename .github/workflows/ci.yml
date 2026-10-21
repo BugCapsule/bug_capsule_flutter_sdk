@@ -20,26 +20,26 @@ jobs:
       - run: flutter pub get
       - name: Analyze
         run: |
-          for p in packages/* example/repro_demo; do
+          for p in packages/* example/bug_capsule_demo; do
             (cd "$p" && flutter analyze --no-pub) || exit 1
           done
       # Pure Dart: capsule model, codec, validator + shared fixtures,
       # redaction, verdict rules.
-      - name: repro_core tests
-        working-directory: packages/repro_core
+      - name: bug_capsule_core tests
+        working-directory: packages/bug_capsule_core
         run: dart test
       # Verdicts, exit codes and backend payloads of run / verify / regress.
-      - name: repro_cli tests
-        working-directory: packages/repro_cli
+      - name: bug_capsule_cli tests
+        working-directory: packages/bug_capsule_cli
         run: dart test
       # Runtime isolation, remote config + kill switch, outbox, integrations.
       - name: Flutter package tests
         run: |
-          for p in repro_flutter repro_dio repro_bloc repro_go_router repro_storage; do
+          for p in bug_capsule_flutter bug_capsule_dio bug_capsule_bloc bug_capsule_go_router bug_capsule_storage; do
             (cd "packages/$p" && flutter test --no-pub) || exit 1
           done
       - name: Demo app widget smoke test
-        working-directory: example/repro_demo
+        working-directory: example/bug_capsule_demo
         run: flutter test --no-pub
 
   # Release builds of the demo app: capture compiles in, replay is disabled,
@@ -55,8 +55,8 @@ jobs:
       - uses: subosito/flutter-action@v2
         with: { channel: stable, cache: true }
       - run: flutter pub get
-      - working-directory: example/repro_demo
-        run: flutter build apk --release --dart-define=REPRO_GIT_SHA=${{ github.sha }}
+      - working-directory: example/bug_capsule_demo
+        run: flutter build apk --release --dart-define=BUGCAPSULE_GIT_SHA=${{ github.sha }}
 
   release-build-ios:
     if: github.event_name != 'pull_request'
@@ -66,5 +66,5 @@ jobs:
       - uses: subosito/flutter-action@v2
         with: { channel: stable, cache: true }
       - run: flutter pub get
-      - working-directory: example/repro_demo
-        run: flutter build ios --release --no-codesign --dart-define=REPRO_GIT_SHA=${{ github.sha }}
+      - working-directory: example/bug_capsule_demo
+        run: flutter build ios --release --no-codesign --dart-define=BUGCAPSULE_GIT_SHA=${{ github.sha }}

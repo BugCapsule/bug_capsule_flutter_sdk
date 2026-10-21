@@ -1,19 +1,19 @@
-name: repro_workspace
+name: bug_capsule_workspace
 publish_to: none
-description: Repro Flutter SDK monorepo (pub workspace).
+description: BugCapsule Flutter SDK monorepo (pub workspace).
 
 environment:
   sdk: ^3.9.0
 
 workspace:
-  - packages/repro_core
-  - packages/repro_flutter
-  - packages/repro_bloc
-  - packages/repro_dio
-  - packages/repro_go_router
-  - packages/repro_storage
-  - packages/repro_cli
-  - example/repro_demo
+  - packages/bug_capsule_core
+  - packages/bug_capsule_flutter
+  - packages/bug_capsule_bloc
+  - packages/bug_capsule_dio
+  - packages/bug_capsule_go_router
+  - packages/bug_capsule_storage
+  - packages/bug_capsule_cli
+  - example/bug_capsule_demo
 
 dev_dependencies:
   lints: ^6.0.0

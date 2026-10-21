@@ -1,12 +1,12 @@
-# Repro capsule format — v1
+# BugCapsule capsule format — v1
 
-A `.repro` file is **gzip-compressed UTF-8 JSON**. The JSON document has three
+A `.bugcapsule` file is **gzip-compressed UTF-8 JSON**. The JSON document has three
 top-level parts: the manifest (who/what/where), a checkpoint (the state replay
 starts from), and an ordered event window (what happened after the checkpoint).
 
 ```json
 {
-  "format": "repro.capsule",
+  "format": "bugcapsule.capsule",
   "specVersion": 1,
   "manifest": { ... },
   "checkpoint": { ... },
@@ -14,7 +14,7 @@ starts from), and an ordered event window (what happened after the checkpoint).
 }
 ```
 
-Readers MUST reject documents whose `format` is not `repro.capsule` and MUST
+Readers MUST reject documents whose `format` is not `bugcapsule.capsule` and MUST
 reject a `specVersion` greater than the one they implement.
 
 Readers MUST ignore fields and event types they do not know (forward
@@ -54,7 +54,7 @@ anchor. Replay maps `t` back to wall time with
 | `session.id` | string | |
 | `session.startedAt` | ISO-8601 | |
 | `session.wallClockAtAnchorMs` | int | See *Time*. |
-| `session.seed` | int | Seed for `Repro.random`. |
+| `session.seed` | int | Seed for `BugCapsule.random`. |
 | `session.durationMs` | int | From anchor to capsule creation. |
 | `failure` | object \| null | See below. Null for a manual capture with no assertion. |
 | `eligibility.status` | `eligible` \| `partial` \| `ineligible` | Computed on device. |
@@ -195,7 +195,7 @@ same way to events and to checkpoint data:
   `apikey`, `authorization`, `cookie`, `cardnumber`, `creditcard`,
   `privatekey`, `sessionid` match as substrings; `pin`, `pan`, `otp`, `ssn`,
   `cvv`, `cvc`, `passcode`, `iban` match exactly; configured keys
-  (`ReproConfig.redactKeys`, remote `redactKeys`) are added.
+  (`BugCapsuleConfig.redactKeys`, remote `redactKeys`) are added.
 * **Headers.** `authorization`, `cookie`, `set-cookie`,
   `proxy-authorization`, `x-api-key`, `x-auth-token`, configured headers and
   any header whose name matches the deny list are replaced; other header
@@ -208,7 +208,7 @@ same way to events and to checkpoint data:
   text bodies, every string value): bearer/basic tokens, JWTs, well-known API
   key formats, `key=value` / `key: value` / `"key": "value"` pairs with a
   sensitive key, Luhn-valid card numbers, and configured patterns
-  (`ReproConfig.redactPatterns`). A string that holds a JSON object or array
+  (`BugCapsuleConfig.redactPatterns`). A string that holds a JSON object or array
   is redacted as JSON.
 * Tracked text fields are replaced whole when their id matches the deny list
   or the app marks them `sensitive`.
@@ -218,8 +218,8 @@ segments, personal data that is not a credential (names, emails, addresses,
 free-form notes), secrets under innocuous key names that do not match a
 pattern, binary bodies, or state an integration chose not to describe. Apps
 close these gaps with `redactKeys`, `redactPatterns`, `beforeRecord` /
-`beforeCheckpoint` hooks, integration options (`ReproDio.exclude`,
-`ReproGoRouter.sanitizeLocation`, storage allow/deny prefixes, BLoC
+`beforeCheckpoint` hooks, integration options (`BugCapsuleDio.exclude`,
+`BugCapsuleGoRouter.sanitizeLocation`, storage allow/deny prefixes, BLoC
 serializers that project state), and by disabling body capture remotely.
 
 Replay reports placeholders it has to replay as `text.redacted`,
@@ -231,7 +231,7 @@ The device computes eligibility when writing the capsule. `missing` explains
 each gap, for example:
 
 ```json
-[{"dependency": "build.gitSha", "reason": "REPRO_GIT_SHA was not set at build time"},
+[{"dependency": "build.gitSha", "reason": "BUGCAPSULE_GIT_SHA was not set at build time"},
  {"dependency": "failure.assertion", "reason": "manual capture without a failure assertion"}]
 ```
 
