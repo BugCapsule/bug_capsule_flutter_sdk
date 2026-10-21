@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../core/core.dart' show EnvelopeResponse;
 import 'config.dart';
 import 'remote_config.dart';
 
@@ -29,7 +30,14 @@ abstract interface class BugCapsuleTransport {
   void close();
 }
 
-class BugCapsuleBackendClient implements BugCapsuleTransport {
+/// Sends monitoring envelopes (`POST /v1/envelope`). [BugCapsuleBackendClient]
+/// implements it next to [BugCapsuleTransport]; tests substitute a fake.
+abstract interface class EnvelopeTransport {
+  /// [gzippedBody] is the envelope JSON, gzip-compressed.
+  Future<UploadResult> sendEnvelope(List<int> gzippedBody);
+}
+
+class BugCapsuleBackendClient implements BugCapsuleTransport, EnvelopeTransport {
   BugCapsuleBackendClient(this.config);
 
   final BugCapsuleBackendConfig config;
@@ -88,6 +96,40 @@ class BugCapsuleBackendClient implements BugCapsuleTransport {
       // 4xx other than 401/408/429 will never succeed: drop instead of
       // retrying. 401 (rotated key) keeps the queue: the config fetch stops
       // capture, and a kill switch purges it.
+      final retry = res.statusCode >= 500 ||
+          res.statusCode == 401 ||
+          res.statusCode == 408 ||
+          res.statusCode == 429;
+      return UploadResult(retry ? UploadStatus.retryLater : UploadStatus.rejected,
+          message: code, retryAfter: _retryAfter(res));
+    } catch (e) {
+      return UploadResult(UploadStatus.retryLater, message: '$e');
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  @override
+  Future<UploadResult> sendEnvelope(List<int> gzippedBody) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    try {
+      final req = await client.postUrl(_uri('/v1/envelope')).timeout(_timeout);
+      req.headers
+        ..set(HttpHeaders.authorizationHeader, 'Bearer ${config.ingestKey}')
+        ..contentType = ContentType.json
+        ..set(HttpHeaders.contentEncodingHeader, 'gzip')
+        ..contentLength = gzippedBody.length;
+      req.add(gzippedBody);
+      final res = await req.close().timeout(_timeout);
+      final body = await utf8.decodeStream(res).timeout(_timeout);
+      final json = _tryJson(body);
+      if (res.statusCode == 200) {
+        // Rejected items are invalid and must not be retried.
+        final rejected = json == null ? const <String>[] : EnvelopeResponse.fromJson(json).rejected;
+        if (rejected.isNotEmpty) debugPrint('[bugcapsule] envelope items rejected: ${rejected.join('; ')}');
+        return const UploadResult(UploadStatus.uploaded);
+      }
+      final code = json?['code'] as String? ?? 'HTTP ${res.statusCode}';
       final retry = res.statusCode >= 500 ||
           res.statusCode == 401 ||
           res.statusCode == 408 ||
@@ -254,11 +296,17 @@ class OutboxEntry {
 /// * **Shutdown**: [close] stops after the current upload; files left behind
 ///   are retried next launch (the backend deduplicates by capsule id).
 class UploadOutbox {
-  UploadOutbox._(this.dir, this.limits, this._now);
+  UploadOutbox._(this.dir, this.limits, this._now, this.extension)
+      : _name = RegExp('^(?:(\\d+)_)?([A-Za-z0-9-]{1,100})${RegExp.escape(extension)}\$');
 
+  /// [extension] names the queued files: `.bugcapsule` for capsules,
+  /// `.envelope` for monitoring envelopes (the same rules, a separate queue).
+  /// Entries must be gzip data.
   static Future<UploadOutbox> open(Directory dir,
-      {OutboxLimits limits = const OutboxLimits(), DateTime Function()? now}) async {
-    final outbox = UploadOutbox._(dir, limits, now ?? DateTime.now);
+      {OutboxLimits limits = const OutboxLimits(),
+      DateTime Function()? now,
+      String extension = '.bugcapsule'}) async {
+    final outbox = UploadOutbox._(dir, limits, now ?? DateTime.now, extension);
     await dir.create(recursive: true);
     await _removeTemporaryFiles(dir);
     await outbox._lock.run(outbox._enforceLimits);
@@ -279,7 +327,8 @@ class UploadOutbox {
   /// failing (a large capsule on a slow uplink) go behind newer ones.
   final Map<String, int> _attempts = {};
 
-  static final _name = RegExp(r'^(?:(\d+)_)?([A-Za-z0-9-]{1,100})\.bugcapsule$');
+  final String extension;
+  final RegExp _name;
 
   /// Earliest time the next upload attempt may run after failures.
   DateTime? get retryAt => _retryAt;
@@ -312,7 +361,7 @@ class UploadOutbox {
   Future<bool> enqueue(String capsuleId, List<int> bytes) {
     if (_closed || bytes.length > limits.maxBytes) return Future.value(false);
     return _lock.run(() async {
-      final file = File('${dir.path}/${_now().millisecondsSinceEpoch}_$capsuleId.bugcapsule');
+      final file = File('${dir.path}/${_now().millisecondsSinceEpoch}_$capsuleId$extension');
       try {
         await _writeAtomically(file, bytes);
       } on FileSystemException catch (e) {

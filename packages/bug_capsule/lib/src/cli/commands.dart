@@ -14,6 +14,7 @@ import 'processes.dart';
 import 'project_config.dart';
 import 'replay.dart';
 import 'replay_server.dart';
+import 'symbols.dart';
 import 'term.dart';
 
 const version = '0.4.0';
@@ -32,7 +33,8 @@ CommandRunner<int> buildRunner() => CommandRunner<int>(
       ..addCommand(PullCommand())
       ..addCommand(PushCommand())
       ..addCommand(ShareCommand())
-      ..addCommand(KillSwitchCommand());
+      ..addCommand(KillSwitchCommand())
+      ..addCommand(SymbolsCommand());
 
 Future<int> runBugCapsule(List<String> args) async {
   final runner = buildRunner();

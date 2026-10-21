@@ -30,6 +30,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import '../runtime/monitoring/hub.dart';
 import '../runtime/runtime.dart';
 
 class BugCapsuleDio extends BugCapsuleIntegration {
@@ -137,8 +138,31 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
     if (session == null) return _inner.fetch(options, requestStream, cancelFuture);
     final replay = session.replay;
     if (replay != null) return _replay(session, replay, options, requestStream, cancelFuture);
-    if (!session.isRecording) return _inner.fetch(options, requestStream, cancelFuture);
-    return _capture(session, options, requestStream, cancelFuture);
+    // Monitoring: an http.client span, and trace headers for propagation
+    // targets. They are added for the transport only: the capsule records
+    // the app's headers, and request keys never include headers.
+    final span = MonitoringHub.current?.startHttpSpan(options.method, options.uri, options.headers);
+    final appHeaders = span == null || span.headers.isEmpty ? null : Map<String, dynamic>.of(options.headers);
+    if (appHeaders != null) options.headers.addAll(span!.headers);
+    try {
+      if (!session.isRecording) {
+        try {
+          final response = await _inner.fetch(options, requestStream, cancelFuture);
+          span?.finish(statusCode: response.statusCode, breadcrumb: true);
+          return response;
+        } catch (e) {
+          span?.finish(error: e, cancelled: e is DioException && e.type == DioExceptionType.cancel, breadcrumb: true);
+          rethrow;
+        }
+      }
+      return await _capture(session, options, requestStream, cancelFuture, span, appHeaders);
+    } finally {
+      if (appHeaders != null) {
+        options.headers
+          ..clear()
+          ..addAll(appHeaders);
+      }
+    }
   }
 
   Future<ResponseBody> _capture(
@@ -146,6 +170,8 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
     RequestOptions options,
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
+    HttpSpan? span,
+    Map<String, dynamic>? appHeaders,
   ) async {
     final started = Stopwatch()..start();
     final excluded = _bugCapsule.exclude?.call(options) ?? false;
@@ -190,7 +216,7 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
         'occurrence': occurrence!,
         'method': options.method.toUpperCase(),
         'url': session.redactor.redactUri(options.uri).toString(),
-        if (!excluded) 'requestHeaders': session.redactor.redactHeaders(options.headers),
+        if (!excluded) 'requestHeaders': session.redactor.redactHeaders(appHeaders ?? options.headers),
         'requestBody': requestBody,
         'requestEncoding': requestEncoding,
         if (excluded) 'excluded': true,
@@ -200,7 +226,9 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
     final ResponseBody response;
     try {
       response = await _inner.fetch(options, request?.stream, cancelFuture);
+      span?.finish(statusCode: response.statusCode);
     } catch (e) {
+      span?.finish(error: e, cancelled: e is DioException && e.type == DioExceptionType.cancel);
       if (key != null) {
         _record(session, () => {
               ...base(),

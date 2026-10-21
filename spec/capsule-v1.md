@@ -63,6 +63,7 @@ anchor. Replay maps `t` back to wall time with
 | `stats` | `{eventCount, droppedEvents, checkpointKind}` | |
 | `labels` | map<string,string> | Free-form tags (QA note, ticket id, ...). Values are scrubbed like free text. |
 | `redaction` | `{extraKeys: string[], extraHeaders: string[]}`? | Redaction rules used on top of the defaults (app config and remote config). Replay applies the same rules so request keys computed from redacted bodies match. Omitted when empty. |
+| `monitoring` | `{eventId, traceId?, release?, environment?}`? | The monitoring `event` sent for the same failure ([monitoring-v1](https://github.com/draz26648/bug_capsule_backend/blob/main/docs/monitoring-v1.md) §4.3); the backend links the capsule to that event's issue. `eventId` ≤100, `traceId` ≤32, `release` ≤200, `environment` ≤64. Omitted when monitoring is off. |
 
 ### Failure
 

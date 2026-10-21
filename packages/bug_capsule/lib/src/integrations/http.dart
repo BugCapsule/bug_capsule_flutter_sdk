@@ -26,6 +26,7 @@ library;
 import 'dart:async';
 
 import 'package:http/http.dart' as http;
+import '../runtime/monitoring/hub.dart';
 import '../runtime/runtime.dart';
 
 class BugCapsuleHttp extends BugCapsuleIntegration {
@@ -107,11 +108,25 @@ class _BugCapsuleClient extends http.BaseClient {
     if (session == null) return _inner.send(request);
     final replay = session.replay;
     if (replay != null) return _replay(session, replay, request);
-    if (!session.isRecording) return _inner.send(request);
-    return _capture(session, request);
+    // Monitoring: an http.client span, and trace headers for propagation
+    // targets. The capsule records the app's headers (request keys never
+    // include headers).
+    final span = MonitoringHub.current?.startHttpSpan(request.method, request.url, request.headers);
+    if (!session.isRecording) {
+      if (span != null) request.headers.addAll(span.headers);
+      try {
+        final response = await _inner.send(request);
+        span?.finish(statusCode: response.statusCode, breadcrumb: true);
+        return response;
+      } catch (e) {
+        span?.finish(error: e, cancelled: e is http.RequestAbortedException, breadcrumb: true);
+        rethrow;
+      }
+    }
+    return _capture(session, request, span);
   }
 
-  Future<http.StreamedResponse> _capture(BugCapsuleSession session, http.BaseRequest original) async {
+  Future<http.StreamedResponse> _capture(BugCapsuleSession session, http.BaseRequest original, HttpSpan? span) async {
     final started = Stopwatch()..start();
     final excluded = _bugCapsule.exclude?.call(original) ?? false;
     final captureBodies = session.captureNetworkBodies && !excluded;
@@ -163,8 +178,12 @@ class _BugCapsuleClient extends http.BaseClient {
 
     final http.StreamedResponse response;
     try {
-      response = await _inner.send(_ForwardedRequest(original, request.stream));
+      final forwarded = _ForwardedRequest(original, request.stream);
+      if (span != null) forwarded.headers.addAll(span.headers);
+      response = await _inner.send(forwarded);
+      span?.finish(statusCode: response.statusCode);
     } catch (e) {
+      span?.finish(error: e, cancelled: e is http.RequestAbortedException);
       if (key != null) {
         _record(session, () => {
               ...base(),

@@ -18,6 +18,7 @@
 library;
 
 import 'package:go_router/go_router.dart';
+import '../runtime/monitoring/hub.dart';
 import '../runtime/runtime.dart';
 
 class BugCapsuleGoRouter extends BugCapsuleIntegration {
@@ -57,6 +58,19 @@ class BugCapsuleGoRouter extends BugCapsuleIntegration {
     _lastLocation = location;
     if (config.extra != null) _sawExtra = true;
     final session = _session;
+    final hub = MonitoringHub.current;
+    if (hub != null && session?.replay == null) {
+      try {
+        // Named after the route pattern (`/product/:id`), never the location.
+        hub.onNavigation(config.fullPath.isNotEmpty ? config.fullPath : config.uri.path);
+        // A recording session derives the breadcrumb from the route event.
+        if (session == null || !session.isRecording) {
+          hub.navigationBreadcrumb(session == null ? location : _redact(session, config.uri));
+        }
+      } catch (_) {
+        // Monitoring never breaks navigation.
+      }
+    }
     if (session == null || !session.isRecording) return;
     session.record(EventTypes.route, {
       'location': _redact(session, config.uri),

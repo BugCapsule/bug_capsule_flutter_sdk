@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:async' as async show runZonedGuarded;
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 
 import 'package:clock/clock.dart';
@@ -13,6 +15,10 @@ import 'actions.dart';
 import 'backend.dart';
 import 'config.dart';
 import 'integration.dart';
+import 'monitoring/breadcrumbs.dart';
+import 'monitoring/hub.dart';
+import 'monitoring/scope.dart';
+import 'monitoring/tracing.dart';
 import 'remote_config.dart';
 import 'replay_engine.dart';
 
@@ -46,10 +52,15 @@ class CaptureResult {
 /// randomness in tests.
 @visibleForTesting
 class BugCapsuleTestOverrides {
-  const BugCapsuleTestOverrides({this.storageDirectory, this.transport, this.random, this.setupTimeout});
+  const BugCapsuleTestOverrides(
+      {this.storageDirectory, this.transport, this.envelopeTransport, this.random, this.setupTimeout});
 
   final Directory? storageDirectory;
   final BugCapsuleTransport? transport;
+
+  /// Monitoring envelopes; defaults to [transport] when it implements
+  /// [EnvelopeTransport].
+  final EnvelopeTransport? envelopeTransport;
   final Random? random;
   final Duration? setupTimeout;
 }
@@ -83,7 +94,7 @@ abstract final class BugCapsule {
     required FutureOr<void> Function() appRunner,
   }) {
     if (_rt != null) throw StateError('BugCapsule.init called twice');
-    final rt = _rt = _Runtime(config, integrations, debugOverrides);
+    final rt = _rt = _Runtime(config, integrations, debugOverrides, _callerPackage(StackTrace.current));
     return withClock(Clock(rt.wallClock), () => rt.start(appRunner));
   }
 
@@ -106,6 +117,7 @@ abstract final class BugCapsule {
     _actions.register(id, (_) => callback());
     return () {
       _rt?.record(EventTypes.action, {'id': id});
+      _rt?.hub?.onUserAction(id);
       callback();
     };
   }
@@ -147,8 +159,12 @@ abstract final class BugCapsule {
   static void fail(String assertionId, [String message = '']) {
     final rt = _rt;
     if (rt == null) return;
-    rt.handleFailure(
-        FailureRecord.assertion(assertionId, message, rt.now(), scrub: rt.redactor.scrubText));
+    final prepared = rt.hub?.prepareException(StateError(message), StackTrace.current,
+        mechanism: Mechanism.assertion, typeOverride: assertionId, valueOverride: message);
+    final capsule = rt.handleFailure(
+        FailureRecord.assertion(assertionId, message, rt.now(), scrub: rt.redactor.scrubText),
+        monitoring: prepared?.monitoringInfo());
+    if (prepared != null) rt.hub!.submit(prepared, capsule: capsule);
   }
 
   /// Raises [assertionId] when [condition] is false.
@@ -181,16 +197,202 @@ abstract final class BugCapsule {
 
   static final ActionRegistry _actions = ActionRegistry();
 
+  // ------------------------------------------------------------ monitoring
+
+  /// Sends [error] as an error event (handled, level `error` unless given)
+  /// with the current scope. Returns the event id, or null when monitoring is
+  /// off or the event was sampled out.
+  static String? captureException(
+    Object error, {
+    StackTrace? stackTrace,
+    EventLevel? level,
+    Map<String, String>? tags,
+    Map<String, Object?>? extra,
+    List<String>? fingerprint,
+    Map<String, Object?>? contexts,
+  }) {
+    final hub = _rt?.hub;
+    return hub?.capture(hub.prepareException(error, stackTrace ?? StackTrace.current,
+        mechanism: Mechanism.manual,
+        level: level,
+        tags: tags,
+        extra: extra,
+        fingerprint: fingerprint,
+        contexts: contexts));
+  }
+
+  /// Sends a message event (with the current stack when `attachStacktrace`).
+  static String? captureMessage(String message, {EventLevel level = EventLevel.info, Map<String, String>? tags}) {
+    final hub = _rt?.hub;
+    return hub?.capture(hub.prepareMessage(message, level: level, tags: tags));
+  }
+
+  /// Sends user feedback (monitoring-v1 §9), linked to [eventId] when given.
+  /// With [captureCapsule] (default: `MonitoringOptions.captureCapsuleWithFeedback`,
+  /// true in QA mode) a capsule is written too and linked by `capsuleId`.
+  /// Returns the feedback id, or null when monitoring is off or [message]
+  /// is empty.
+  static Future<String?> captureFeedback({
+    required String message,
+    String? name,
+    String? email,
+    String? eventId,
+    String? url,
+    Map<String, String>? tags,
+    bool? captureCapsule,
+  }) async =>
+      _rt?.hub?.captureFeedback(
+        message: message,
+        name: name,
+        email: email,
+        eventId: eventId,
+        url: url,
+        tags: tags,
+        captureCapsule: captureCapsule,
+      );
+
+  /// Id of the last error event that was sent (not sampled out).
+  static String? lastEventId() => _rt?.hub?.lastEventId;
+
+  static void setUser(MonitoringUser? user) => Scope.current.setUser(user);
+  static void setTag(String key, String value) => Scope.current.setTag(key, value);
+  static void setTags(Map<String, String> tags) => Scope.current.setTags(tags);
+  static void setExtra(String key, Object? value) => Scope.current.setExtra(key, value);
+  static void setExtras(Map<String, Object?> extras) => Scope.current.setExtras(extras);
+  static void setContext(String name, Object? value) => Scope.current.setContext(name, value);
+  static void setLevel(EventLevel? level) => Scope.current.setLevel(level);
+  static void setFingerprint(List<String>? fingerprint) => Scope.current.setFingerprint(fingerprint);
+
+  static void addBreadcrumb(Breadcrumb breadcrumb) => _rt?.hub?.addBreadcrumb(breadcrumb);
+  static void clearBreadcrumbs() => _rt?.hub?.clearBreadcrumbs();
+
+  /// Runs [fn] with a copy of the current scope; changes to it apply only to
+  /// what is captured inside [fn] (including its async continuations).
+  static R withScope<R>(R Function(Scope scope) fn) {
+    final scope = Scope.current.clone();
+    return runZoned(() => fn(scope), zoneValues: {scopeZoneKey: scope});
+  }
+
+  static void configureScope(void Function(Scope scope) fn) => fn(Scope.current);
+
+  /// Starts a root transaction (a new trace, or the one passed to
+  /// [continueTrace]). With [bindToScope] it becomes the parent of spans
+  /// started outside [startSpan] (e.g. HTTP spans). Finish it to send it.
+  static BugCapsuleTransaction startTransaction(String name, String op, {bool bindToScope = false}) =>
+      _rt?.hub?.startTransaction(name, op, bindToScope: bindToScope) ??
+      TransactionImpl(name: name, op: op, sink: _noopSink, sampled: false);
+
+  /// Runs [fn] inside a span that is active for its zone (children, HTTP
+  /// spans and error events attach to it) and finishes it when [fn]
+  /// completes (status `internal_error` if it throws). A child of the active
+  /// span, else a new transaction.
+  static FutureOr<R> startSpan<R>(String name, String op, FutureOr<R> Function(BugCapsuleSpan span) fn) {
+    final parent = activeSpan;
+    final BugCapsuleSpan span = parent?.startChild(op, description: name) ?? startTransaction(name, op);
+    final FutureOr<R> result;
+    try {
+      result = runZoned(() => fn(span), zoneValues: {spanZoneKey: span});
+    } catch (_) {
+      span.finish(status: SpanStatus.internalError);
+      rethrow;
+    }
+    if (result is Future<R>) return _finishAfter(result, span);
+    span.finish();
+    return result;
+  }
+
+  static Future<R> _finishAfter<R>(Future<R> future, BugCapsuleSpan span) async {
+    try {
+      final value = await future;
+      span.finish();
+      return value;
+    } catch (_) {
+      span.finish(status: SpanStatus.internalError);
+      rethrow;
+    }
+  }
+
+  /// The span of the current zone ([startSpan]), else the transaction bound
+  /// to the scope (the current screen), if open.
+  static BugCapsuleSpan? get activeSpan => Scope.current.activeSpan;
+
+  /// `traceparent` for a request made by a custom client, or null when no
+  /// span is active.
+  static String? getTraceparent() => activeSpan?.toTraceparent();
+  static String? getBaggage() => activeSpan?.toBaggage();
+
+  /// Continues an incoming trace: the next root transaction uses its trace
+  /// id, parent span and sampling decision.
+  static void continueTrace(String? traceparent, String? baggage) {
+    final parent = TraceParent.parse(traceparent);
+    if (parent == null) return;
+    final rate = double.tryParse(Baggage.parse(baggage)['sample_rate'] ?? '');
+    Scope.current.continuedTrace = ContinuedTrace(parent.traceId, parent.parentSpanId, parent.sampled, sampleRate: rate);
+  }
+
+  /// Sessions are automatic; these are for apps that manage them.
+  static void startSession() => _rt?.hub?.startSession();
+  static void endSession() => _rt?.hub?.endSession();
+
+  /// Uploads queued monitoring envelopes. True when the queue is empty.
+  static Future<bool> flush([Duration timeout = const Duration(seconds: 10)]) async =>
+      await _rt?.hub?.flush(timeout: timeout) ?? true;
+
+  /// Ends the session, uploads queued envelopes and stops monitoring.
+  static Future<void> close() async => _rt?.closeMonitoring();
+
+  /// `runZonedGuarded` that sends uncaught zone errors as `uncaught` events
+  /// (and treats them as failures), then calls [onError]:
+  ///
+  /// ```dart
+  /// void main() => BugCapsule.runZonedGuarded(() => BugCapsule.init(...));
+  /// ```
+  static R? runZonedGuarded<R>(R Function() body, {void Function(Object error, StackTrace stack)? onError}) =>
+      async.runZonedGuarded(body, (error, stack) {
+        _rt?.onUncaught(error, stack, Mechanism.uncaught);
+        onError?.call(error, stack);
+      });
+
+  /// Sends uncaught errors of [isolate] (one the app spawned) as events.
+  static void addIsolateErrorListener(Isolate isolate) => _rt?.hub?.addIsolate(isolate);
+
+  static final TransactionSink _noopSink = _NoopSink();
+
+  /// The package of the first frame outside BugCapsule: the app's, which
+  /// marks its frames `inApp`.
+  static String? _callerPackage(StackTrace stack) {
+    for (final line in stack.toString().split('\n')) {
+      final m = RegExp(r'\(package:([^/]+)/').firstMatch(line);
+      if (m != null && m[1] != 'bug_capsule' && m[1] != 'flutter' && m[1] != 'clock') return m[1];
+    }
+    return null;
+  }
+
   @visibleForTesting
   static Future<void> resetForTest() async {
     await _rt?.dispose();
     _rt = null;
+    Scope.root.clear();
   }
 }
 
+class _NoopSink implements TransactionSink {
+  @override
+  String? get release => null;
+  @override
+  String? get environment => null;
+  @override
+  void transactionFinished(TransactionImpl transaction) {}
+}
+
 class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
-  _Runtime(this.config, this.integrations, this._overrides)
+  _Runtime(this.config, this.integrations, this._overrides, this._appPackage)
       : _random = _overrides?.random ?? Random();
+
+  final String? _appPackage;
+
+  /// Monitoring; null when off, before setup and during replay.
+  MonitoringHub? hub;
 
   @override
   final BugCapsuleConfig config;
@@ -269,13 +471,19 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     if (_warned.add(message)) debugPrint('[bugcapsule] $message');
   }
 
+  /// Records into the flight recorder while recording; monitoring derives
+  /// breadcrumbs from the same (sanitized) events, also when this session
+  /// does not record a capsule.
   @override
   void record(String type, [Map<String, Object?> data = const {}]) {
-    if (!_recording) return;
-    final recorder = _recorder;
-    if (recorder == null) return;
+    final recorder = _recording ? _recorder : null;
+    final hub = this.hub;
+    final crumb = hub != null && BreadcrumbMapper.wants(type);
+    if (recorder == null && !crumb) return;
     final clean = _sanitizeEvent(type, data);
-    if (clean != null) recorder.add(now(), type, clean);
+    if (clean == null) return;
+    if (crumb) _guard(() => hub.onRecorded(type, clean));
+    recorder?.add(now(), type, clean);
   }
 
   /// Defense in depth: whatever an integration records goes through the
@@ -315,7 +523,7 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   }
 
   @override
-  void reportError(Object error, StackTrace? stack) => _onError(error, stack);
+  void reportError(Object error, StackTrace? stack) => _onError(error, stack, Mechanism.manual);
 
   // ---------------------------------------------------------------- startup
 
@@ -343,6 +551,9 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
       _setupAbandoned = true;
       debugPrint('[bugcapsule] capture setup failed; the app runs without capture: $e\n$st');
       _stopRecording();
+      final h = hub;
+      hub = null;
+      unawaited(h?.dispose());
     }
     await appRunner();
     _afterAppStarted();
@@ -422,8 +633,48 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     }
 
     if (_setupAbandoned) return _stopRecording();
+    // Monitoring starts once capture setup has finished (a setup that never
+    // finishes leaves the app without capture and without monitoring).
+    final envelopes = _overrides?.envelopeTransport ??
+        (transport is EnvelopeTransport ? transport as EnvelopeTransport : null);
+    if (config.monitoring.enabled && (cached?.enabled ?? true)) {
+      final h = MonitoringHub(
+        options: config.monitoring,
+        host: MonitoringHost(
+          config: config,
+          redactor: () => _redactor,
+          remote: () => remote?.current,
+          uploadsAllowed: () => _uploadsAllowed,
+          ensureFreshConfig: () => remote?.ensureFresh() ?? Future.value(),
+          refreshConfig: () => remote?.refresh() ?? Future.value(),
+          writeCapsule: (note, monitoring) async {
+            String? queued;
+            await writeCapsule(
+              failure: lastFailure,
+              labels: {'note': note, 'source': 'feedback'},
+              monitoring: monitoring,
+              onQueued: (id) => queued = id,
+            );
+            return queued;
+          },
+          isRecording: () => _recording,
+        ),
+        sdkVersion: _sdkVersion,
+        startedAt: _startedAt,
+        storage: s.root,
+        transport: envelopes,
+        appPackage: _appPackage,
+      );
+      await h.start(lifecycle: binding.lifecycleState);
+      if (_setupAbandoned) {
+        await h.dispose();
+        return _stopRecording();
+      }
+      hub = h;
+    }
     binding.addObserver(this);
     _observing = true;
+    if (hub != null) _installErrorHandlers();
     if (_recording) {
       final launch = Checkpoint(
         kind: CheckpointKind.launch,
@@ -490,12 +741,17 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     _handlersInstalled = true;
     final previousFlutterError = _previousFlutterError = FlutterError.onError;
     FlutterError.onError = (details) {
-      if (!details.silent) _guard(() => _onError(details.exception, details.stack));
+      if (!details.silent) {
+        _guard(() => _onError(details.exception, details.stack, Mechanism('flutter_error', handled: false, data: {
+              'library': ?details.library,
+              if (details.context != null) 'context': details.context.toString(),
+            })));
+      }
       previousFlutterError?.call(details);
     };
     final previousPlatformError = _previousPlatformError = PlatformDispatcher.instance.onError;
     PlatformDispatcher.instance.onError = (error, stack) {
-      _guard(() => _onError(error, stack));
+      _guard(() => _onError(error, stack, Mechanism.platformDispatcher));
       return previousPlatformError?.call(error, stack) ?? isReplaying;
     };
   }
@@ -585,6 +841,7 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _guard(() => record(EventTypes.lifecycle, {'state': state.name}));
+    _guard(() => hub?.onLifecycle(state));
     final controller = remote;
     if (controller == null) return;
     if (state == AppLifecycleState.resumed) {
@@ -595,40 +852,76 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     }
   }
 
-  void _onError(Object error, StackTrace? stack) {
+  /// Errors already sent as events, so one error reaching several handlers
+  /// (an integration's `reportError`, then the zone or PlatformDispatcher)
+  /// is sent once.
+  final Expando<bool> _reported = Expando();
+
+  /// An uncaught zone error (`BugCapsule.runZonedGuarded`).
+  void onUncaught(Object error, StackTrace stack, Mechanism mechanism) => _guard(() => _onError(error, stack, mechanism));
+
+  void _onError(Object error, StackTrace? stack, Mechanism mechanism) {
     if (config.ignoreError?.call(error) ?? false) return;
-    handleFailure(FailureRecord.exception(error, stack, now(), scrub: _redactor.scrubText));
+    var h = engine == null ? hub : null;
+    if (h != null && _canExpando(error)) {
+      if (_reported[error] == true) h = null;
+      _reported[error] = true;
+    }
+    final prepared = h?.prepareException(error, stack, mechanism: mechanism);
+    final capsule = handleFailure(FailureRecord.exception(error, stack, now(), scrub: _redactor.scrubText),
+        monitoring: prepared?.monitoringInfo());
+    if (prepared != null) h!.submit(prepared, capsule: capsule);
   }
 
-  void handleFailure(FailureRecord failure) {
+  static bool _canExpando(Object o) => o is! num && o is! String && o is! bool && o is! Record;
+
+  /// Records the failure and, when it is new and capture is on, schedules
+  /// a capsule. Returns the capsule id once the capsule is queued for upload
+  /// (null if it is not written or not queued), or null when none is
+  /// scheduled. [monitoring] goes into `manifest.monitoring`.
+  Future<String?>? handleFailure(FailureRecord failure, {CapsuleMonitoring? monitoring}) {
     final replaying = engine;
     if (replaying != null) {
       replaying.onFailure(failure);
-      return;
+      return null;
     }
-    if (!_recording) return;
+    if (!_recording) return null;
     record(EventTypes.failure, failure.toJson()..remove('stack'));
     lastFailure = failure;
-    if (!_seenSignatures.add(failure.signature)) return;
-    if (!config.autoCaptureOnFailure) return;
-    if (_capsulesWritten >= config.maxCapsulesPerSession) return;
-    if (!_capturedSignatures.add(failure.signature)) return;
+    if (!_seenSignatures.add(failure.signature)) return null;
+    if (!config.autoCaptureOnFailure) return null;
+    if (_capsulesWritten >= config.maxCapsulesPerSession) return null;
+    if (!_capturedSignatures.add(failure.signature)) return null;
+    final queued = Completer<String?>();
     // Let the failure settle (error widgets, follow-up events) before writing.
     Timer(const Duration(milliseconds: 300), () {
-      unawaited(writeCapsule(failure: failure).then((r) {
+      unawaited(writeCapsule(
+        failure: failure,
+        monitoring: monitoring,
+        onQueued: (id) {
+          if (!queued.isCompleted) queued.complete(id);
+        },
+      ).then((r) {
         if (r != null) {
           debugPrint('[bugcapsule] captured ${r.capsuleId} '
               '(${r.eligibility.status.name}) → ${r.file.path}');
         }
-      }).catchError((Object e) => debugPrint('[bugcapsule] capture failed: $e')));
+      }).catchError((Object e) => debugPrint('[bugcapsule] capture failed: $e')).whenComplete(() {
+        if (!queued.isCompleted) queued.complete(null);
+      }));
     });
+    return queued.future;
   }
 
   // --------------------------------------------------------------- capsule
 
+  /// [onQueued] is called with the capsule id once it is in the upload
+  /// outbox (before the upload), so a monitoring event can link to it.
   Future<CaptureResult?> writeCapsule({
     FailureRecord? failure,
     Map<String, String> labels = const {},
+    CapsuleMonitoring? monitoring,
+    void Function(String capsuleId)? onQueued,
   }) async {
     final recorder = _recorder;
     if (!_recording || recorder == null) return null;
@@ -726,6 +1019,7 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
           'random.seeded': 'explicit',
           for (final i in integrations) 'integration.${i.name}': 'supported',
         },
+        monitoring: monitoring,
       ),
       checkpoint: window.checkpoint.shift(anchor),
       events: events,
@@ -758,6 +1052,7 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
         await outbox.purge();
         return null;
       } else {
+        onQueued?.call(capsule.manifest.capsuleId);
         upload = await flushOutbox(onlyId: capsule.manifest.capsuleId);
       }
     }
@@ -828,6 +1123,7 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   /// * `maxCapsuleBytes`: applies to the next capsule.
   void _applyRemote(RemoteCaptureConfig? previous, RemoteCaptureConfig next) {
     _maxCapsuleBytes = next.maxCapsuleBytes;
+    _guard(() => hub?.onRemoteConfig(next));
     if (!next.enabled) {
       _disableCapture();
       return;
@@ -1016,8 +1312,16 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     return build == null ? version : '$version ($build)';
   }
 
+  Future<void> closeMonitoring() async {
+    final h = hub;
+    hub = null;
+    await h?.close();
+  }
+
   Future<void> dispose() async {
     _disposed = true;
+    final h = hub;
+    hub = null;
     _stopRecording();
     remote?.dispose();
     if (_observing) WidgetsBinding.instance.removeObserver(this);
@@ -1026,6 +1330,7 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
       FlutterError.onError = _previousFlutterError;
       PlatformDispatcher.instance.onError = _previousPlatformError;
     }
+    await h?.dispose();
     await _outbox?.close();
     _transport?.close();
   }
