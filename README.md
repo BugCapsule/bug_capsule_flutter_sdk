@@ -11,23 +11,36 @@ QA hits a bug ─► capsule auto-captured & uploaded ─► bugcapsule run <id>
 
 The capsule holds what replay needs: a storage checkpoint, recorded touches and semantic actions, typed text, lifecycle changes, every HTTP exchange with its latency, state-management activity (BLoC, Riverpod, Provider/ChangeNotifier, GetX, MobX), and the failure assertion. All of it is redacted on the device. Replay re-runs the real app code against that recording: network calls are served from the capsule with the same timing, so races and data-dependent bugs come back.
 
-## Packages
+## Package
 
-| Package | What it does |
+Everything ships in one package, [`bug_capsule`](packages/bug_capsule), with one import:
+
+```dart
+import 'package:bug_capsule/bug_capsule.dart';
+```
+
+| Part | What it does |
 |---|---|
-| [`bug_capsule_core`](packages/bug_capsule_core) | Pure Dart: capsule model ([spec v1](spec/capsule-v1.md)), flight recorder, codec, redaction, network matching |
-| [`bug_capsule_flutter`](packages/bug_capsule_flutter) | `BugCapsule.init`, capture (touches, lifecycle, errors, checkpoints), upload, kill switch, replay engine, QA overlay |
-| [`bug_capsule_bloc`](packages/bug_capsule_bloc) | BLoC/Cubit transitions, state snapshots and restore |
-| [`bug_capsule_riverpod`](packages/bug_capsule_riverpod) | Riverpod 3 provider activity, state snapshots and restore |
-| [`bug_capsule_provider`](packages/bug_capsule_provider) | Provider / `ChangeNotifier` / `ValueNotifier` changes, state snapshots and restore |
-| [`bug_capsule_getx`](packages/bug_capsule_getx) | GetX controller updates and `Rx` changes, state snapshots and restore |
-| [`bug_capsule_mobx`](packages/bug_capsule_mobx) | MobX observable writes, actions and reaction errors; store snapshots and restore |
-| [`bug_capsule_dio`](packages/bug_capsule_dio) | Transport-level HTTP capture and deterministic replay with endpoint normalization (also covers Retrofit) |
-| [`bug_capsule_http`](packages/bug_capsule_http) | The same for `package:http` clients (also covers Chopper and other `http.Client` based APIs) |
-| [`bug_capsule_go_router`](packages/bug_capsule_go_router) | Navigation capture and route restore |
-| [`bug_capsule_storage`](packages/bug_capsule_storage) | SharedPreferences snapshot/restore (allowlist) |
-| [`bug_capsule_cli`](packages/bug_capsule_cli) | `bugcapsule inspect / run / verify / regress / list / pull / push / share / capture` |
-| [`example/bug_capsule_demo`](example/bug_capsule_demo) | Shop app with planted "cannot reproduce" bugs |
+| Runtime | `BugCapsule.init`, capture (touches, lifecycle, errors, checkpoints), upload, kill switch, replay engine, QA overlay |
+| Core | Capsule model ([spec v1](spec/capsule-v1.md)), flight recorder, codec, redaction, network matching |
+| `BugCapsuleBloc` | BLoC/Cubit transitions, state snapshots and restore |
+| `BugCapsuleRiverpod` | Riverpod 3 provider activity, state snapshots and restore |
+| `BugCapsuleNotifiers` | Provider / `ChangeNotifier` / `ValueNotifier` changes, state snapshots and restore |
+| `BugCapsuleGetx` | GetX controller updates and `Rx` changes, state snapshots and restore |
+| `BugCapsuleMobx` | MobX observable writes, actions and reaction errors; store snapshots and restore |
+| `BugCapsuleDio` | Transport-level HTTP capture and deterministic replay with endpoint normalization (also covers Retrofit) |
+| `BugCapsuleHttp` | The same for `package:http` clients (also covers Chopper and other `http.Client` based APIs) |
+| `BugCapsuleGoRouter` | Navigation capture and route restore |
+| `BugCapsuleSharedPreferences` | SharedPreferences snapshot/restore (allowlist) |
+| `bugcapsule` CLI | `bugcapsule inspect / run / verify / regress / list / pull / push / share / capture` |
+
+[`example/bug_capsule_demo`](example/bug_capsule_demo) is a shop app with planted "cannot reproduce" bugs.
+
+The package depends on every library it integrates with, so your app's
+versions must fall in these ranges even for libraries you don't use with
+BugCapsule: `bloc` ^9, `riverpod` ^3, `get` ^4.6, `mobx` ^2.3, `dio` ^5.9,
+`http` ^1.5, `go_router` 14 to 18, `shared_preferences` ^2.5. Code you don't
+use is tree-shaken out of release builds.
 
 The backend (upload, triage, kill switch, share links) lives in [draz26648/bug_capsule_backend](https://github.com/draz26648/bug_capsule_backend).
 
@@ -35,14 +48,12 @@ The backend (upload, triage, kill switch, share links) lives in [draz26648/bug_c
 
 ```yaml
 dependencies:
-  bug_capsule_flutter: {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_flutter}}
-  bug_capsule_bloc:    {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_bloc}}
-  bug_capsule_dio:     {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_dio}}
-  bug_capsule_go_router: {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_go_router}}
-  bug_capsule_storage: {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_storage}}
+  bug_capsule: {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule}}
 ```
 
 ```dart
+import 'package:bug_capsule/bug_capsule.dart';
+
 final bugCapsuleDio = BugCapsuleDio(rules: [
   // Fields that differ on every run must not affect request matching.
   EndpointRule('POST', '/api/checkout', ignoreBodyFields: {'timestamp', 'nonce'}),
@@ -78,15 +89,8 @@ MaterialApp.router(builder: (context, child) => BugCapsuleOverlay(child: child!)
 
 ### Other state management and HTTP clients
 
-Use the integrations that match your app; they can be combined (e.g. Riverpod with `package:http`).
+They come with the same package; use the ones that match your app. They can be combined (e.g. Riverpod with `package:http`).
 
-```yaml
-  bug_capsule_riverpod: {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_riverpod}}
-  bug_capsule_provider: {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_provider}}
-  bug_capsule_getx:     {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_getx}}
-  bug_capsule_mobx:     {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_mobx}}
-  bug_capsule_http:     {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_http}}
-```
 
 ```dart
 // Riverpod 3: register providers whose state replay should restore, and add the observer.
@@ -156,7 +160,8 @@ Every capsule reports its **eligibility** (`eligible` / `partial` / `ineligible`
 ## The CLI
 
 ```bash
-dart pub global activate --source git https://github.com/draz26648/bug_capsule_flutter_sdk --git-path packages/bug_capsule_cli
+dart pub global activate --source git https://github.com/draz26648/bug_capsule_flutter_sdk --git-path packages/bug_capsule
+# or, inside an app that depends on bug_capsule: dart run bug_capsule:bugcapsule <command>
 bugcapsule login --url http://127.0.0.1:8787 --secret-key bcs_... --ingest-key bci_...
 
 bugcapsule list                                   # capsules on the backend
@@ -267,6 +272,17 @@ Production capture works, but it is the riskiest mode. Before rollout:
 - A request whose server answers before the request body was fully sent is keyed without its body hash; replay may then report it as unrecorded.
 - Capsules captured by SDK 0.1 with body capture off were keyed without body hashes; replaying them with 0.2 reports those requests as unrecorded.
 
+## Upgrading to 0.4 (one package)
+
+The twelve packages (`bug_capsule_core`, `bug_capsule_flutter`, `bug_capsule_bloc`,
+`bug_capsule_dio`, …, `bug_capsule_cli`) are now one package, `bug_capsule`. The API
+is unchanged; only the dependency and the imports change.
+
+- In `pubspec.yaml`, replace every `bug_capsule_*` dependency with the single `bug_capsule` line above.
+- Replace every `package:bug_capsule_*/…` import with `import 'package:bug_capsule/bug_capsule.dart';`.
+- CLI: `dart pub global deactivate bug_capsule_cli`, then activate `bug_capsule` as shown in [The CLI](#the-cli).
+- Capsules still report `sdk.name: bug_capsule_flutter`, so the backend and older CLIs read them as before.
+
 ## Upgrading from 0.1
 
 - `BugCapsuleSession` gained no members; `BugCapsule.resetForTest()` now returns a `Future` (await it in tests).
@@ -276,12 +292,10 @@ Production capture works, but it is the riskiest mode. Before rollout:
 ## Development
 
 ```bash
-flutter pub get                       # pub workspace: all packages at once
-(cd packages/bug_capsule_core && dart test) # model, codec, validator + shared fixtures, redaction, verdicts
-(cd packages/bug_capsule_cli && dart test)
-for p in bug_capsule_flutter bug_capsule_dio bug_capsule_http bug_capsule_bloc bug_capsule_riverpod bug_capsule_provider bug_capsule_getx bug_capsule_mobx bug_capsule_go_router bug_capsule_storage; do (cd packages/$p && flutter test); done
+flutter pub get                       # pub workspace: the package and the demo app
+(cd packages/bug_capsule && flutter test)   # core, CLI, runtime and every integration
 (cd example/bug_capsule_demo && flutter test)
-dart run bug_capsule_cli:bugcapsule --help
+(cd packages/bug_capsule && dart run bugcapsule --help)
 ```
 
 `spec/fixtures/capsule-v1` holds valid and malformed capsules that both this

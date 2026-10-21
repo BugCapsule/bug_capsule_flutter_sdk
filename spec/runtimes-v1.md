@@ -358,7 +358,7 @@ treats every missing report as an `error` attempt.
 
 ## 11. Verdicts
 
-Unchanged (`bug_capsule_core/lib/src/verdict.dart`); the CLI computes them
+Unchanged (`packages/bug_capsule/lib/src/core/verdict.dart`); the CLI computes them
 for every runtime. `fixtures/conformance/verdicts.json` pins attempt
 classification and batch verdicts, including that unknown divergence types
 are material and that missing attempts count against the request.
@@ -374,7 +374,7 @@ principle, but no runtime pair has been verified.
 ## 13. Conformance fixtures
 
 Generated from the Dart reference by
-`packages/bug_capsule_core/tool/generate_conformance.dart`
+`packages/bug_capsule/tool/generate_conformance.dart`
 (`--check` fails when stale; `conformance_test.dart` does the same in CI):
 
 | File | What every implementation asserts |

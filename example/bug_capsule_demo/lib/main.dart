@@ -2,11 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import 'package:bug_capsule_bloc/bug_capsule_bloc.dart';
-import 'package:bug_capsule_dio/bug_capsule_dio.dart';
-import 'package:bug_capsule_flutter/bug_capsule_flutter.dart';
-import 'package:bug_capsule_go_router/bug_capsule_go_router.dart';
-import 'package:bug_capsule_storage/bug_capsule_storage.dart';
+import 'package:bug_capsule/bug_capsule.dart';
 
 import 'fake_server.dart';
 import 'screens.dart';

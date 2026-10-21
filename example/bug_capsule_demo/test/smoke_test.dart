@@ -2,11 +2,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:bug_capsule_bloc/bug_capsule_bloc.dart';
+import 'package:bug_capsule/bug_capsule.dart';
 import 'package:bug_capsule_demo/main.dart';
 import 'package:bug_capsule_demo/shop.dart';
-import 'package:bug_capsule_flutter/bug_capsule_flutter.dart';
-import 'package:bug_capsule_storage/bug_capsule_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// The critical capture workflow on the real demo app: boot under BugCapsule, use

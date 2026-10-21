@@ -6,18 +6,7 @@ environment:
   sdk: ^3.9.0
 
 workspace:
-  - packages/bug_capsule_core
-  - packages/bug_capsule_flutter
-  - packages/bug_capsule_bloc
-  - packages/bug_capsule_riverpod
-  - packages/bug_capsule_provider
-  - packages/bug_capsule_getx
-  - packages/bug_capsule_mobx
-  - packages/bug_capsule_dio
-  - packages/bug_capsule_http
-  - packages/bug_capsule_go_router
-  - packages/bug_capsule_storage
-  - packages/bug_capsule_cli
+  - packages/bug_capsule
   - example/bug_capsule_demo
 
 dev_dependencies:
