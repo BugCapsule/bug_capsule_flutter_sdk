@@ -13,6 +13,8 @@ abstract final class CapsuleLimits {
   static const maxIntegrations = 100;
   static const maxMissing = 500;
   static const maxRedactionKeys = 500;
+  static const maxCapabilities = 200;
+  static const maxFrameworks = 20;
 
   /// JSON values in the whole document, counted before parsing.
   static const maxJsonValues = 4000000;
@@ -251,6 +253,30 @@ void _validate(Object? root) {
         final v = list[i];
         if (v is! String || v.length > 200) _fail('$mp.redaction.$k[$i]', 'must be a string');
       }
+    }
+  }
+
+  // v1 extension (SDK 0.3): the capturing runtime and its capabilities.
+  final runtime = _optObject(m, 'runtime', mp);
+  if (runtime != null) {
+    _string(runtime, 'name', '$mp.runtime', max: 50);
+    _optString(runtime, 'version', '$mp.runtime', max: 200);
+    _optString(runtime, 'language', '$mp.runtime', max: 50);
+    if (runtime['frameworks'] != null) {
+      final list = _array(runtime['frameworks'], '$mp.runtime.frameworks', CapsuleLimits.maxFrameworks);
+      for (var i = 0; i < list.length; i++) {
+        final v = list[i];
+        if (v is! String || v.isEmpty || v.length > 50) {
+          _fail('$mp.runtime.frameworks[$i]', 'must be a non-empty string of at most 50 characters');
+        }
+      }
+    }
+  }
+  final capabilities = _optObject(m, 'capabilities', mp);
+  if (capabilities != null) {
+    _stringMap(capabilities, '$mp.capabilities', maxEntries: CapsuleLimits.maxCapabilities, max: 100);
+    for (final k in capabilities.keys) {
+      if (k.length > 100) _fail('$mp.capabilities', 'keys must be at most 100 characters');
     }
   }
 

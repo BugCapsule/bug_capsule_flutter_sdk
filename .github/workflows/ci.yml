@@ -35,7 +35,7 @@ jobs:
       # Runtime isolation, remote config + kill switch, outbox, integrations.
       - name: Flutter package tests
         run: |
-          for p in bug_capsule_flutter bug_capsule_dio bug_capsule_bloc bug_capsule_go_router bug_capsule_storage; do
+          for p in bug_capsule_flutter bug_capsule_dio bug_capsule_http bug_capsule_bloc bug_capsule_riverpod bug_capsule_provider bug_capsule_getx bug_capsule_mobx bug_capsule_go_router bug_capsule_storage; do
             (cd "packages/$p" && flutter test --no-pub) || exit 1
           done
       - name: Demo app widget smoke test
