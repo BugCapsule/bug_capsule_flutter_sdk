@@ -1,7 +1,7 @@
 {
   "format": "bugcapsule.conformance",
   "version": 1,
-  "generatedBy": "bug_capsule_core/tool/generate_conformance.dart",
+  "generatedBy": "packages/bug_capsule/tool/generate_conformance.dart",
   "description": "Request keys (spec capsule-v1 \"Network matching\"). Inputs: method, url, body (a JSON value, or a string that is parsed as JSON when it is valid JSON and hashed as text otherwise; null = no body), rules, globalIgnoreQuery (default: _, ts, timestamp, nonce, cachebust), globalIgnoreBodyFields. With \"redact\": true the URL and body go through the default redactor (plus redactKeys) first, as capture and replay do.",
   "cases": [
     {

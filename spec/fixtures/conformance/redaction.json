@@ -1,7 +1,7 @@
 {
   "format": "bugcapsule.conformance",
   "version": 1,
-  "generatedBy": "bug_capsule_core/tool/generate_conformance.dart",
+  "generatedBy": "packages/bug_capsule/tool/generate_conformance.dart",
   "description": "Redaction with the default rules plus extraKeys [\"loyaltyId\"] and extraHeaders [\"x-tenant\"]. redactUrl: \"params\" lists the decoded query parameters of the output in order; implementations must match them (and should match \"output\" exactly).",
   "extraKeys": [
     "loyaltyId"

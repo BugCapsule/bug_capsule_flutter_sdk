@@ -60,6 +60,7 @@ compatibility test against every fixture in `fixtures/capsule-v1/valid`.
 |---|---|
 | `input.pointer.capture` / `input.pointer.replay` | touches/clicks recorded / re-injected |
 | `input.semantic.replay` | registered actions invoked by id |
+| `input.key.replay` | hardware/system keys (`key` events) replayed (Android: Back) |
 | `text.replay` | tracked text restored by id |
 | `lifecycle.replay` | foreground/background replayed (`partial` = synthetic events) |
 | `network.<client>` | `okhttp`, `urlsession`, `fetch`, `xhr`, `dio` exchanges captured and served |
@@ -150,6 +151,13 @@ current route.
 `{key, value?}` when an app-registered state object reports a change. Not
 replayed; state comes back through checkpoints.
 
+### `key` (new, Android)
+
+`{phase: down|up, keyCode, key}` for system keys the app reacts to; Android
+records the Back key (`key: "back"`, `keyCode` 4) and replays it with
+`Instrumentation.sendKeySync`. Readers that do not know the type ignore it;
+a runtime that cannot replay it reports `capability.unsupported`.
+
 ### `http`
 
 As v1. `error.type` uses one vocabulary in every runtime:
@@ -160,6 +168,11 @@ As v1. `error.type` uses one vocabulary in every runtime:
 | `connectionTimeout` | `SocketTimeoutException` while connecting | `.timedOut` before response | — | `connectionTimeout` |
 | `receiveTimeout` | `SocketTimeoutException` while reading, `InterruptedIOException("timeout")` | `.timedOut` after response | XHR `timeout`, `AbortSignal.timeout` | `receiveTimeout` |
 | `cancel` | `call.isCanceled()` | `.cancelled` | `AbortError` | `cancel` |
+
+`pending: true` (Android and iOS, SDK 0.3) marks an exchange that was still in
+flight when the capsule was written (typically at a crash). Replay holds such
+a request open instead of failing it as `network.unrecorded`, as the original
+request never completed either.
 
 During replay a recorded error is raised with the runtime's native type
 after the recorded `durationMs`, cancellation of the app's request stops

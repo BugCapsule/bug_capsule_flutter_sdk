@@ -57,7 +57,7 @@ Map<String, Object?> buildConformanceFixtures() => {
 Map<String, Object?> _header(String what) => {
       'format': 'bugcapsule.conformance',
       'version': 1,
-      'generatedBy': 'bug_capsule_core/tool/generate_conformance.dart',
+      'generatedBy': 'packages/bug_capsule/tool/generate_conformance.dart',
       'description': what,
     };
 
@@ -208,7 +208,7 @@ Map<String, Object?> _verdicts() {
     });
   }
   return {
-    ..._header('Attempt classification and batch verdicts (bug_capsule_core evaluateRun). '
+    ..._header('Attempt classification and batch verdicts (lib/src/core/verdict.dart evaluateRun). '
         'Divergence types not listed in "expectedDivergences" are material.'),
     'expectedDivergences': DivergencePolicy.expected.toList()..sort(),
     'cases': cases,
