@@ -23,7 +23,7 @@ npm run dev                        # http://127.0.0.1:8787; /ready answers 200
 ```bash
 cd ../bug_capsule_flutter_sdk
 flutter pub get
-dart pub global activate --source path packages/bug_capsule_cli
+dart pub global activate --source path packages/bug_capsule
 bugcapsule login --url http://127.0.0.1:8787 --secret-key bcs_... --ingest-key bci_...
 ```
 
