@@ -136,8 +136,12 @@ ParsedStack _parseNative(List<String> lines) {
       dsoBase = (abs - BigInt.parse(m[2]!, radix: 16)).toRadixString(16);
     }
     final symbol = m[3]!.trim();
+    // The first frame printed is the crashing one and carries the exact PC;
+    // every caller frame carries a return address, so step back into the
+    // call instruction (monitoring-v1 §3: the backend resolves as sent).
+    final pc = frames.isEmpty ? abs : abs - BigInt.one;
     frames.add(EventFrame(
-      instructionAddr: '0x${abs.toRadixString(16)}',
+      instructionAddr: '0x${pc.toRadixString(16)}',
       // `_kDartIsolateSnapshotInstructions+0x1c3f3b` is not a function name.
       function: symbol.isEmpty || symbol.startsWith('_kDart') ? null : symbol,
       inApp: true,
