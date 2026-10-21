@@ -82,11 +82,13 @@ class BackendClient {
     List<int>? bytes,
     bool ingest = false,
     bool auth = true,
+    Map<String, String> headers = const {},
   }) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
     try {
       final req = await client.openUrl(method, uri);
       if (auth) req.headers.set(HttpHeaders.authorizationHeader, 'Bearer ${_key(ingest: ingest)}');
+      headers.forEach(req.headers.set);
       if (json != null) {
         req.headers.contentType = ContentType.json;
         req.write(jsonEncode(json));
@@ -154,4 +156,12 @@ class BackendClient {
 
   Future<Map<String, Object?>> updateConfig(Map<String, Object?> patch) =>
       _json('PATCH', '/v1/project/config', body: patch);
+
+  /// `POST /v1/debug-files?kind=…` (monitoring-v1 §5.4), gzip-compressed.
+  Future<Map<String, Object?>> uploadDebugFile(String kind, Map<String, String> query, List<int> file) async {
+    final (_, body, _) = await _send('POST', _uri('/v1/debug-files', {'kind': kind, ...query}),
+        bytes: gzip.encode(file), headers: {HttpHeaders.contentEncodingHeader: 'gzip'});
+    if (body.isEmpty) return const {};
+    return (jsonDecode(utf8.decode(body)) as Map).cast<String, Object?>();
+  }
 }

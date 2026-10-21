@@ -36,6 +36,26 @@ unit suites (257 tests) were re-run this session, its device E2E was not.
 | Offline outbox (10 / 10 MiB / 7 days, backoff, Retry-After) | T | T | T | T (IndexedDB, cross-tab safe) |
 | Runtime + capability metadata in capsules | T | T | T | T |
 
+## Monitoring (monitoring-v1, Flutter)
+
+The native and web columns are tracked in their own repositories.
+
+| Feature | Flutter |
+|---|---|
+| Envelopes to `/v1/envelope` (gzip, own outbox 30 / 5 MiB / 7 days, backoff, Retry-After) | T |
+| Error events: FlutterError, PlatformDispatcher, isolate, `runZonedGuarded` helper, `captureException` / `captureMessage` | T |
+| Dart stack frames (oldest first, `inApp`), AOT `instructionAddr` + `elf` image, `dart_obfuscation` image | T |
+| Breadcrumbs derived from flight-recorder events | T (state events only while recording a capsule) |
+| Scope (`setUser`, tags, extras, contexts, level, fingerprint, `withScope`), `beforeSend`, `lastEventId` | T |
+| Event ↔ capsule link (`capsuleId`, `manifest.monitoring`) | T |
+| Sessions (foreground runs, 30 s background timeout, crashed, abnormal on next launch) | T |
+| Screen transactions (GoRouter, `NavigatorObserver`), TTID, slow / frozen frames | T |
+| App start (from `BugCapsule.init`, cold only) | P |
+| HTTP spans + `traceparent` / `baggage` (Dio, package:http), sampling, zone-scoped active span | T |
+| Feedback (`captureFeedback`, form, sheet, shake detector with app-supplied accelerometer) | T |
+| Native crashes, ANR / app hangs | n/a (from the Android / iOS SDKs) |
+| `bugcapsule symbols upload` (`elf`, `dart_obfuscation`) | T |
+
 ## Replay
 
 | Feature | Flutter | Android | iOS | Web |

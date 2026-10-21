@@ -279,6 +279,14 @@ void _validate(Object? root) {
       if (k.length > 100) _fail('$mp.capabilities', 'keys must be at most 100 characters');
     }
   }
+  // v1 extension (monitoring-v1 §4.3): the linked monitoring event.
+  final monitoring = _optObject(m, 'monitoring', mp);
+  if (monitoring != null) {
+    _string(monitoring, 'eventId', '$mp.monitoring', max: 100);
+    _optString(monitoring, 'traceId', '$mp.monitoring', max: 32);
+    _optString(monitoring, 'release', '$mp.monitoring', max: 200);
+    _optString(monitoring, 'environment', '$mp.monitoring', max: 64);
+  }
 
   const cp = r'$.checkpoint';
   final checkpoint = _object(doc['checkpoint'], cp);
