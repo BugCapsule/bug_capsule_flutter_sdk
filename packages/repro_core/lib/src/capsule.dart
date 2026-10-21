@@ -93,6 +93,10 @@ class EligibilityBuilder {
   final List<MissingDependency> _missing = [];
 
   void missing(String dependency, String reason, {bool blocking = false}) {
+    // Bounds of the capsule format; reasons often embed error messages.
+    if (dependency.length > 200) dependency = dependency.substring(0, 200);
+    if (reason.length > 2000) reason = reason.substring(0, 2000);
+    if (_missing.length >= 200) return;
     if (_missing.any((m) => m.dependency == dependency && m.reason == reason)) return;
     _missing.add(MissingDependency(dependency, reason, blocking: blocking));
   }
@@ -246,7 +250,9 @@ class CapsuleManifest {
       eventCount: stats['eventCount'] as int? ?? 0,
       droppedEvents: stats['droppedEvents'] as int? ?? 0,
       checkpointKind: CheckpointKind.values.byName(stats['checkpointKind'] as String? ?? 'launch'),
-      labels: (j['labels'] as Map?)?.cast<String, String>() ?? const {},
+      labels: {
+        for (final e in ((j['labels'] as Map?) ?? const {}).entries) '${e.key}': e.value as String,
+      },
     );
   }
 

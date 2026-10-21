@@ -4,6 +4,7 @@
 library;
 
 export 'src/capsule.dart';
+export 'src/capsule_validator.dart';
 export 'src/codec.dart';
 export 'src/event.dart';
 export 'src/failure.dart';
