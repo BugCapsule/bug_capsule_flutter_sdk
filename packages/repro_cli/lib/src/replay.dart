@@ -10,29 +10,51 @@ import 'term.dart';
 
 enum ReplayKind { replay, verify }
 
+/// The attempts of one `repro run` / `repro verify` and what they prove.
+/// The verdict comes from [evaluateRun] (repro_core), the single source of
+/// the rules for output, exit code and the result recorded on the backend.
 class ReplaySummary {
-  ReplaySummary(this.kind, this.reports, this.buildSha);
+  ReplaySummary(this.kind, this.reports, this.buildSha, {required this.requestedAttempts})
+      : evaluation = evaluateRun(
+            kind == ReplayKind.replay ? RunKind.replay : RunKind.verify, requestedAttempts, reports);
 
   final ReplayKind kind;
   final List<ReplayReport> reports;
   final String? buildSha;
+  final int requestedAttempts;
+  final RunEvaluation evaluation;
 
+  Verdict get verdict => evaluation.verdict;
+
+  /// Attempts that ran (may be fewer than requested).
   int get attempts => reports.length;
   int get reproductions => reports.where((r) => r.outcome == ReplayOutcome.reproduced).length;
-  bool get incompatible => reports.any((r) => r.outcome == ReplayOutcome.incompatible);
-  bool get errored => reports.every((r) => r.outcome == ReplayOutcome.error);
-  bool get noAssertion => reports.any((r) => r.outcome == ReplayOutcome.noAssertion);
+  bool get incompatible => verdict == Verdict.incompatible;
+  bool get inconclusive => verdict == Verdict.inconclusive;
 
-  /// Wire outcome for the backend `runs` endpoint.
-  String get wireOutcome => incompatible
-      ? 'incompatible'
-      : errored
-          ? 'error'
-          : reproductions > 0
-              ? 'reproduced'
-              : 'not_reproduced';
+  /// Outcome for the backend `runs` endpoint.
+  String get wireOutcome => verdict.wire;
 
   int get durationMs => reports.fold(0, (s, r) => s + r.durationMs);
+
+  /// Body of `POST /v1/capsules/{id}/runs`. `attempts` is the number
+  /// requested, so attempts that never ran cannot make a run look complete.
+  Map<String, Object?> runPayload({String? device}) => {
+        'kind': kind.name,
+        'outcome': wireOutcome,
+        'attempts': requestedAttempts < 1 ? 1 : requestedAttempts,
+        'reproductions': reproductions,
+        'validAttempts': evaluation.validAttempts,
+        'gitSha': buildSha,
+        'device': device,
+        'durationMs': durationMs,
+        'details': {
+          'verdict': verdict.name,
+          'reasons': evaluation.reasons.take(50).toList(),
+          'completedAttempts': attempts,
+          'reports': [for (final r in reports) r.toJson()],
+        },
+      };
 }
 
 /// Resolves which source tree to build: the capsule's pinned commit for
@@ -105,7 +127,7 @@ Future<ReplaySummary> replayCapsule({
       break;
     }
   }
-  return ReplaySummary(kind, reports, buildSha);
+  return ReplaySummary(kind, reports, buildSha, requestedAttempts: attempts);
 }
 
 String _attemptLine(ReplayKind kind, ReplayReport r) {
@@ -113,38 +135,49 @@ String _attemptLine(ReplayKind kind, ReplayReport r) {
       ? ' (${(r.compressedMs / 1000).toStringAsFixed(1)}s idle skipped)'
       : '';
   final secs = dim('${(r.durationMs / 1000).toStringAsFixed(1)}s$skipped');
+  final assessment = assessAttempt(r);
+  final invalid = r.outcome == ReplayOutcome.notReproduced &&
+      assessment.status == AttemptStatus.invalid;
   final label = switch (r.outcome) {
     ReplayOutcome.reproduced => kind == ReplayKind.replay ? green('REPRODUCED') : red('STILL FAILS'),
+    ReplayOutcome.notReproduced when invalid => yellow('INVALID'),
     ReplayOutcome.notReproduced => kind == ReplayKind.replay ? yellow('NOT REPRODUCED') : green('PASS'),
     ReplayOutcome.incompatible => red('INCOMPATIBLE'),
     ReplayOutcome.noAssertion => yellow('NO ASSERTION'),
     ReplayOutcome.error => red('ERROR'),
   };
-  final extra = r.message != null ? '  ${dim(r.message!.split('\n').first)}' : '';
+  final note = invalid ? assessment.reasons.first : r.message;
+  final extra = note != null ? '  ${dim(note.split('\n').first)}' : '';
   return '$label  $secs  ${dim('${r.strategy.name}, ${r.eventsDispatched} inputs, ${r.fixturesServed} responses')}$extra';
 }
 
 void printSummary(ReplaySummary s, Capsule capsule) {
-  stdout.writeln();
-  final n = s.attempts;
-  final k = s.reproductions;
-  String verdict;
-  if (s.incompatible) {
-    verdict = '${red('INCOMPATIBLE')} — capsule cannot run against this build';
-  } else if (s.noAssertion) {
-    verdict = '${yellow('NO ASSERTION')} — capsule has no failure to check; replay ran for inspection only';
-  } else if (s.errored) {
-    verdict = '${red('ERROR')} — replay did not complete';
-  } else if (s.kind == ReplayKind.replay) {
-    verdict = k == n
-        ? green('REPRODUCED $k/$n')
-        : k == 0
-            ? yellow('NOT REPRODUCED 0/$n')
-            : yellow('FLAKY $k/$n');
-  } else {
-    verdict = k == 0 ? green('FIXED — failure gone in $n/$n runs') : red('STILL FAILING $k/$n');
+  stdout.writeln(summaryLines(s).join('\n'));
+}
+
+/// The verdict block printed after the attempts.
+List<String> summaryLines(ReplaySummary s) {
+  final lines = <String>[''];
+  final n = s.requestedAttempts;
+  final e = s.evaluation;
+  final k = e.reproductions;
+  final verdict = switch (s.verdict) {
+    Verdict.incompatible => '${red('INCOMPATIBLE')} — capsule cannot run against this build',
+    Verdict.inconclusive => '${yellow('INCONCLUSIVE')} — ${e.validAttempts} of $n attempts ran validly; '
+        'nothing is ${s.kind == ReplayKind.verify ? 'verified' : 'concluded'}',
+    Verdict.reproduced => green('REPRODUCED $k/$n'),
+    Verdict.notReproduced => yellow('NOT REPRODUCED 0/$n'),
+    Verdict.flaky => yellow('FLAKY $k/$n'),
+    Verdict.fixed => green('FIXED — failure gone in $n/$n valid runs'),
+    Verdict.stillFailing => red('STILL FAILING $k/$n'),
+  };
+  lines.add('${bold('Result:')} $verdict');
+  if (!e.succeeded && e.reasons.isNotEmpty) {
+    lines.add(bold('Why:'));
+    for (final r in e.reasons.take(10)) {
+      lines.add('  ${yellow('•')} $r');
+    }
   }
-  stdout.writeln('${bold('Result:')} $verdict');
 
   final divergences = <String, int>{};
   for (final r in s.reports) {
@@ -156,20 +189,17 @@ void printSummary(ReplaySummary s, Capsule capsule) {
     }
   }
   if (divergences.isNotEmpty) {
-    stdout.writeln(bold('Divergences:'));
+    lines.add(bold('Divergences:'));
     for (final e in divergences.entries.take(15)) {
-      stdout.writeln('  ${yellow('•')} ${e.key}${e.value > 1 ? dim(' ×${e.value}') : ''}');
+      lines.add('  ${yellow('•')} ${e.key}${e.value > 1 ? dim(' ×${e.value}') : ''}');
     }
-    if (divergences.length > 15) stdout.writeln(dim('  … ${divergences.length - 15} more'));
+    if (divergences.length > 15) lines.add(dim('  … ${divergences.length - 15} more'));
   }
   final errors = s.reports.where((r) => r.outcome == ReplayOutcome.error && r.message != null);
-  if (errors.isNotEmpty) stdout.writeln(red(errors.first.message!));
+  if (errors.isNotEmpty) lines.add(red(errors.first.message!));
+  return lines;
 }
 
-/// Exit codes: 0 success, 1 opposite of expected, 2 flaky, 3 error/incompatible.
-int exitCodeFor(ReplaySummary s) {
-  if (s.incompatible || s.errored || s.noAssertion) return 3;
-  final k = s.reproductions;
-  if (s.kind == ReplayKind.replay) return k == s.attempts ? 0 : (k == 0 ? 1 : 2);
-  return k == 0 ? 0 : 1;
-}
+/// Exit codes: 0 success (reproduced / fixed), 1 the opposite (not
+/// reproduced / still failing), 2 flaky, 3 inconclusive or incompatible.
+int exitCodeFor(ReplaySummary s) => s.evaluation.exitCode;

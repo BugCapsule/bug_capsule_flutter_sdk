@@ -121,6 +121,7 @@ class ReplayReport {
     this.otherFailures = const [],
     this.divergences = const [],
     this.eventsDispatched = 0,
+    this.eventsExpected,
     this.fixturesServed = 0,
     this.compressedMs = 0,
     this.gapsCompressed = 0,
@@ -146,6 +147,7 @@ class ReplayReport {
             Divergence.fromJson((d as Map).cast<String, Object?>()),
         ],
         eventsDispatched: j['eventsDispatched'] as int? ?? 0,
+        eventsExpected: j['eventsExpected'] as int?,
         fixturesServed: j['fixturesServed'] as int? ?? 0,
         compressedMs: j['compressedMs'] as int? ?? 0,
         gapsCompressed: j['gapsCompressed'] as int? ?? 0,
@@ -162,6 +164,11 @@ class ReplayReport {
   final List<FailureRecord> otherFailures;
   final List<Divergence> divergences;
   final int eventsDispatched;
+
+  /// Recorded inputs this attempt should have dispatched; null from SDKs
+  /// that predate the field. A run without the failure is only conclusive
+  /// when every one of them was dispatched.
+  final int? eventsExpected;
   final int fixturesServed;
 
   /// Recorded idle time skipped by idle compression; [durationMs] plus this
@@ -181,6 +188,7 @@ class ReplayReport {
         'otherFailures': [for (final f in otherFailures) f.toJson()],
         'divergences': [for (final d in divergences) d.toJson()],
         'eventsDispatched': eventsDispatched,
+        'eventsExpected': eventsExpected,
         'fixturesServed': fixturesServed,
         'compressedMs': compressedMs,
         'gapsCompressed': gapsCompressed,
