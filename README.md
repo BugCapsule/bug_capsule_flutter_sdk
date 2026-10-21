@@ -9,7 +9,7 @@ QA hits a bug ─► capsule auto-captured & uploaded ─► bugcapsule run <id>
                                                     bugcapsule regress add ─► runs in CI
 ```
 
-The capsule holds what replay needs: a storage checkpoint, recorded touches and semantic actions, typed text, lifecycle changes, every HTTP exchange with its latency, BLoC activity, and the failure assertion. All of it is redacted on the device. Replay re-runs the real app code against that recording: network calls are served from the capsule with the same timing, so races and data-dependent bugs come back.
+The capsule holds what replay needs: a storage checkpoint, recorded touches and semantic actions, typed text, lifecycle changes, every HTTP exchange with its latency, state-management activity (BLoC, Riverpod, Provider/ChangeNotifier, GetX, MobX), and the failure assertion. All of it is redacted on the device. Replay re-runs the real app code against that recording: network calls are served from the capsule with the same timing, so races and data-dependent bugs come back.
 
 ## Packages
 
@@ -18,7 +18,12 @@ The capsule holds what replay needs: a storage checkpoint, recorded touches and 
 | [`bug_capsule_core`](packages/bug_capsule_core) | Pure Dart: capsule model ([spec v1](spec/capsule-v1.md)), flight recorder, codec, redaction, network matching |
 | [`bug_capsule_flutter`](packages/bug_capsule_flutter) | `BugCapsule.init`, capture (touches, lifecycle, errors, checkpoints), upload, kill switch, replay engine, QA overlay |
 | [`bug_capsule_bloc`](packages/bug_capsule_bloc) | BLoC/Cubit transitions, state snapshots and restore |
-| [`bug_capsule_dio`](packages/bug_capsule_dio) | Transport-level HTTP capture and deterministic replay with endpoint normalization |
+| [`bug_capsule_riverpod`](packages/bug_capsule_riverpod) | Riverpod 3 provider activity, state snapshots and restore |
+| [`bug_capsule_provider`](packages/bug_capsule_provider) | Provider / `ChangeNotifier` / `ValueNotifier` changes, state snapshots and restore |
+| [`bug_capsule_getx`](packages/bug_capsule_getx) | GetX controller updates and `Rx` changes, state snapshots and restore |
+| [`bug_capsule_mobx`](packages/bug_capsule_mobx) | MobX observable writes, actions and reaction errors; store snapshots and restore |
+| [`bug_capsule_dio`](packages/bug_capsule_dio) | Transport-level HTTP capture and deterministic replay with endpoint normalization (also covers Retrofit) |
+| [`bug_capsule_http`](packages/bug_capsule_http) | The same for `package:http` clients (also covers Chopper and other `http.Client` based APIs) |
 | [`bug_capsule_go_router`](packages/bug_capsule_go_router) | Navigation capture and route restore |
 | [`bug_capsule_storage`](packages/bug_capsule_storage) | SharedPreferences snapshot/restore (allowlist) |
 | [`bug_capsule_cli`](packages/bug_capsule_cli) | `bugcapsule inspect / run / verify / regress / list / pull / push / share / capture` |
@@ -71,6 +76,65 @@ bugCapsuleRouter.attach(router);
 MaterialApp.router(builder: (context, child) => BugCapsuleOverlay(child: child!), ...);
 ```
 
+### Other state management and HTTP clients
+
+Use the integrations that match your app; they can be combined (e.g. Riverpod with `package:http`).
+
+```yaml
+  bug_capsule_riverpod: {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_riverpod}}
+  bug_capsule_provider: {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_provider}}
+  bug_capsule_getx:     {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_getx}}
+  bug_capsule_mobx:     {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_mobx}}
+  bug_capsule_http:     {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule_http}}
+```
+
+```dart
+// Riverpod 3: register providers whose state replay should restore, and add the observer.
+final bugCapsuleRiverpod = BugCapsuleRiverpod(states: [
+  BugCapsuleRiverpodState<Cart>(cartProvider, toJson: (c) => c.toJson(), fromJson: Cart.fromJson),
+]);
+// appRunner: () => runApp(ProviderScope(observers: [bugCapsuleRiverpod.observer], child: const MyApp())),
+
+// Provider / ChangeNotifier / ValueNotifier: track each model where you create it.
+final bugCapsuleNotifiers = BugCapsuleNotifiers();
+ChangeNotifierProvider(
+  create: (_) => bugCapsuleNotifiers.track(CartModel(), id: 'cart',
+      toJson: (m) => m.toJson(), restore: (m, json) => m.replaceWith(CartModel.fromJson(json))),
+  child: ...,
+);
+
+// GetX: track Rx values and GetBuilder controllers where you create them.
+final bugCapsuleGetx = BugCapsuleGetx();
+class CartController extends GetxController {
+  final coupon = bugCapsuleGetx.trackRx(''.obs, id: 'cart.coupon');   // primitives need no serializer
+  final items = bugCapsuleGetx.trackRx(<CartItem>[].obs, id: 'cart.items',
+      toJson: (items) => {'items': [for (final i in items) i.toJson()]},
+      fromJson: (json) => [for (final i in json['items'] as List) CartItem.fromJson(i as Map<String, Object?>)]);
+}
+
+// MobX: observable writes, actions and reaction errors are recorded on their own;
+// track stores whose state replay should restore (restore runs inside an action).
+final bugCapsuleMobx = BugCapsuleMobx();
+final cart = bugCapsuleMobx.track(CartStore(), id: 'cart', toJson: (s) => s.toJson(), restore: (s, json) => s.replaceWith(json));
+
+// package:http (and Chopper, graphql, generated clients): wrap the client.
+final bugCapsuleHttp = BugCapsuleHttp(rules: [EndpointRule('POST', '/api/checkout', ignoreBodyFields: {'nonce'})]);
+final client = bugCapsuleHttp.client();                  // or bugCapsuleHttp.client(existingClient)
+final chopper = ChopperClient(client: bugCapsuleHttp.client(), ...);
+
+// and list them: integrations: [bugCapsuleRiverpod, bugCapsuleNotifiers, bugCapsuleGetx, bugCapsuleMobx, bugCapsuleHttp, ...]
+```
+
+| Library | Integration | Notes |
+|---|---|---|
+| `flutter_bloc` / `bloc` | `BugCapsuleBloc` | global `BlocObserver`, no per-bloc setup |
+| `riverpod` / `flutter_riverpod` / `hooks_riverpod` 3.x | `BugCapsuleRiverpod` | `NotifierProvider`, `AsyncNotifierProvider`, `StreamNotifierProvider` (and families) restore on their own; providers generated by `riverpod_generator` need a `restore:` callback and a registration to be checkpointed |
+| `provider`, `ChangeNotifier`, `ValueNotifier`, any `Listenable` | `BugCapsuleNotifiers` | wrap each model in `track(...)`; `restore:` puts state back |
+| `get` (GetX) | `BugCapsuleGetx` | `trackRx(...)` for `.obs` values, `track(...)` for `GetBuilder` controllers; `update([ids])` is not seen, only `update()` |
+| `mobx` / `flutter_mobx` | `BugCapsuleMobx` | spy-based: no setup for recording; `track(...)` stores to checkpoint and restore them |
+| `dio`, `retrofit` | `BugCapsuleDio` | `attach(dio)` |
+| `http`, `chopper`, anything taking an `http.Client` | `BugCapsuleHttp` | `client(inner)`; same request keys and capsule events as Dio |
+
 Build with the commit pinned so replay can check out the same code:
 
 ```bash
@@ -103,6 +167,18 @@ bugcapsule regress add <id> && bugcapsule regress run  # keep it as a regression
 bugcapsule share <id>                             # expiring public link
 bugcapsule capture --on | --off | --sample-rate 0.05   # remote kill switch and production sampling
 ```
+
+### Other runtimes (CLI 0.3)
+
+The same CLI replays capsules from the native Android, native iOS and web
+SDKs: `bugcapsule run|verify|regress` pick the runtime from `--runtime`,
+`bugcapsule.json` or the project files, refuse capsules from another runtime
+(`INCOMPATIBLE`), and drive an emulator instrumentation, an XCUITest or a
+Playwright browser instead of `flutter run`. Every attempt gets its own token
+and attempt id on the loopback replay server, and late reports are rejected.
+See [docs/cli-runtimes.md](docs/cli-runtimes.md), the runtime contracts in
+[spec/runtimes-v1.md](spec/runtimes-v1.md) and the
+[feature matrix](docs/feature-matrix.md).
 
 ### Verdicts
 
@@ -170,7 +246,7 @@ Production capture works, but it is the riskiest mode. Before rollout:
 1. **Kill switch.** `bugcapsule capture --on` disables capture. The backend refuses uploads from that moment (`403`). Devices see it at their next config refresh: after `configTtlSeconds` (default 5 min), when the app returns to the foreground, or before any upload attempt with a config older than its TTL. They then stop recording, drop the buffer, delete queued and saved captures, and keep the switch across launches even offline. An upload already on the wire finishes. Re-enabling applies from the next app launch. Test it before you need it.
 2. **Remote config.** Fetched after startup, then refreshed on its TTL with exponential backoff (30 s to 30 min, `Retry-After` honoured) and on resume. It is cached per backend URL and ingest key, so a staging config never applies to production. With no cached config (first launch, offline), debug/QA builds record and production builds sample at the app's cap, but **nothing is uploaded until a config fetch succeeds**; a cached config older than `maxStaleConfig` (7 days) also stops uploads. A rejected ingest key (rotated) stops capture for the session. New body and redaction settings apply to the running session, including events already buffered.
 3. **Sampling.** A production session records with probability `min(productionSampleRate, backend sampleRate)`, decided at launch. Lowering the remote rate mid-session keeps a recording session with probability new/old, so the share of recording sessions follows the new rate; raising it applies from the next launch and never above the app's cap (default 0.1). Sessions that aren't sampled install no recorders.
-4. **Redaction.** Applied on the device to events and checkpoints alike, and again to everything integrations record. See the spec's [Redaction](spec/capsule-v1.md#redaction) section for exactly what is caught and what is not. Add `redactKeys`, `redactPatterns`, `beforeRecord` / `beforeCheckpoint` hooks, `BugCapsuleDio(exclude: ...)` for endpoints you must not record and `BugCapsuleGoRouter(sanitizeLocation: ...)` for secrets in paths; then inspect real capsules (`bugcapsule inspect`) before widening the rollout.
+4. **Redaction.** Applied on the device to events and checkpoints alike, and again to everything integrations record. See the spec's [Redaction](spec/capsule-v1.md#redaction) section for exactly what is caught and what is not. Add `redactKeys`, `redactPatterns`, `beforeRecord` / `beforeCheckpoint` hooks, `BugCapsuleDio(exclude: ...)` / `BugCapsuleHttp(exclude: ...)` for endpoints you must not record and `BugCapsuleGoRouter(sanitizeLocation: ...)` for secrets in paths; then inspect real capsules (`bugcapsule inspect`) before widening the rollout.
 5. **Bodies.** Turn off `captureNetworkBodies` (remotely too) for endpoints you can't send; capsules then become `partial`. HTTP capture never buffers whole bodies: bytes stream to the app unchanged and only a bounded prefix is kept (`maxBodyBytes`, 256 KiB; binary 64 KiB). With bodies off nothing is kept for the recording; request bodies up to 64 KiB are still hashed (never stored) so replay can match requests.
 6. **Device storage.** At most 20 saved captures and an upload outbox of 10 capsules / 10 MiB / 7 days (`BugCapsuleConfig.outboxLimits`), oldest evicted first; failed uploads back off from 30 s to 1 h. Disk-full and corrupt files drop the capsule, never the app.
 7. **Isolation.** If storage, an integration's setup or anything else in capture setup fails, the app starts without capture. SDK errors are never thrown into the app's error handlers or callbacks.
@@ -181,7 +257,9 @@ Production capture works, but it is the riskiest mode. Before rollout:
 
 - Replay keeps recorded timing, except that idle gaps between inputs longer than 1.5 s shrink to about 0.3 s when the recording and the replayed app are both idle (no pending response, no recent BLoC activity, no pressed pointer; running animations get up to 2 s to finish). Recorded network latency is never shortened. `--no-compress-idle` replays in real time. App `Timer`s are not tracked, so a timer whose effect is not recorded (say, a plain `setState`) can be skipped over; use `--no-compress-idle` if replay depends on one.
 - `DateTime.now()`, `Timer`s and animations are not virtualized; only `clock.now()` and `BugCapsule.random` are deterministic.
-- Platform channels, native SDKs (Firebase, maps, payments), WebSockets and the `http` package are not captured. Bugs that depend on them are partial at best.
+- Platform channels, native SDKs (Firebase, maps, payments) and WebSockets are not captured. Bugs that depend on them are partial at best. HTTP is captured for Dio and `package:http` clients only (`dart:io` `HttpClient` used directly, `cupertino_http` / `cronet_http` without an `http.Client` wrapper, and GraphQL subscriptions are not).
+- Redux has no integration yet; its state is re-executed by replay but not checkpointed or restored.
+- Riverpod, `ChangeNotifier`, GetX and MobX state injection from periodic checkpoints has the same limits as BLoC: instances are matched by initialization order (`cart#0`), and an `AsyncNotifier` whose `build` finishes after the restore overwrites the restored state.
 - BLoC state injection from periodic checkpoints matches instances by creation order (`CartBloc#0`). BLoCs that dispatch events in their constructor can overwrite restored state. Launch-checkpoint replay (the default for sessions within the 5-minute window) re-executes the session instead and avoids this.
 - Pointer replay assumes the same logical screen size; otherwise the CLI scales coordinates and falls back to semantic actions when they exist.
 - The Android path (`flutter run` + `adb reverse`) is implemented but has not been exercised end to end yet.
@@ -201,7 +279,7 @@ Production capture works, but it is the riskiest mode. Before rollout:
 flutter pub get                       # pub workspace: all packages at once
 (cd packages/bug_capsule_core && dart test) # model, codec, validator + shared fixtures, redaction, verdicts
 (cd packages/bug_capsule_cli && dart test)
-for p in bug_capsule_flutter bug_capsule_dio bug_capsule_bloc bug_capsule_go_router bug_capsule_storage; do (cd packages/$p && flutter test); done
+for p in bug_capsule_flutter bug_capsule_dio bug_capsule_http bug_capsule_bloc bug_capsule_riverpod bug_capsule_provider bug_capsule_getx bug_capsule_mobx bug_capsule_go_router bug_capsule_storage; do (cd packages/$p && flutter test); done
 (cd example/bug_capsule_demo && flutter test)
 dart run bug_capsule_cli:bugcapsule --help
 ```

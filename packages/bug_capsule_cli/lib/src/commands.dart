@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,11 +10,13 @@ import 'backend_client.dart';
 import 'capsule_source.dart';
 import 'inspect.dart';
 import 'launcher.dart';
+import 'processes.dart';
+import 'project_config.dart';
 import 'replay.dart';
 import 'replay_server.dart';
 import 'term.dart';
 
-const version = '0.1.0';
+const version = '0.3.0';
 
 CommandRunner<int> buildRunner() => CommandRunner<int>(
       'bugcapsule',
@@ -99,11 +102,20 @@ class InspectCommand extends Command<int> {
 
 void _addLaunchOptions(ArgParser p) {
   p
+    ..addOption('runtime',
+        allowed: ProjectConfig.runtimes,
+        help: 'App runtime (default: "runtime" in bugcapsule.json, else detected from the project).')
     ..addOption('device', abbr: 'd', help: 'Device id or name (default: first simulator/emulator).')
-    ..addOption('project', abbr: 'p', defaultsTo: '.', help: 'Flutter app directory.')
-    ..addOption('target', abbr: 't', defaultsTo: 'lib/main.dart', help: 'Entry point.')
-    ..addOption('flavor', help: 'Build flavor.')
-    ..addMultiOption('dart-define', help: 'Extra --dart-define values (KEY=VALUE).')
+    ..addOption('project', abbr: 'p', defaultsTo: '.', help: 'App project directory.')
+    ..addOption('target', abbr: 't', defaultsTo: 'lib/main.dart', help: 'Entry point (flutter).')
+    ..addOption('flavor', help: 'Build flavor (flutter).')
+    ..addMultiOption('dart-define', help: 'Extra --dart-define values (KEY=VALUE, flutter).')
+    ..addOption('apk', help: 'Prebuilt app APK (android); skips the Gradle build.')
+    ..addOption('test-apk', help: 'Prebuilt instrumentation APK (android).')
+    ..addOption('xctestrun', help: 'Prebuilt .xctestrun from build-for-testing (ios); skips the build.')
+    ..addOption('app-url', help: 'URL of an already running web app (web); skips build and serve.')
+    ..addOption('attempt-timeout', help: 'Seconds per attempt (default: recorded duration + settle + 45s).')
+    ..addFlag('lan', negatable: false, help: 'Bind the replay server on the LAN (physical devices).')
     ..addOption('strategy',
         allowed: ['auto', 'pointer', 'semantic'], defaultsTo: 'auto', help: 'How input is replayed.')
     ..addOption('settle', defaultsTo: '8', help: 'Seconds to wait for the failure after the last input.')
@@ -113,6 +125,39 @@ void _addLaunchOptions(ArgParser p) {
         defaultsTo: true,
         help: 'Skip long idle gaps between inputs (recorded network latency is always kept).')
     ..addFlag('verbose', abbr: 'v', negatable: false, help: 'Show build and device output.');
+}
+
+Map<String, String> _artifacts(ArgResults args) => {
+      for (final k in const ['apk', 'test-apk', 'xctestrun', 'app-url'])
+        if (args[k] != null) k: args[k] as String,
+    };
+
+/// Resolves the runtime for [project] and refuses a capsule from another one.
+(ProjectConfig, String) _runtimeFor(ArgResults args, String project) {
+  final config = ProjectConfig.load(project);
+  final runtime = config.resolveRuntime(override: args['runtime'] as String?);
+  if (runtime == null) {
+    throw StateError('cannot tell the runtime of $project; pass --runtime or add ${ProjectConfig.fileName}');
+  }
+  return (config, runtime);
+}
+
+/// Stops child processes and runs cleanups on Ctrl-C, then exits 130.
+StreamSubscription<ProcessSignal> _onInterrupt(Future<void> Function() cleanup) =>
+    ProcessSignal.sigint.watch().listen((_) async {
+      stderr.writeln(yellow('\ninterrupted; stopping replay processes'));
+      try {
+        await cleanup();
+      } finally {
+        await Processes.stopAll();
+        exit(130);
+      }
+    });
+
+Duration? _attemptTimeout(ArgResults args, ProjectConfig config) {
+  final raw = args['attempt-timeout'] as String?;
+  if (raw != null) return Duration(milliseconds: (double.parse(raw) * 1000).round());
+  return config.attemptTimeout;
 }
 
 Map<String, String> _defines(ArgResults args, String? sha, bool dirty) => {
@@ -159,53 +204,84 @@ class ReplayCommand extends Command<int> {
           '${m.eligibility.missing.map((x) => x.dependency).join(', ')}');
     }
 
-    final (projectDir, buildSha, dirty) = await resolveTree(
-      loaded,
-      projectDir: args['project'] as String,
-      kind: kind,
-      pin: kind == ReplayKind.replay ? args['pin'] as bool : false,
-    );
-    final device = await pickDevice(args['device'] as String?);
-    stdout.writeln('${bold('Device')} $device');
+    final project = args['project'] as String;
+    final (config, runtime) = _runtimeFor(args, project);
+    stdout.writeln('${bold('Runtime')} $runtime'
+        '${loaded.capsule.manifest.runtime == null ? '' : dim('  (captured: ${m.runtimeName} ${m.runtime?.version ?? ''})')}');
+    final attempts = int.parse(args['runs'] as String);
+    final mismatch = runtimeMismatch(loaded.capsule, runtime);
+    if (mismatch != null) {
+      final summary = incompatibleSummary(kind, attempts, mismatch, runtime: runtime);
+      printSummary(summary, loaded.capsule);
+      await _report(loaded, summary, runtime);
+      return exitCodeFor(summary);
+    }
 
-    final server = await ReplayServer.start();
+    final artifacts = _artifacts(args);
+    final (projectDir, buildSha, dirty) = artifacts.isNotEmpty
+        ? (project, null, false)
+        : await resolveTree(
+            loaded,
+            projectDir: project,
+            kind: kind,
+            pin: kind == ReplayKind.replay ? args['pin'] as bool : false,
+          );
+    final device = runtime == 'flutter' ? await pickDevice(args['device'] as String?) : null;
+    if (device != null) stdout.writeln('${bold('Device')} $device');
+
+    final server = await ReplayServer.start(lan: args['lan'] as bool);
     final launcher = AppLauncher.forOptions(LaunchOptions(
+      runtime: runtime,
+      config: config,
       projectDir: projectDir,
       target: args['target'] as String,
       device: device,
+      deviceQuery: args['device'] as String?,
       dartDefines: _defines(args, buildSha, dirty),
       flavor: args['flavor'] as String?,
       verbose: args['verbose'] as bool,
+      buildSha: buildSha,
+      dirty: dirty,
+      artifacts: artifacts,
     ));
+    final interrupt = _onInterrupt(() async {
+      await launcher.dispose();
+      await server.close();
+    });
     try {
       await launcher.prepare(server);
+      if (device == null) stdout.writeln('${bold('Target')} ${launcher.target}');
       final summary = await replayCapsule(
         loaded: loaded,
         launcher: launcher,
         server: server,
         kind: kind,
-        attempts: int.parse(args['runs'] as String),
+        attempts: attempts,
         strategy: ReplayStrategy.values.byName(args['strategy'] as String),
         settleTimeoutMs: (double.parse(args['settle'] as String) * 1000).round(),
         strictNetwork: !(args['lenient-network'] as bool),
         idleCompression: args['compress-idle'] as bool,
         buildSha: buildSha,
+        runtime: runtime,
+        attemptTimeout: _attemptTimeout(args, config),
       );
       printSummary(summary, loaded.capsule);
-      await _report(loaded, summary, device);
+      await _report(loaded, summary, launcher.target);
       return exitCodeFor(summary);
     } finally {
+      await interrupt.cancel();
       await launcher.dispose();
       await server.close();
+      await Processes.stopAll();
     }
   }
 
-  Future<void> _report(LoadedCapsule loaded, ReplaySummary s, Device device) async {
+  Future<void> _report(LoadedCapsule loaded, ReplaySummary s, String device) async {
     final id = loaded.serverId;
     final creds = Credentials.load();
     if (id == null || creds?.secretKey == null) return;
     try {
-      await BackendClient(creds!).createRun(id, s.runPayload(device: device.toString()));
+      await BackendClient(creds!).createRun(id, s.runPayload(device: device));
       stdout.writeln(dim('Recorded on backend capsule $id (${s.wireOutcome})'));
     } catch (e) {
       stdout.writeln(yellow('! could not record result on backend: $e'));
@@ -279,6 +355,7 @@ class _RegressAdd extends Command<int> {
       'signature': m.failure!.signature,
       'status': 'active',
       'addedAt': DateTime.now().toUtc().toIso8601String(),
+      'runtime': m.runtimeName,
       'lineage': {'serverId': loaded.serverId, 'capturedGitSha': m.gitSha},
       'lastRun': null,
     });
@@ -348,26 +425,43 @@ class _RegressRun extends Command<int> {
       stdout.writeln('No active regression tests.');
       return 0;
     }
-    final device = await pickDevice(args['device'] as String?);
+    final (config, runtime) = _runtimeFor(args, project);
+    final artifacts = _artifacts(args);
+    final device = runtime == 'flutter' ? await pickDevice(args['device'] as String?) : null;
     final first = await loadCapsule('$project/${selected.first['file']}');
-    final (projectDir, sha, dirty) =
-        await resolveTree(first, projectDir: project, kind: ReplayKind.verify, pin: false);
-    final server = await ReplayServer.start();
+    final (projectDir, sha, dirty) = artifacts.isNotEmpty
+        ? (project, null, false)
+        : await resolveTree(first, projectDir: project, kind: ReplayKind.verify, pin: false);
+    final server = await ReplayServer.start(lan: args['lan'] as bool);
     final launcher = AppLauncher.forOptions(LaunchOptions(
+      runtime: runtime,
+      config: config,
       projectDir: projectDir,
       target: args['target'] as String,
       device: device,
+      deviceQuery: args['device'] as String?,
       dartDefines: _defines(args, sha, dirty),
       flavor: args['flavor'] as String?,
       verbose: args['verbose'] as bool,
+      buildSha: sha,
+      dirty: dirty,
+      artifacts: artifacts,
     ));
+    final interrupt = _onInterrupt(() async {
+      suite.save(tests);
+      await launcher.dispose();
+      await server.close();
+    });
     var failed = 0;
     try {
       await launcher.prepare(server);
       for (final t in selected) {
         stdout.writeln('\n${bold('${t['name']}')} ${dim(shortId('${t['capsuleId']}'))}');
         final loaded = await loadCapsule('$project/${t['file']}');
-        final s = await replayCapsule(
+        final mismatch = runtimeMismatch(loaded.capsule, runtime);
+        final s = mismatch != null
+            ? incompatibleSummary(ReplayKind.verify, int.parse(args['runs'] as String), mismatch, runtime: runtime)
+            : await replayCapsule(
           loaded: loaded,
           launcher: launcher,
           server: server,
@@ -378,6 +472,8 @@ class _RegressRun extends Command<int> {
           strictNetwork: !(args['lenient-network'] as bool),
           idleCompression: args['compress-idle'] as bool,
           buildSha: sha,
+          runtime: runtime,
+          attemptTimeout: _attemptTimeout(args, config),
         );
         final String result;
         switch (s.verdict) {
@@ -410,9 +506,11 @@ class _RegressRun extends Command<int> {
         stdout.writeln('  → ${result == 'pass' ? green(result) : result == 'fail' ? red(result) : yellow(result)}');
       }
     } finally {
+      await interrupt.cancel();
       suite.save(tests);
       await launcher.dispose();
       await server.close();
+      await Processes.stopAll();
     }
     stdout.writeln();
     stdout.writeln(failed == 0

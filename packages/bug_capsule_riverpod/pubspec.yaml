@@ -1,0 +1,19 @@
+name: bug_capsule_riverpod
+description: Riverpod integration for BugCapsule — records provider updates and snapshots/restores registered provider state.
+version: 0.1.0
+repository: https://github.com/draz26648/bug_capsule_flutter_sdk
+resolution: workspace
+
+environment:
+  sdk: ^3.9.0
+  flutter: ">=3.35.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  riverpod: ^3.0.0
+  bug_capsule_flutter: ^0.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

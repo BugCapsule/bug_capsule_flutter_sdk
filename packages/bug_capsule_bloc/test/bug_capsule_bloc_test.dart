@@ -59,7 +59,7 @@ void main() {
     final cubit = TokenCubit()..bump();
     final snapshot = bloc.snapshot(CheckpointKind.periodic).toString();
     expect(snapshot, isNot(contains('synthBlocToken1')));
-    expect(session.events.toString(), isNot(contains('synthBlocToken1')));
+    expect([for (final e in session.events) e.data].toString(), isNot(contains('synthBlocToken1')));
     await cubit.close();
   });
 

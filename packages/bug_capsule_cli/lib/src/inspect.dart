@@ -19,14 +19,26 @@ void printInspect(Capsule c, {int timeline = 40, bool json = false}) {
     ..writeln('  source     ${m.gitSha == null ? yellow('no git SHA') : m.gitSha!}'
         '${m.dirty == true ? yellow(' (dirty)') : ''}')
     ..writeln('  platform   ${m.platform.os} ${m.platform.osVersion}  '
-        '${m.platform.screenWidth.toStringAsFixed(0)}×${m.platform.screenHeight.toStringAsFixed(0)} @${m.platform.pixelRatio}x  '
-        '${dim('dart ${m.platform.dartVersion}')}')
+        '${m.platform.screenWidth.toStringAsFixed(0)}×${m.platform.screenHeight.toStringAsFixed(0)} @${m.platform.pixelRatio}x'
+        '${m.platform.dartVersion.isEmpty ? '' : '  ${dim('dart ${m.platform.dartVersion}')}'}')
+    ..writeln('  runtime    ${m.runtimeName}${m.runtime?.version == null ? '' : ' ${m.runtime!.version}'}'
+        '${m.runtime?.language == null ? '' : dim('  ${m.runtime!.language}')}'
+        '${(m.runtime?.frameworks ?? const []).isEmpty ? '' : dim('  frameworks: ${m.runtime!.frameworks.join(', ')}')}'
+        '${m.runtime == null ? dim('  (inferred from sdk.name)') : ''}')
     ..writeln('  sdk        ${m.sdkName} ${m.sdkVersion}  ${dim('integrations: ${m.integrations.join(', ')}')}')
     ..writeln('  session    ${(m.session.durationMs / 1000).toStringAsFixed(1)}s recorded, '
         '${m.eventCount} events${m.droppedEvents > 0 ? ', ${m.droppedEvents} evicted' : ''}, '
         'checkpoint: ${m.checkpointKind.name}');
   if (m.labels.isNotEmpty) {
     stdout.writeln('  labels     ${m.labels.entries.map((e) => '${e.key}=${e.value}').join(', ')}');
+  }
+  if (m.capabilities.isNotEmpty) {
+    final limited = [
+      for (final e in m.capabilities.entries)
+        if (e.value != 'supported') '${e.key}=${e.value}',
+    ];
+    stdout.writeln('  capability ${m.capabilities.length} declared'
+        '${limited.isEmpty ? ', all supported' : dim('  not fully supported: ${limited.join(', ')}')}');
   }
 
   stdout.writeln();
@@ -101,6 +113,19 @@ String _describe(BugCapsuleEvent e) {
     EventTypes.blocState => '${d['key']} → ${d['state']}',
     EventTypes.blocCreate || EventTypes.blocClose => '${d['key']}',
     EventTypes.blocError => '${d['key']}: ${d['error']}',
+    EventTypes.riverpodAdd || EventTypes.riverpodUpdate => '${d['key']} → ${d['state']}',
+    EventTypes.riverpodDispose ||
+    EventTypes.notifierCreate ||
+    EventTypes.notifierChange ||
+    EventTypes.getxCreate ||
+    EventTypes.getxChange ||
+    EventTypes.mobxCreate ||
+    EventTypes.mobxChange =>
+      '${d['key']}',
+    EventTypes.mobxObservable => '${d['name']}${d.containsKey('value') ? ' = ${d['value']}' : ''}',
+    EventTypes.mobxAction => '${d['name']}',
+    EventTypes.mobxError => '${d['reaction']}: ${d['error']}',
+    EventTypes.riverpodError => '${d['key']}: ${d['error']}',
     EventTypes.failure => red('${d['signature']}'),
     EventTypes.log => '${d['message']}',
     _ => jsonEncode(d),
