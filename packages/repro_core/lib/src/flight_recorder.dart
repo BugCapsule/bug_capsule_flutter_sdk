@@ -42,12 +42,15 @@ class FlightRecorder {
   final int windowMs;
   final int maxCheckpoints;
 
-  final Checkpoint _launch;
+  Checkpoint _launch;
   final ListQueue<ReproEvent> _events = ListQueue();
   final List<Checkpoint> _periodic = [];
   int _seq = 0;
   int _dropped = 0;
   int _lastEvictedSeq = 0;
+
+  /// Events removed by [rewrite] over the session.
+  int rewriteDropped = 0;
 
   int get lastSeq => _seq;
   int get eventCount => _events.length;
@@ -65,6 +68,36 @@ class FlightRecorder {
     assert(checkpoint.kind == CheckpointKind.periodic);
     _periodic.add(checkpoint);
     _prune();
+  }
+
+  /// Rewrites every retained event and checkpoint in place, e.g. to apply
+  /// redaction rules that arrived after they were recorded. Sequence numbers
+  /// and times must be kept; returning null drops the event (counted in
+  /// [rewriteDropped]).
+  void rewrite({
+    ReproEvent? Function(ReproEvent event)? event,
+    Checkpoint Function(Checkpoint checkpoint)? checkpoint,
+  }) {
+    if (event != null) {
+      final updated = <ReproEvent>[];
+      for (final e in _events) {
+        final r = event(e);
+        if (r == null) {
+          rewriteDropped++;
+        } else {
+          updated.add(r);
+        }
+      }
+      _events
+        ..clear()
+        ..addAll(updated);
+    }
+    if (checkpoint != null) {
+      _launch = checkpoint(_launch);
+      for (var i = 0; i < _periodic.length; i++) {
+        _periodic[i] = checkpoint(_periodic[i]);
+      }
+    }
   }
 
   /// Builds a checkpoint stamped with the current sequence number.
