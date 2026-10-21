@@ -82,7 +82,7 @@ flutter build ipa --dart-define=REPRO_GIT_SHA=$(git rev-parse HEAD) --dart-defin
 | Hook | Why |
 |---|---|
 | `onPressed: Repro.action('cart.checkout', () => ...)` | Semantic replay when the developer's screen differs from QA's |
-| `Repro.trackText('login.email', controller)` | Typed text is replayed; sensitive ids (`password`, `otp`, …) are redacted |
+| `Repro.trackText('login.email', controller)` | Typed text is replayed; sensitive ids (`password`, `otp`, …) are redacted, and `sensitive: true` redacts any field (use it for every obscured field) |
 | `Repro.check('cart_total_non_negative', total >= 0)` / `Repro.fail(id)` | Wrong behaviour that doesn't throw becomes a checkable failure |
 | `clock.now()` (package `clock`) instead of `DateTime.now()` | Replay restores the recorded wall clock |
 | `Repro.random` instead of `Random()` | Seeded per session, the same seed on replay |
@@ -104,7 +104,40 @@ repro share <id>                             # expiring public link
 repro capture --on | --off | --sample-rate 0.05   # remote kill switch and production sampling
 ```
 
-`run`/`verify` exit codes: `0` expected outcome, `1` opposite, `2` flaky, `3` incompatible or error. Results are recorded on the backend, so a capsule moves `new → reproduced → fixed`.
+### Verdicts
+
+`run` and `verify` judge every attempt, then the batch:
+
+* An attempt **reproduced** when the original failure assertion fired.
+* An attempt is **clean** only when it ran to the end as recorded: it has a
+  failure assertion to check, every recorded input was dispatched, no other
+  failure fired, and nothing *material* diverged. Material: unregistered
+  actions, untracked text fields, failed or missing restoration (an
+  integration that captured data is missing or failed to restore), requests
+  without a recorded response, responses replayed without their body, reused
+  responses, dispatch errors, values that were redacted on the device and
+  replayed as placeholders (a missing token or OTP can send the app down
+  another path), and any divergence this version does not know. Expected
+  differences do not count: a changed commit (`build.gitSha`), a different
+  screen size, and recorded responses the replay never asked for. To verify
+  flows behind a login, keep the login state out of the deny list for QA
+  builds (e.g. a test account whose token you allow) or exclude it from the
+  failing flow.
+* Anything else is **invalid**: errors, incompatible capsules, no assertion.
+
+| `repro run` (replay) | `repro verify` | exit |
+|---|---|---|
+| `REPRODUCED` every requested attempt reproduced | `FIXED` every requested attempt clean | 0 |
+| `NOT REPRODUCED` every requested attempt clean | `STILL FAILING` reproduced, no clean attempt | 1 |
+| `FLAKY` both reproduced and clean attempts | `FLAKY` | 2 |
+| `INCONCLUSIVE` / `INCOMPATIBLE` anything else | `INCONCLUSIVE` / `INCOMPATIBLE` | 3 |
+
+Attempts that never ran count against the requested number, so one clean
+attempt plus one error is `INCONCLUSIVE`, never `FIXED`. The verdict is
+recorded on the backend with the number of valid attempts; the backend moves a
+capsule to `fixed` only for a verify where every requested attempt was valid
+(and rejects contradictory results). `repro regress run` treats `INCONCLUSIVE`
+as a failure.
 
 On an iOS simulator the CLI builds once, then launches the installed app for each attempt. It hands over the replay request through a file in the app's sandbox, because environment variables don't reach the app on recent simulator runtimes. Other devices use `flutter run` with a dart-define for each attempt.
 
@@ -134,14 +167,17 @@ Measured on an iPhone 18 Pro simulator (iOS 27, Flutter 3.47.7): the race, legac
 
 Production capture works, but it is the riskiest mode. Before rollout:
 
-1. **Kill switch.** `repro capture --on` stops capture and uploads on the next config refresh (cached config is read at startup and refreshed in the background, `configTtlSeconds`). Test it before you need it.
-2. **Sampling.** A production session records with probability `min(productionSampleRate, backend sampleRate)`. The app's cap defaults to 0.1, so the backend can lower sampling (`repro capture --sample-rate 0.01`) without a release but never raise it past what shipped. Sessions that aren't sampled install no recorders.
-3. **Redaction.** Auth headers, cookies, and keys containing `password`/`token`/`secret`/`otp`/`pin`/`cvv`/`card…` are replaced on the device. Add your own with `redactKeys`, and inspect real capsules (`repro inspect`) before widening the rollout.
-4. **Bodies.** Turn off `captureNetworkBodies` for endpoints you can't send (capsules then become `partial`).
-5. **Performance.** Measure cold start, frame times and memory on a low-end Android device with and without Repro. Pointer and HTTP capture run on the UI isolate; capsule encoding runs in a background isolate.
-6. **Release builds never enter replay mode** (`REPRO_REPLAY_URL` and replay request files are ignored when `kReleaseMode`).
+1. **Kill switch.** `repro capture --on` disables capture. The backend refuses uploads from that moment (`403`). Devices see it at their next config refresh: after `configTtlSeconds` (default 5 min), when the app returns to the foreground, or before any upload attempt with a config older than its TTL. They then stop recording, drop the buffer, delete queued and saved captures, and keep the switch across launches even offline. An upload already on the wire finishes. Re-enabling applies from the next app launch. Test it before you need it.
+2. **Remote config.** Fetched after startup, then refreshed on its TTL with exponential backoff (30 s to 30 min, `Retry-After` honoured) and on resume. It is cached per backend URL and ingest key, so a staging config never applies to production. With no cached config (first launch, offline), debug/QA builds record and production builds sample at the app's cap, but **nothing is uploaded until a config fetch succeeds**; a cached config older than `maxStaleConfig` (7 days) also stops uploads. A rejected ingest key (rotated) stops capture for the session. New body and redaction settings apply to the running session, including events already buffered.
+3. **Sampling.** A production session records with probability `min(productionSampleRate, backend sampleRate)`, decided at launch. Lowering the remote rate mid-session keeps a recording session with probability new/old, so the share of recording sessions follows the new rate; raising it applies from the next launch and never above the app's cap (default 0.1). Sessions that aren't sampled install no recorders.
+4. **Redaction.** Applied on the device to events and checkpoints alike, and again to everything integrations record. See the spec's [Redaction](spec/capsule-v1.md#redaction) section for exactly what is caught and what is not. Add `redactKeys`, `redactPatterns`, `beforeRecord` / `beforeCheckpoint` hooks, `ReproDio(exclude: ...)` for endpoints you must not record and `ReproGoRouter(sanitizeLocation: ...)` for secrets in paths; then inspect real capsules (`repro inspect`) before widening the rollout.
+5. **Bodies.** Turn off `captureNetworkBodies` (remotely too) for endpoints you can't send; capsules then become `partial`. HTTP capture never buffers whole bodies: bytes stream to the app unchanged and only a bounded prefix is kept (`maxBodyBytes`, 256 KiB; binary 64 KiB). With bodies off nothing is kept for the recording; request bodies up to 64 KiB are still hashed (never stored) so replay can match requests.
+6. **Device storage.** At most 20 saved captures and an upload outbox of 10 capsules / 10 MiB / 7 days (`ReproConfig.outboxLimits`), oldest evicted first; failed uploads back off from 30 s to 1 h. Disk-full and corrupt files drop the capsule, never the app.
+7. **Isolation.** If storage, an integration's setup or anything else in capture setup fails, the app starts without capture. SDK errors are never thrown into the app's error handlers or callbacks.
+8. **Performance.** Measure cold start, frame times and memory on a low-end Android device with and without Repro ([plan](docs/release-and-device-test-plan.md)). Pointer and HTTP capture and redaction run on the UI isolate; capsule encoding runs in a background isolate.
+9. **Release builds never enter replay mode** (`REPRO_REPLAY_URL` and replay request files are ignored when `kReleaseMode`).
 
-## Known limitations (v0.1)
+## Known limitations (v0.2)
 
 - Replay keeps recorded timing, except that idle gaps between inputs longer than 1.5 s shrink to about 0.3 s when the recording and the replayed app are both idle (no pending response, no recent BLoC activity, no pressed pointer; running animations get up to 2 s to finish). Recorded network latency is never shortened. `--no-compress-idle` replays in real time. App `Timer`s are not tracked, so a timer whose effect is not recorded (say, a plain `setState`) can be skipped over; use `--no-compress-idle` if replay depends on one.
 - `DateTime.now()`, `Timer`s and animations are not virtualized; only `clock.now()` and `Repro.random` are deterministic.
@@ -149,12 +185,31 @@ Production capture works, but it is the riskiest mode. Before rollout:
 - BLoC state injection from periodic checkpoints matches instances by creation order (`CartBloc#0`). BLoCs that dispatch events in their constructor can overwrite restored state. Launch-checkpoint replay (the default for sessions within the 5-minute window) re-executes the session instead and avoids this.
 - Pointer replay assumes the same logical screen size; otherwise the CLI scales coordinates and falls back to semantic actions when they exist.
 - The Android path (`flutter run` + `adb reverse`) is implemented but has not been exercised end to end yet.
+- Redaction is pattern based. It does not recognise personal data that is not a credential (names, emails, addresses) or secrets in URL paths; use the hooks above.
+- A request whose server answers before the request body was fully sent is keyed without its body hash; replay may then report it as unrecorded.
+- Capsules captured by SDK 0.1 with body capture off were keyed without body hashes; replaying them with 0.2 reports those requests as unrecorded.
+
+## Upgrading from 0.1
+
+- `ReproSession` gained no members; `Repro.resetForTest()` now returns a `Future` (await it in tests).
+- The upload outbox is now bounded; files left by 0.1 are kept and count toward the limits.
+- CLI 0.2 reports verdicts with `validAttempts`. The backend (0.2) no longer moves a capsule to `fixed` (or `not_reproduced`) on results from CLI 0.1, which could not tell an errored attempt from a passing one; update the CLI.
 
 ## Development
 
 ```bash
 flutter pub get                       # pub workspace: all packages at once
-(cd packages/repro_core && dart test)
-(cd packages/repro_dio && flutter test)
+(cd packages/repro_core && dart test) # model, codec, validator + shared fixtures, redaction, verdicts
+(cd packages/repro_cli && dart test)
+for p in repro_flutter repro_dio repro_bloc repro_go_router repro_storage; do (cd packages/$p && flutter test); done
+(cd example/repro_demo && flutter test)
 dart run repro_cli:repro --help
 ```
+
+`spec/fixtures/capsule-v1` holds valid and malformed capsules that both this
+SDK and the backend test against; change them here and copy them to the
+backend's `test/fixtures/capsule-v1` (its test suite fails when they differ).
+
+Release builds, real-device checks and the overhead budget:
+[docs/release-and-device-test-plan.md](docs/release-and-device-test-plan.md).
+End-to-end onboarding with the demo app: [docs/onboarding.md](docs/onboarding.md).
