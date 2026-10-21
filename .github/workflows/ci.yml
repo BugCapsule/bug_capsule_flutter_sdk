@@ -20,24 +20,16 @@ jobs:
       - run: flutter pub get
       - name: Analyze
         run: |
-          for p in packages/* example/bug_capsule_demo; do
+          for p in packages/bug_capsule example/bug_capsule_demo; do
             (cd "$p" && flutter analyze --no-pub) || exit 1
           done
-      # Pure Dart: capsule model, codec, validator + shared fixtures,
-      # redaction, verdict rules.
-      - name: bug_capsule_core tests
-        working-directory: packages/bug_capsule_core
-        run: dart test
-      # Verdicts, exit codes and backend payloads of run / verify / regress.
-      - name: bug_capsule_cli tests
-        working-directory: packages/bug_capsule_cli
-        run: dart test
-      # Runtime isolation, remote config + kill switch, outbox, integrations.
-      - name: Flutter package tests
-        run: |
-          for p in bug_capsule_flutter bug_capsule_dio bug_capsule_http bug_capsule_bloc bug_capsule_riverpod bug_capsule_provider bug_capsule_getx bug_capsule_mobx bug_capsule_go_router bug_capsule_storage; do
-            (cd "packages/$p" && flutter test --no-pub) || exit 1
-          done
+      # Core (capsule model, codec, validator + shared fixtures, redaction,
+      # verdict rules), CLI (verdicts, exit codes and backend payloads of
+      # run / verify / regress), runtime (isolation, remote config + kill
+      # switch, outbox) and every integration.
+      - name: bug_capsule tests
+        working-directory: packages/bug_capsule
+        run: flutter test --no-pub
       - name: Demo app widget smoke test
         working-directory: example/bug_capsule_demo
         run: flutter test --no-pub
