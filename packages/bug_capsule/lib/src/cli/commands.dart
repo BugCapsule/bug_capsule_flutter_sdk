@@ -71,7 +71,7 @@ String _rest(Command<int> c, String what) {
 
 BackendClient _client() {
   final creds = Credentials.load();
-  if (creds == null) throw StateError('no backend configured; run `bugcapsule login --url ... --secret-key ...`');
+  if (creds == null) throw StateError('no backend configured; run `bugcapsule login --url ... --token ...`');
   return BackendClient(creds);
 }
 
@@ -281,7 +281,7 @@ class ReplayCommand extends Command<int> {
   Future<void> _report(LoadedCapsule loaded, ReplaySummary s, String device) async {
     final id = loaded.serverId;
     final creds = Credentials.load();
-    if (id == null || creds?.secretKey == null) return;
+    if (id == null || creds?.projectCredential == null) return;
     try {
       await BackendClient(creds!).createRun(id, s.runPayload(device: device));
       stdout.writeln(dim('Recorded on backend capsule $id (${s.wireOutcome})'));
@@ -528,25 +528,41 @@ class LoginCommand extends Command<int> {
   LoginCommand() {
     argParser
       ..addOption('url', mandatory: true, help: 'Backend URL, e.g. http://127.0.0.1:8787')
-      ..addOption('secret-key', help: 'Project secret key (bcs_...).')
+      ..addOption('token',
+          help: 'Your personal token (bcp_...) from the dashboard: Project Settings › Keys & CLI access. '
+              'Or a service token (bcv_...) in CI.')
+      ..addOption('secret-key', help: 'Legacy: the project secret key (bcs_...), shared full access.')
       ..addOption('ingest-key', help: 'Project ingest key (bci_...), for `bugcapsule push`.');
   }
 
   @override
   String get name => 'login';
   @override
-  String get description => 'Save backend URL and keys to ~/.bugcapsule/config.json.';
+  String get description => 'Save the backend URL and your token (or keys) to ~/.bugcapsule/config.json.';
 
   @override
   Future<int> run() async {
+    var token = argResults!['token'] as String?;
+    var secretKey = argResults!['secret-key'] as String?;
+    if (token != null && secretKey != null) throw UsageException('use --token or --secret-key, not both', usage);
+    // A token given as --secret-key (CLI 0.4.0 docs) is stored as a token.
+    if (token == null && secretKey != null && Credentials.isToken(secretKey)) {
+      token = secretKey;
+      secretKey = null;
+    }
+    if (token != null && !Credentials.isToken(token)) {
+      throw UsageException('--token takes a personal (bcp_...) or service (bcv_...) token; a bcs_ project key goes in --secret-key', usage);
+    }
     final creds = Credentials(
       url: argResults!['url'] as String,
-      secretKey: argResults!['secret-key'] as String?,
+      token: token,
+      secretKey: secretKey,
       ingestKey: argResults!['ingest-key'] as String?,
     );
-    if (creds.secretKey != null) {
+    if (creds.projectCredential != null) {
       final project = await BackendClient(creds).project();
-      stdout.writeln('${green('✓')} project "${project['name']}" (${project['id']})');
+      final how = token == null ? 'the shared project secret key (legacy)' : token.startsWith('bcp_') ? 'your personal token' : 'a service token';
+      stdout.writeln('${green('✓')} project "${project['name']}" (${project['id']}) with $how');
     }
     creds.save();
     stdout.writeln('Saved ${Credentials.file.path}');

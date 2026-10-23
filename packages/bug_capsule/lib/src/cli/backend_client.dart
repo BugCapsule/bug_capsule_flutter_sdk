@@ -3,27 +3,46 @@ import 'dart:io';
 
 /// Stored at ~/.bugcapsule/config.json (mode 600).
 class Credentials {
-  const Credentials({required this.url, this.secretKey, this.ingestKey});
+  const Credentials({required this.url, this.secretKey, this.ingestKey, this.token});
 
   factory Credentials.fromJson(Map<String, Object?> j) => Credentials(
         url: j['url'] as String,
         secretKey: j['secretKey'] as String?,
         ingestKey: j['ingestKey'] as String?,
+        token: j['token'] as String?,
       );
 
   final String url;
+
+  /// Legacy: the project's shared secret key (bcs_), full access to the project.
   final String? secretKey;
   final String? ingestKey;
 
-  Map<String, Object?> toJson() => {'url': url, 'secretKey': secretKey, 'ingestKey': ingestKey};
+  /// A personal (bcp_) or service (bcv_) token from the dashboard's
+  /// Keys & CLI access page: bound to one project, scoped, expiring and
+  /// revocable on its own. Preferred over [secretKey] when both are set.
+  final String? token;
+
+  /// What project requests are authorized with.
+  String? get projectCredential => token ?? secretKey;
+
+  Map<String, Object?> toJson() => {
+        'url': url,
+        if (token != null) 'token': token,
+        if (secretKey != null) 'secretKey': secretKey,
+        'ingestKey': ingestKey,
+      };
+
+  /// Personal and service tokens; anything else is a legacy key.
+  static bool isToken(String value) => value.startsWith('bcp_') || value.startsWith('bcv_');
 
   static File get file {
     final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
     return File('$home/.bugcapsule/config.json');
   }
 
-  /// Environment variables win over the file: BUGCAPSULE_URL, BUGCAPSULE_SECRET_KEY,
-  /// BUGCAPSULE_INGEST_KEY.
+  /// Environment variables win over the file: BUGCAPSULE_URL, BUGCAPSULE_TOKEN,
+  /// BUGCAPSULE_SECRET_KEY, BUGCAPSULE_INGEST_KEY.
   static Credentials? load() {
     final env = Platform.environment;
     Credentials? fromFile;
@@ -37,6 +56,7 @@ class Credentials {
       url: url,
       secretKey: env['BUGCAPSULE_SECRET_KEY'] ?? fromFile?.secretKey,
       ingestKey: env['BUGCAPSULE_INGEST_KEY'] ?? fromFile?.ingestKey,
+      token: env['BUGCAPSULE_TOKEN'] ?? fromFile?.token,
     );
   }
 
@@ -53,7 +73,15 @@ class ApiException implements Exception {
   final String code;
   final String detail;
   @override
-  String toString() => 'HTTP $status $code${detail.isEmpty ? '' : ': $detail'}';
+  String toString() {
+    final base = 'HTTP $status $code${detail.isEmpty ? '' : ': $detail'}';
+    if (status == 401) {
+      return '$base\nThe token or key was refused: it may be wrong, expired or revoked, or you were removed from the project. '
+          'Issue a new personal token in the dashboard (Project Settings › Keys & CLI access) and run `bugcapsule login --url <backend> --token <token>`.';
+    }
+    if (status == 403) return '$base\nYour role or this token’s scopes don’t allow it; ask a project admin.';
+    return base;
+  }
 }
 
 class BackendClient {
@@ -67,10 +95,11 @@ class BackendClient {
   }
 
   String _key({bool ingest = false}) {
-    final key = ingest ? credentials.ingestKey : credentials.secretKey;
+    final key = ingest ? credentials.ingestKey : credentials.projectCredential;
     if (key == null) {
-      throw StateError(
-          'no ${ingest ? 'ingest' : 'secret'} key; run `bugcapsule login` or set BUGCAPSULE_${ingest ? 'INGEST' : 'SECRET'}_KEY');
+      throw StateError(ingest
+          ? 'no ingest key; run `bugcapsule login --ingest-key ...` or set BUGCAPSULE_INGEST_KEY'
+          : 'not signed in to a project; run `bugcapsule login --url <backend> --token <token>` or set BUGCAPSULE_TOKEN');
     }
     return key;
   }
