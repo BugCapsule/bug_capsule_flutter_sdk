@@ -61,7 +61,9 @@ class CartState {
   double get discount => switch (coupon) {
         'SAVE10' => subtotal * 0.1,
         // Bug: a fixed discount larger than the cart makes the total negative.
-        'SAVE100' => 100,
+        'SAVE100' => const bool.fromEnvironment('BUGCAPSULE_DEMO_FIX_COUPON')
+            ? (subtotal < 100 ? subtotal : 100)
+            : 100,
         _ => 0,
       };
   double get total => subtotal - discount;

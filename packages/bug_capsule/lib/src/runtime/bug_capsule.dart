@@ -53,7 +53,7 @@ class CaptureResult {
 @visibleForTesting
 class BugCapsuleTestOverrides {
   const BugCapsuleTestOverrides(
-      {this.storageDirectory, this.transport, this.envelopeTransport, this.random, this.setupTimeout});
+      {this.storageDirectory, this.transport, this.envelopeTransport, this.random, this.setupTimeout, this.encodeCapsule});
 
   final Directory? storageDirectory;
   final BugCapsuleTransport? transport;
@@ -63,6 +63,9 @@ class BugCapsuleTestOverrides {
   final EnvelopeTransport? envelopeTransport;
   final Random? random;
   final Duration? setupTimeout;
+
+  /// Deterministic encoding boundary for capture cancellation tests.
+  final Future<List<int>> Function(Capsule)? encodeCapsule;
 }
 
 /// Entry point of the BugCapsule SDK.
@@ -1027,7 +1030,7 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
 
     // Never queue what a reader would reject; keep it locally for inspection.
     final problem = validateCapsuleDocument(CapsuleCodec.toJson(capsule));
-    final bytes = await compute(_encodeCapsule, capsule);
+    final bytes = await (_overrides?.encodeCapsule?.call(capsule) ?? compute(_encodeCapsule, capsule));
     // The kill switch fired while encoding: drop the capsule.
     if (_killed) return null;
     final s = await store!;

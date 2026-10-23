@@ -398,3 +398,9 @@ backend's `test/fixtures/capsule-v1` (its test suite fails when they differ).
 Release builds, real-device checks and the overhead budget:
 [docs/release-and-device-test-plan.md](docs/release-and-device-test-plan.md).
 End-to-end onboarding with the demo app: [docs/onboarding.md](docs/onboarding.md).
+
+## Release validation (2026-10-23)
+
+This repository is licensed under Apache-2.0 (see LICENSE). Local candidates are
+prepared without publishing. See `docs/release-readiness.md` for the current
+validation evidence and remaining release gates.

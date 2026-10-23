@@ -23,3 +23,5 @@ coverage/
 # Local capsules
 *.bugcapsule
 !**/test/fixtures/*.bugcapsule
+
+/dist/
