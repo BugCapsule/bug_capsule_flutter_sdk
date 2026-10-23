@@ -227,7 +227,7 @@ class _SymbolsUploadCommand extends Command<int> {
       return 0;
     }
     final creds = Credentials.load();
-    if (creds == null) throw StateError('no backend configured; run `bugcapsule login --url ... --secret-key ...`');
+    if (creds == null) throw StateError('no backend configured; run `bugcapsule login --url ... --token ...`');
     final client = BackendClient(creds);
     for (final u in plan) {
       await client.uploadDebugFile(u.kind, u.query, await u.file.readAsBytes());
