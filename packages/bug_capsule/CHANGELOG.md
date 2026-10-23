@@ -1,3 +1,8 @@
+## 0.4.1-beta.1
+
+- Public beta packaging of the validated 0.4.0 SDK and multi-runtime CLI.
+- Updated package repository metadata and prerelease version.
+
 ## 0.4.0
 
 - Unify the Flutter integrations and multi-runtime replay CLI in `bug_capsule`.

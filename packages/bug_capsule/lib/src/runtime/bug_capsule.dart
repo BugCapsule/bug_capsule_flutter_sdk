@@ -25,7 +25,7 @@ import 'replay_engine.dart';
 // The capsule's `sdk.name`: the backend and CLI read it to pick the Flutter
 // runtime, so it keeps the old package name.
 const _sdkName = 'bug_capsule_flutter';
-const _sdkVersion = '0.4.0';
+const _sdkVersion = '0.4.1-beta.1';
 
 List<int> _encodeCapsule(Capsule capsule) => CapsuleCodec.encode(capsule);
 
