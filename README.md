@@ -252,7 +252,8 @@ Android and iOS SDKs, not from Dart.
 ```bash
 dart pub global activate --source git https://github.com/draz26648/bug_capsule_flutter_sdk --git-path packages/bug_capsule
 # or, inside an app that depends on bug_capsule: dart run bug_capsule:bugcapsule <command>
-bugcapsule login --url http://127.0.0.1:8787 --secret-key bcs_... --ingest-key bci_...
+bugcapsule login --url http://127.0.0.1:8787 --token bcp_...   # your personal token (dashboard: Project Settings › Keys & CLI access)
+# legacy, a backend without accounts: --secret-key bcs_... (the project's shared secret key)
 
 bugcapsule list                                   # capsules on the backend
 bugcapsule inspect <id|file|share-url>            # failure, eligibility, network, timeline
@@ -261,8 +262,17 @@ bugcapsule verify <id> -n 5                       # replay on your working tree;
 bugcapsule regress add <id> && bugcapsule regress run  # keep it as a regression test (exit 1 on failure, for CI)
 bugcapsule share <id>                             # expiring public link
 bugcapsule capture --on | --off | --sample-rate 0.05   # remote kill switch and production sampling
-bugcapsule symbols upload --split-debug-info build/symbols  # debug files for symbolication (secret key)
+bugcapsule symbols upload --split-debug-info build/symbols  # debug files for symbolication (token with debug_files.upload)
 ```
+
+A personal token (`bcp_`) acts as you within its scopes, in one project, and
+stops working when it expires, is revoked, or you leave the project; other
+people's tokens are unaffected. In CI use a service token (`bcv_`) in
+`BUGCAPSULE_TOKEN`. `BUGCAPSULE_URL`, `BUGCAPSULE_TOKEN`,
+`BUGCAPSULE_SECRET_KEY` and `BUGCAPSULE_INGEST_KEY` override
+`~/.bugcapsule/config.json`; a token wins over a secret key. CLI 0.4.0 has no
+`--token` flag: pass the token as `--secret-key` there (newer versions store
+it as a token either way).
 
 ### Other runtimes (CLI 0.3)
 
