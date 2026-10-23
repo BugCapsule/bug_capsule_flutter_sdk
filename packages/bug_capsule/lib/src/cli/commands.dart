@@ -17,7 +17,7 @@ import 'replay_server.dart';
 import 'symbols.dart';
 import 'term.dart';
 
-const version = '0.4.0';
+const version = '0.4.1-beta.1';
 
 CommandRunner<int> buildRunner() => CommandRunner<int>(
       'bugcapsule',
@@ -545,7 +545,7 @@ class LoginCommand extends Command<int> {
     var token = argResults!['token'] as String?;
     var secretKey = argResults!['secret-key'] as String?;
     if (token != null && secretKey != null) throw UsageException('use --token or --secret-key, not both', usage);
-    // A token given as --secret-key (CLI 0.4.0 docs) is stored as a token.
+    // A token given as --secret-key (CLI 0.4.1-beta.1 docs) is stored as a token.
     if (token == null && secretKey != null && Credentials.isToken(secretKey)) {
       token = secretKey;
       secretKey = null;
