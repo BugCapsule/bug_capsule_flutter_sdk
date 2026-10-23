@@ -5,4 +5,4 @@
 - Test kill-switch cancellation at a deterministic encoding boundary.
 - Find Android adb from SDK paths when the replay CLI runs outside a configured PATH.
 
-- License the package and CLI under Apache-2.0.
+- Apply the Bug Capsule Proprietary License to the package and CLI; prior written permission is required for use or distribution.
