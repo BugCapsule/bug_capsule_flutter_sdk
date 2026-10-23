@@ -138,11 +138,13 @@ void main() {
     Random? random,
     Directory? storage,
     bool backend = true,
+    Future<List<int>> Function(Capsule)? encodeCapsule,
   }) async {
     BugCapsule.debugOverrides = BugCapsuleTestOverrides(
       storageDirectory: storage ?? dir,
       transport: backend ? transport : null,
       random: random,
+      encodeCapsule: encodeCapsule,
     );
     var ran = false;
     await BugCapsule.init(
@@ -302,11 +304,19 @@ void main() {
     });
 
     test('a capture being encoded when the kill switch fires is discarded', () async {
-      await start();
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      await start(encodeCapsule: (capsule) async {
+        entered.complete();
+        await release.future;
+        return CapsuleCodec.encode(capsule);
+      });
       BugCapsule.fail('x');
       final pending = BugCapsule.capture();
+      await entered.future;
       transport.enabled = false;
       await BugCapsule.refreshRemoteConfig();
+      release.complete();
       expect(await pending, isNull);
       await settle();
       expect(transport.uploads, isEmpty);

@@ -70,4 +70,4 @@ in the release notes. Devices: one recent iPhone, one low-end Android
 | Flutter | 3.35 – 3.47 stable | beta/master |
 | Capture | iOS 16+, Android 10+ physical devices and simulators/emulators | web, desktop |
 | Replay | iOS simulator (macOS host) | Android emulator (unverified), physical devices |
-| Integrations | Dio 5.9+, bloc 9, go_router 14-18, shared_preferences 2.5 | `http` package, WebSockets, platform channels, Riverpod/Provider state |
+| Integrations | Dio 5.9+, http 1.5+, bloc 9, Riverpod 3, Provider, GetX 4, MobX 2, go_router 14-18, shared_preferences 2.5 | WebSockets, platform channels |

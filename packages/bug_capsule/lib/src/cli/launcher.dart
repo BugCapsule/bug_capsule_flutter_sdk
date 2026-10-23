@@ -12,6 +12,28 @@ import 'project_config.dart';
 import 'replay_server.dart';
 import 'term.dart';
 
+/// Resolve adb as Flutter does on a standard SDK install, even without PATH setup.
+String resolveAndroidAdb(String projectDir, {Map<String, String>? environment}) {
+  final env = environment ?? Platform.environment;
+  final candidates = <String?>[env['ANDROID_HOME'], env['ANDROID_SDK_ROOT']];
+  final properties = File('$projectDir/android/local.properties');
+  if (properties.existsSync()) {
+    for (final line in properties.readAsLinesSync()) {
+      if (line.startsWith('sdk.dir=')) {
+        candidates.add(line.substring(8).trim().replaceAll(r'\:', ':').replaceAll(r'\\', r'\'));
+      }
+    }
+  }
+  if (env['HOME'] != null) {
+    candidates.addAll(['${env['HOME']}/Library/Android/sdk', '${env['HOME']}/Android/Sdk']);
+  }
+  final name = Platform.isWindows ? 'adb.exe' : 'adb';
+  for (final sdk in candidates) {
+    if (sdk != null && File('$sdk/platform-tools/$name').existsSync()) return '$sdk/platform-tools/$name';
+  }
+  return name;
+}
+
 class Device {
   const Device(this.id, this.name, this.platform, this.emulator);
 
@@ -270,10 +292,11 @@ class FlutterRunLauncher implements AppLauncher {
     final device = options.device!;
     if (device.isAndroid) {
       // Lets the emulator reach the host's loopback replay server.
-      await _run('adb', ['-s', device.id, 'reverse', 'tcp:${server.port}', 'tcp:${server.port}'],
+      final adb = resolveAndroidAdb(options.projectDir);
+      await _run(adb, ['-s', device.id, 'reverse', 'tcp:${server.port}', 'tcp:${server.port}'],
           verbose: options.verbose, label: 'adb reverse');
       Processes.onCleanup(() async {
-        await Process.run('adb', ['-s', device.id, 'reverse', '--remove', 'tcp:${server.port}']);
+        await Process.run(adb, ['-s', device.id, 'reverse', '--remove', 'tcp:${server.port}']);
       });
     }
   }
