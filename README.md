@@ -1,61 +1,88 @@
 # BugCapsule Flutter SDK
 
-BugCapsule turns a Flutter failure that QA saw into a portable `.bugcapsule` capsule a developer can **replay on a simulator**, **verify after a fix**, and keep as a **regression test**.
+BugCapsule records what led up to a bug in your Flutter app and saves it as a
+portable `.bugcapsule` file. A developer can **replay** that file on a
+simulator against the real app code, **verify** a fix against it, and keep it
+as a **regression test**. The same SDK also reports errors, release health,
+performance traces and user feedback, and links each error to the capsule that
+replays it.
 
 ```
-QA hits a bug ─► capsule auto-captured & uploaded ─► bugcapsule run <id>   ─► REPRODUCED 3/3
-                                                    fix the code
-                                                    bugcapsule verify <id> ─► FIXED 0/5
-                                                    bugcapsule regress add ─► runs in CI
+QA hits a bug      ─► capsule captured, redacted on the device, uploaded
+bugcapsule run     ─► REPRODUCED 3/3
+fix the code
+bugcapsule verify  ─► FIXED 5/5
+bugcapsule regress ─► runs in CI from now on
 ```
 
-The capsule holds what replay needs: a storage checkpoint, recorded touches and semantic actions, typed text, lifecycle changes, every HTTP exchange with its latency, state-management activity (BLoC, Riverpod, Provider/ChangeNotifier, GetX, MobX), and the failure assertion. All of it is redacted on the device. Replay re-runs the real app code against that recording: network calls are served from the capsule with the same timing, so races and data-dependent bugs come back.
+A capsule holds what replay needs: a storage checkpoint, recorded touches and
+actions, typed text, lifecycle changes, every HTTP exchange with its timing,
+state-management activity, and the failure itself. Replay runs your real app
+code against that recording, with network responses served at their recorded
+timing, so races and data-dependent bugs come back.
 
-## Package
+📖 Full documentation: **[docs.bugcapsule.com/flutter](https://docs.bugcapsule.com/flutter.html)** ·
+📦 [pub.dev/packages/bug_capsule](https://pub.dev/packages/bug_capsule)
 
-Everything ships in one package, [`bug_capsule`](packages/bug_capsule), with one import:
+## Contents
+
+- [Requirements](#requirements)
+- [Install](#install)
+- [Connect your app](#connect-your-app)
+- [Make bugs replayable](#make-bugs-replayable)
+- [Replay, verify and keep a regression test](#replay-verify-and-keep-a-regression-test)
+- [Monitoring](#monitoring)
+- [Privacy](#privacy)
+- [Going to production](#going-to-production)
+- [Limitations](#limitations)
+- [Demo app](#demo-app)
+- [Upgrading](#upgrading)
+- [More documentation](#more-documentation)
+- [Support and license](#support-and-license)
+
+## Requirements
+
+- A BugCapsule project. Sign in at [app.bugcapsule.com](https://app.bugcapsule.com).
+- Flutter 3.35+ and Dart 3.9+.
+- An iOS simulator (or Android emulator) and `git` for replay.
+
+## Install
+
+```bash
+flutter pub add bug_capsule
+```
+
+Everything ships in this one package, with one import:
 
 ```dart
 import 'package:bug_capsule/bug_capsule.dart';
 ```
 
-| Part | What it does |
-|---|---|
-| Runtime | `BugCapsule.init`, capture (touches, lifecycle, errors, checkpoints), upload, kill switch, replay engine, QA overlay |
-| Monitoring | Error events, release health (sessions), tracing (screens, app start, frames, HTTP spans, `traceparent`), user feedback form ([monitoring-v1](https://github.com/draz26648/bug_capsule_backend/blob/main/docs/monitoring-v1.md)) |
-| Core | Capsule model ([spec v1](spec/capsule-v1.md)), flight recorder, codec, redaction, network matching |
-| `BugCapsuleBloc` | BLoC/Cubit transitions, state snapshots and restore |
-| `BugCapsuleRiverpod` | Riverpod 3 provider activity, state snapshots and restore |
-| `BugCapsuleNotifiers` | Provider / `ChangeNotifier` / `ValueNotifier` changes, state snapshots and restore |
-| `BugCapsuleGetx` | GetX controller updates and `Rx` changes, state snapshots and restore |
-| `BugCapsuleMobx` | MobX observable writes, actions and reaction errors; store snapshots and restore |
-| `BugCapsuleDio` | Transport-level HTTP capture and deterministic replay with endpoint normalization (also covers Retrofit) |
-| `BugCapsuleHttp` | The same for `package:http` clients (also covers Chopper and other `http.Client` based APIs) |
-| `BugCapsuleGoRouter` | Navigation capture and route restore |
-| `BugCapsuleSharedPreferences` | SharedPreferences snapshot/restore (allowlist) |
-| `bugcapsule` CLI | `bugcapsule inspect / run / verify / regress / list / pull / push / share / capture / symbols` |
-
-[`example/bug_capsule_demo`](example/bug_capsule_demo) is a shop app with planted "cannot reproduce" bugs.
-
 The package depends on every library it integrates with, so your app's
-versions must fall in these ranges even for libraries you don't use with
-BugCapsule: `bloc` ^9, `riverpod` ^3, `get` ^4.6, `mobx` ^2.3, `dio` ^5.9,
-`http` ^1.5, `go_router` 14 to 18, `shared_preferences` ^2.5. Code you don't
-use is tree-shaken out of release builds.
+versions must fall in these ranges even for libraries you don't use:
+`bloc` ^9, `riverpod` ^3, `get` ^4.6, `mobx` ^2.3, `dio` ^5.9, `http` ^1.5,
+`go_router` 14 to 18, `shared_preferences` ^2.5. Code you don't use is
+tree-shaken out of release builds.
 
-The backend (upload, triage, kill switch, share links) lives in [draz26648/bug_capsule_backend](https://github.com/draz26648/bug_capsule_backend).
+> **Versions.** The latest release on pub.dev is `0.4.1-beta.1`. This README
+> describes `main`. **SDK tokens** (`token:`) and **`BugCapsule.status`** ship
+> in the next release. On `0.4.1-beta.1`, connect with an
+> [explicit address and ingest key](#connect-with-an-address-and-ingest-key)
+> instead.
 
-## Integrate
+## Connect your app
 
-```yaml
-dependencies:
-  bug_capsule: {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule}}
-```
+### 1. Get an SDK token
 
-### 1. Connect with the SDK token (one line)
+In the dashboard, open **Project settings → Keys → SDK tokens** and generate a
+token. It looks like `bcsdk.v1.…` and is shown once, so copy it right away.
 
-Copy the SDK token from the dashboard (Project settings › SDK tokens) and
-make `BugCapsule.init` the first line of `main`:
+The SDK token is the only value your app needs. It holds your BugCapsule
+address and a send-only credential: it can upload capsules and monitoring data
+and read capture settings, nothing else. That makes it safe to ship in the
+app. You can rotate or revoke it in the dashboard at any time.
+
+### 2. Initialize first thing in `main`
 
 ```dart
 import 'package:bug_capsule/bug_capsule.dart';
@@ -66,71 +93,78 @@ void main() => BugCapsule.init(
     );
 ```
 
-The token (`bcsdk.v1.…`) holds the API address and an upload-only
-credential: it can fetch the project's SDK settings and send Capsules and
-monitoring data, nothing else, so it is safe to ship in the app. It works the
-same for the hosted service and a self-hosted backend. `appVersion` and
-`appBuild` are optional (they default to the `BUGCAPSULE_APP_VERSION` /
-`BUGCAPSULE_APP_BUILD` dart-defines, then to the version in
-`MonitoringOptions.release`, then to `unknown` / `0`); set them so capsules
-and releases carry your real version.
+That is a complete connection. `appVersion` and `appBuild` are optional; set
+them (or the `BUGCAPSULE_APP_VERSION` / `BUGCAPSULE_APP_BUILD` dart-defines)
+so capsules and releases carry your real version.
 
-A token that can't be used never stops the app: `init` doesn't throw or
-wait, prints one `[bugcapsule] …` line saying what to fix (an ingest or
-secret key pasted instead of a token, a damaged copy, a token from a newer
-SDK) and the app runs without uploads. Being offline, a timeout or a server
-error is never fatal either: Capsules wait in the on-device outbox and go out
-when the backend is reachable again. When the token is revoked or has
-expired, the SDK prints the reason once and stops capture and uploads for the
-session.
+**It never breaks your app.** A token that can't be used doesn't throw or
+wait: `init` prints one `[bugcapsule] …` line saying what to fix and the app
+runs without uploads. Being offline is never fatal either: capsules wait in an
+on-device outbox and go out once BugCapsule is reachable.
 
-### 2. Check the connection: `BugCapsule.status`
+### 3. Check the connection
 
 ```dart
 final status = BugCapsule.status;
-status.connection.state;                   // connected, connecting, offline, rejected, invalid_token, …
-status.connection.reason;                  // e.g. token_revoked
-status.connection.message;                 // what to do about it
-status.connection.configFetchedAt;         // 1st confirmation: the backend accepted the token
-status.connection.firstCapsuleAcceptedAt;  // 2nd confirmation: data arrived
-status.connection.firstEventAcceptedAt;
+status.connection.state;                   // connected, connecting, offline, rejected, …
+status.connection.message;                 // what to do, when something is wrong
+status.connection.configFetchedAt;         // set once BugCapsule accepted the token
+status.connection.firstCapsuleAcceptedAt;  // set once a capsule reached your project
 status.instrumentation.missing;            // e.g. [network, navigation, app_state]
 ```
 
-| `state` | Meaning |
-|---|---|
-| `not_configured` | no token and no backend: capture runs on the device only |
-| `invalid_token` / `unsupported_token_version` | the token can't be used; `message` says why |
-| `connecting` | no configuration fetched yet in this session |
-| `connected` | the configuration was fetched (basic connectivity) |
-| `offline` | the backend can't be reached; data is kept and retried |
-| `rejected` | the backend refused the credential (`reason`: `token_revoked`, `token_expired`, `token_unknown`, …); capture and uploads are off |
-| `disabled` | `enabled: false`, or capture switched off for the project |
-
-Being connected is not the same as complete replay. `instrumentation`
-lists what replay can restore and what is still `missing`:
-
-| Step | `instrumentation` | Add |
+| `state` | Meaning | What to do |
 |---|---|---|
-| Network fixtures | `network` | `BugCapsuleDio` or `BugCapsuleHttp` |
-| Navigation | `navigation` | `BugCapsuleGoRouter` |
-| App state | `appState` (`app_state`) | `BugCapsuleBloc`, `BugCapsuleRiverpod`, `BugCapsuleNotifiers`, `BugCapsuleGetx`, `BugCapsuleMobx`, `BugCapsuleSharedPreferences` |
+| `not_configured` | No token and no backend: capture stays on the device. | Pass a token. |
+| `invalid_token` / `unsupported_token_version` | The token can't be used; `message` says why. | Paste the full `bcsdk.v1.…` token, or update the SDK. |
+| `connecting` | No configuration fetched yet in this session. | Wait a moment. |
+| `connected` | The configuration was fetched. | Nothing. |
+| `offline` | BugCapsule can't be reached; data is kept and retried. | Check the device's network. |
+| `rejected` | The token was refused (`reason`: `token_revoked`, `token_expired`, `token_unknown`, …). Capture and uploads stop for this session. | Generate a new token. |
+| `disabled` | `enabled: false`, or capture is switched off for the project. | — |
 
-### 3. Add replay integrations, one at a time
+### Connect with an address and ingest key
+
+For self-hosted setups, older SDK versions, or apps that already pass an
+address explicitly:
+
+```dart
+config: const BugCapsuleConfig(
+  backend: BugCapsuleBackendConfig(url: 'https://api.bugcapsule.com', ingestKey: 'bci_…'),
+),
+```
+
+`backend` wins when both are set (the SDK prints that the token was ignored).
+The ingest key is public like the token. **Never put a `bcs_…` secret key in
+an app.**
+
+## Make bugs replayable
+
+Being connected is not the same as faithful replay. Replay also needs your
+app's network, navigation and state. Add the integrations that match your app;
+`BugCapsule.status.instrumentation.missing` tells you what is left.
+
+| Replay needs | Add |
+|---|---|
+| Network | `BugCapsuleDio` or `BugCapsuleHttp` |
+| Navigation | `BugCapsuleGoRouter` |
+| App state | `BugCapsuleBloc`, `BugCapsuleRiverpod`, `BugCapsuleNotifiers`, `BugCapsuleGetx`, `BugCapsuleMobx`, `BugCapsuleSharedPreferences` |
+
+A typical BLoC + Dio + GoRouter app:
 
 ```dart
 final bugCapsuleDio = BugCapsuleDio(rules: [
-  // Fields that differ on every run must not affect request matching.
+  // Fields that change on every run must not affect request matching.
   EndpointRule('POST', '/api/checkout', ignoreBodyFields: {'timestamp', 'nonce'}),
 ]);
 final bugCapsuleRouter = BugCapsuleGoRouter();
 
-void main() => BugCapsule.init(                     // first line of main, before ensureInitialized
+void main() => BugCapsule.init(              // first line of main, before ensureInitialized
       config: const BugCapsuleConfig(
         token: 'bcsdk.v1.…',
         appVersion: '1.4.0',
         appBuild: '52',
-        mode: CaptureMode.qa,                  // or BUGCAPSULE_MODE dart-define
+        mode: CaptureMode.qa,                // or the BUGCAPSULE_MODE dart-define
       ),
       integrations: [
         BugCapsuleBloc(states: [
@@ -143,43 +177,43 @@ void main() => BugCapsule.init(                     // first line of main, befor
       appRunner: () => runApp(const MyApp()),
     );
 
-// where you build Dio and GoRouter:
-bugCapsuleDio.attach(dio);                                         // after any custom adapter
+// Where you create Dio and GoRouter:
+bugCapsuleDio.attach(dio);                   // after any custom adapter
 final router = GoRouter(initialLocation: bugCapsuleRouter.initialLocation('/'), routes: [...]);
 bugCapsuleRouter.attach(router);
 
-// QA capture button:
+// Optional QA capture button:
 MaterialApp.router(builder: (context, child) => BugCapsuleOverlay(child: child!), ...);
 ```
 
-### Explicit backend URL and ingest key (self-hosted / advanced)
+Build QA builds with the commit, so replay can check out the same code:
 
-Apps that already pass a URL and an ingest key keep working unchanged:
-
-```dart
-config: const BugCapsuleConfig(
-  appVersion: '1.4.0',
-  appBuild: '52',
-  backend: BugCapsuleBackendConfig(url: 'https://bugcapsule.example.com', ingestKey: 'bci_...'),
-),
+```bash
+flutter build ipa --dart-define=BUGCAPSULE_GIT_SHA=$(git rev-parse HEAD) --dart-define=BUGCAPSULE_MODE=qa
 ```
-
-`backend` wins when both are set (the SDK prints that the token was ignored),
-and `BugCapsule.status.connection.source` says which one is in use.
 
 ### Other state management and HTTP clients
 
-They come with the same package; use the ones that match your app. They can be combined (e.g. Riverpod with `package:http`).
+They can be combined, for example Riverpod with `package:http`.
 
+| Library | Integration | Setup |
+|---|---|---|
+| `flutter_bloc` / `bloc` | `BugCapsuleBloc` | A global `BlocObserver`; no per-bloc setup. |
+| `riverpod` / `flutter_riverpod` / `hooks_riverpod` 3.x | `BugCapsuleRiverpod` | Add its `observer` to `ProviderScope`. Notifier providers restore on their own; `riverpod_generator` providers need a `restore:` callback. |
+| `provider`, `ChangeNotifier`, `ValueNotifier` | `BugCapsuleNotifiers` | Wrap each model in `track(...)`. |
+| `get` (GetX) | `BugCapsuleGetx` | `trackRx(...)` for `.obs` values, `track(...)` for `GetBuilder` controllers. |
+| `mobx` / `flutter_mobx` | `BugCapsuleMobx` | Records on its own; `track(...)` stores you want restored. |
+| `dio`, `retrofit` | `BugCapsuleDio` | `attach(dio)` |
+| `http`, `chopper`, anything that takes an `http.Client` | `BugCapsuleHttp` | `client(inner)` |
 
 ```dart
-// Riverpod 3: register providers whose state replay should restore, and add the observer.
+// Riverpod 3
 final bugCapsuleRiverpod = BugCapsuleRiverpod(states: [
   BugCapsuleRiverpodState<Cart>(cartProvider, toJson: (c) => c.toJson(), fromJson: Cart.fromJson),
 ]);
 // appRunner: () => runApp(ProviderScope(observers: [bugCapsuleRiverpod.observer], child: const MyApp())),
 
-// Provider / ChangeNotifier / ValueNotifier: track each model where you create it.
+// Provider / ChangeNotifier
 final bugCapsuleNotifiers = BugCapsuleNotifiers();
 ChangeNotifierProvider(
   create: (_) => bugCapsuleNotifiers.track(CartModel(), id: 'cart',
@@ -187,132 +221,135 @@ ChangeNotifierProvider(
   child: ...,
 );
 
-// GetX: track Rx values and GetBuilder controllers where you create them.
+// GetX
 final bugCapsuleGetx = BugCapsuleGetx();
 class CartController extends GetxController {
   final coupon = bugCapsuleGetx.trackRx(''.obs, id: 'cart.coupon');   // primitives need no serializer
-  final items = bugCapsuleGetx.trackRx(<CartItem>[].obs, id: 'cart.items',
-      toJson: (items) => {'items': [for (final i in items) i.toJson()]},
-      fromJson: (json) => [for (final i in json['items'] as List) CartItem.fromJson(i as Map<String, Object?>)]);
 }
 
-// MobX: observable writes, actions and reaction errors are recorded on their own;
-// track stores whose state replay should restore (restore runs inside an action).
+// MobX
 final bugCapsuleMobx = BugCapsuleMobx();
-final cart = bugCapsuleMobx.track(CartStore(), id: 'cart', toJson: (s) => s.toJson(), restore: (s, json) => s.replaceWith(json));
+final cart = bugCapsuleMobx.track(CartStore(), id: 'cart',
+    toJson: (s) => s.toJson(), restore: (s, json) => s.replaceWith(json));
 
-// package:http (and Chopper, graphql, generated clients): wrap the client.
+// package:http, Chopper, generated clients
 final bugCapsuleHttp = BugCapsuleHttp(rules: [EndpointRule('POST', '/api/checkout', ignoreBodyFields: {'nonce'})]);
-final client = bugCapsuleHttp.client();                  // or bugCapsuleHttp.client(existingClient)
-final chopper = ChopperClient(client: bugCapsuleHttp.client(), ...);
+final client = bugCapsuleHttp.client();                 // or bugCapsuleHttp.client(existingClient)
 
-// and list them: integrations: [bugCapsuleRiverpod, bugCapsuleNotifiers, bugCapsuleGetx, bugCapsuleMobx, bugCapsuleHttp, ...]
+// Then list them: integrations: [bugCapsuleRiverpod, bugCapsuleHttp, ...]
 ```
 
-| Library | Integration | Notes |
-|---|---|---|
-| `flutter_bloc` / `bloc` | `BugCapsuleBloc` | global `BlocObserver`, no per-bloc setup |
-| `riverpod` / `flutter_riverpod` / `hooks_riverpod` 3.x | `BugCapsuleRiverpod` | `NotifierProvider`, `AsyncNotifierProvider`, `StreamNotifierProvider` (and families) restore on their own; providers generated by `riverpod_generator` need a `restore:` callback and a registration to be checkpointed |
-| `provider`, `ChangeNotifier`, `ValueNotifier`, any `Listenable` | `BugCapsuleNotifiers` | wrap each model in `track(...)`; `restore:` puts state back |
-| `get` (GetX) | `BugCapsuleGetx` | `trackRx(...)` for `.obs` values, `track(...)` for `GetBuilder` controllers; `update([ids])` is not seen, only `update()` |
-| `mobx` / `flutter_mobx` | `BugCapsuleMobx` | spy-based: no setup for recording; `track(...)` stores to checkpoint and restore them |
-| `dio`, `retrofit` | `BugCapsuleDio` | `attach(dio)` |
-| `http`, `chopper`, anything taking an `http.Client` | `BugCapsuleHttp` | `client(inner)`; same request keys and capsule events as Dio |
+### Hooks that make more bugs reproducible
 
-Build with the commit pinned so replay can check out the same code:
+| Add this | Why |
+|---|---|
+| `onPressed: BugCapsule.action('cart.checkout', () => ...)` | Replay can invoke the action by id, even when the developer's screen differs from QA's. |
+| `BugCapsule.trackText('login.email', controller)` | Typed text is replayed. Sensitive ids (`password`, `otp`, …) are redacted; use `sensitive: true` for every obscured field. |
+| `BugCapsule.check('cart_total_non_negative', total >= 0)` / `BugCapsule.fail(id)` | Wrong behaviour that doesn't throw becomes a failure replay can check. |
+| `clock.now()` (package `clock`) instead of `DateTime.now()` | Replay returns the recorded time. |
+| `BugCapsule.random` instead of `Random()` | Seeded per session, same seed in replay. |
+
+Every capsule reports its **eligibility** (`eligible`, `partial` or
+`ineligible`) and says exactly what is missing: no git SHA, no failure
+assertion, response bodies not captured, a BLoC without a serializer, and so
+on.
+
+## Replay, verify and keep a regression test
+
+### Install the CLI
+
+The `bugcapsule` CLI ships in the same package and replays capsules from every
+BugCapsule SDK (Flutter, Android, iOS and web).
 
 ```bash
-flutter build ipa --dart-define=BUGCAPSULE_GIT_SHA=$(git rev-parse HEAD) --dart-define=BUGCAPSULE_MODE=qa
+dart pub global activate bug_capsule 0.4.1-beta.1
+bugcapsule --version
 ```
 
-### Make more bugs eligible
+If the shell can't find `bugcapsule`, add `~/.pub-cache/bin` to your `PATH`.
+Inside an app that depends on the package you can also run
+`dart run bug_capsule:bugcapsule <command>`.
 
-| Hook | Why |
+Log in with a personal token from **Project settings → Keys & CLI access**.
+In CI, use a service token (`bcv_…`) in `BUGCAPSULE_TOKEN` instead.
+
+```bash
+bugcapsule login --url https://api.bugcapsule.com --token bcp_…
+```
+
+### Run it
+
+```bash
+bugcapsule list                                   # capsules in your project
+bugcapsule inspect <id|file|share-url>            # failure, eligibility, network, timeline
+bugcapsule run <id> -d <simulator> -n 3          # replays on the capsule's commit (temporary git worktree)
+bugcapsule verify <id> -n 5                       # replays your working tree; FIXED when the bug is gone
+bugcapsule regress add <id>                       # keep it as a regression test
+bugcapsule regress run                            # in CI: exit 1 when a regression fails
+bugcapsule share <id>                             # expiring download link
+bugcapsule capture --on | --off | --sample-rate 0.05   # kill switch and production sampling
+```
+
+Flutter apps that use the defaults need no `bugcapsule.json`. Replay is never
+armed in release builds.
+
+### Verdicts
+
+| `bugcapsule run` | `bugcapsule verify` | Exit code |
+|---|---|---|
+| `REPRODUCED`: every attempt hit the original failure | `FIXED`: every attempt ran cleanly | 0 |
+| `NOT REPRODUCED`: every attempt ran cleanly | `STILL FAILING`: the failure came back, no clean attempt | 1 |
+| `FLAKY`: some attempts reproduced, some didn't | `FLAKY` | 2 |
+| `INCONCLUSIVE` / `INCOMPATIBLE`: anything else | `INCONCLUSIVE` / `INCOMPATIBLE` | 3 |
+
+An attempt only counts as clean when every recorded input was replayed and
+nothing important diverged (an unregistered action, a request without a
+recorded response, a missing restore, …). Attempts that never ran count
+against the total, so one clean attempt plus one error is `INCONCLUSIVE`,
+never `FIXED`. Details: [How verdicts work](https://docs.bugcapsule.com/verdicts.html) ·
+[CLI reference](https://docs.bugcapsule.com/cli.html).
+
+## Monitoring
+
+Monitoring is on by default and runs next to capsules:
+
+| Signal | What you get |
 |---|---|
-| `onPressed: BugCapsule.action('cart.checkout', () => ...)` | Semantic replay when the developer's screen differs from QA's |
-| `BugCapsule.trackText('login.email', controller)` | Typed text is replayed; sensitive ids (`password`, `otp`, …) are redacted, and `sensitive: true` redacts any field (use it for every obscured field) |
-| `BugCapsule.check('cart_total_non_negative', total >= 0)` / `BugCapsule.fail(id)` | Wrong behaviour that doesn't throw becomes a checkable failure |
-| `clock.now()` (package `clock`) instead of `DateTime.now()` | Replay restores the recorded wall clock |
-| `BugCapsule.random` instead of `Random()` | Seeded per session, the same seed on replay |
+| Errors | `FlutterError.onError`, `PlatformDispatcher.onError` and zone errors under `BugCapsule.runZonedGuarded`; stack frames, breadcrumbs, user and tags. Repeated errors are rate-limited. |
+| Release health | One session per foreground run; crash-free rates per release. |
+| Performance | App start, screen transactions with slow and frozen frames, HTTP spans, `traceparent` / `baggage` propagation. |
+| User feedback | A form, a sheet, shake to report, or your own UI. |
 
-Every capsule reports its **eligibility** (`eligible` / `partial` / `ineligible`) and lists exactly which dependency is missing (no git SHA, no failure assertion, response bodies not captured, BLoC without a serializer, …). Ineligible capsules are kept but never counted toward the reproduction rate.
-
-## Monitoring: errors, release health, tracing, feedback
-
-A capsule is a heavy recording of one failure. Next to capsules the SDK sends
-the light, high-volume signals of
-[monitoring-v1](https://github.com/draz26648/bug_capsule_backend/blob/main/docs/monitoring-v1.md):
-error events (grouped into issues), sessions (crash-free rates per release),
-transactions (performance) and user feedback, as envelopes to
-`POST /v1/envelope` with the same SDK token or ingest key. It is on by default. Every item
-goes through the capsule redaction rules on the device before it is queued.
+When a capsule is written for an error, the error links to it, so each issue
+lists the capsules that replay it.
 
 ```dart
 void main() => BugCapsule.runZonedGuarded(() => BugCapsule.init(
       config: BugCapsuleConfig(
-        appId: 'com.shop.app',                 // release defaults to com.shop.app@1.4.0+52
-        appVersion: '1.4.0',
-        appBuild: '52',
         token: 'bcsdk.v1.…',
+        appId: 'com.shop.app',                         // release defaults to com.shop.app@<version>+<build>
         monitoring: MonitoringOptions(
-          tracesSampleRate: 0.2,                       // default: the backend's rate, else 0
-          tracePropagationTargets: ['api.shop.com'],  // URLs that get traceparent / baggage
-          beforeSend: (event, hint) => event,          // last look; return null to drop
+          tracesSampleRate: 0.2,
+          tracePropagationTargets: ['api.shop.com'],   // URLs that get traceparent / baggage
+          beforeSend: (event, hint) => event,          // return null to drop an event
         ),
       ),
       integrations: [bugCapsuleDio, bugCapsuleRouter],
       appRunner: () => runApp(const MyApp()),
     ));
-```
 
-What happens without more code:
-
-| Signal | How |
-|---|---|
-| Errors | `FlutterError.onError` (`flutter_error`), `PlatformDispatcher.onError` (`platform_dispatcher`), uncaught errors of the main isolate and zone errors under `BugCapsule.runZonedGuarded` (`uncaught`). Unhandled errors are `fatal` (`crashOnUnhandled`). One error sent through several handlers is sent once; the same error repeating (say, in `build` every frame) is sent at most 10 times a minute. |
-| Stack traces | Parsed into frames, oldest call first; `inApp` for your package (detected from the caller of `BugCapsule.init`, or `inAppIncludes`). AOT builds with `--split-debug-info` send `instructionAddr` frames and an `elf` debug image with the build id; `--obfuscate` builds add a `dart_obfuscation` image from `--dart-define=BUGCAPSULE_OBFUSCATION_ID`. The backend symbolicates both with the files from `bugcapsule symbols upload`. |
-| Breadcrumbs | Derived from the flight recorder's events: routes, actions, HTTP exchanges, lifecycle, logs, errors and state changes (nothing is instrumented twice). |
-| Capsules | When a capsule is written for a failure, its event carries `capsuleId` and the capsule carries `manifest.monitoring.eventId`, so the issue lists the capsules that replay it. |
-| Sessions | One per foreground run; a new one after 30 s in the background. `crashed` after a fatal event, `abnormal` when the app was killed in the foreground (detected at the next launch). |
-| Screens | `navigation` transactions named after the route pattern (`/product/:id`) from `BugCapsuleGoRouter`, or `BugCapsuleNavigatorObserver` for `Navigator` apps, with `time_to_initial_display` and slow / frozen frame counts. |
-| App start | An `app.start.cold` transaction from `BugCapsule.init` to the first rasterized frame. |
-| HTTP | `http.client` spans for `BugCapsuleDio` and `BugCapsuleHttp` requests under the active span, and `traceparent` / `baggage` headers for `tracePropagationTargets`. The headers are added for the transport only: capsules record your headers, request keys never include headers, and replay adds none. |
-
-```dart
-BugCapsule.setUser(const MonitoringUser(id: 'u_123', segment: 'pro'));
-BugCapsule.setTag('tenant', 'acme');
-BugCapsule.captureException(error, stackTrace: stack, tags: {'flow': 'checkout'});
-BugCapsule.captureMessage('payment provider slow', level: EventLevel.warning);
-BugCapsule.withScope((scope) { scope.setFingerprint(['checkout-timeout']); BugCapsule.captureException(e); });
-
-await BugCapsule.startSpan('load cart', 'task', (span) async {   // active for its zone
-  span.startChild('db', description: 'read cart').finish();
-  await dio.get('/cart');                                          // child http.client span
-});
-
-// User feedback: a form, a sheet, or your own UI.
+BugCapsule.setUser(const MonitoringUser(id: 'u_123'));
+BugCapsule.captureException(error, stackTrace: stack);
 showBugCapsuleFeedback(context, eventId: BugCapsule.lastEventId());
-BugCapsuleFeedbackForm(onSubmitted: (id) => Navigator.pop(context));
-await BugCapsule.captureFeedback(message: 'Checkout did nothing', email: 'ana@example.com');
-// Shake to report, with the accelerometer of the sensor plugin you use (e.g. sensors_plus):
-BugCapsuleShakeToReport(accelerometer: accelerometerEventStream().map((e) => [e.x, e.y, e.z]), child: child);
 ```
 
-In QA mode submitting feedback also writes a capsule (`captureCapsuleWithFeedback`).
-`getTraceparent()` / `getBaggage()` serve custom HTTP clients and
-`continueTrace(traceparent, baggage)` joins an incoming trace;
-`flush()`, `close()`, `startSession()` / `endSession()` and
-`addIsolateErrorListener(isolate)` cover the rest of the API.
+`MonitoringOptions.disabled` turns monitoring off; capsules keep working.
+Native crashes, ANRs and app hangs inside plugins are reported by the
+BugCapsule Android and iOS SDKs, not from Dart. More:
+[docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.html).
 
-The backend can change `monitoringEnabled`, `errorSampleRate`,
-`tracesSampleRate`, `sessionTracking`, `maxBreadcrumbs` and
-`tracePropagationTargets` in the remote config; the kill switch stops
-monitoring too. Envelopes wait in their own outbox (30 envelopes / 5 MiB /
-7 days, `MonitoringOptions.outboxLimits`) with the capsule outbox's backoff
-and `Retry-After` handling, and are sent only once a remote config fetch has
-succeeded. `MonitoringOptions.disabled` turns all of it off.
-
-Release builds with symbols:
+**Readable stack traces.** For obfuscated or `--split-debug-info` builds,
+upload symbols for every release:
 
 ```bash
 OBF_ID=$(bugcapsule symbols new-id)
@@ -323,176 +360,111 @@ bugcapsule symbols upload --split-debug-info build/symbols \
   --obfuscation-map build/obfuscation.json --obfuscation-id $OBF_ID --release com.shop.app@1.4.0+52
 ```
 
-Native crashes, ANRs and app hangs in plugins are reported by the BugCapsule
-Android and iOS SDKs, not from Dart.
+## Privacy
 
-## The CLI
+Redaction runs on the device before anything is stored or uploaded:
+sensitive keys in bodies, storage and state; sensitive headers; credentials in
+URLs; and tokens, JWTs, API keys and card numbers in free text.
 
-```bash
-dart pub global activate --source git https://github.com/draz26648/bug_capsule_flutter_sdk --git-path packages/bug_capsule
-# or, inside an app that depends on bug_capsule: dart run bug_capsule:bugcapsule <command>
-bugcapsule login --url http://127.0.0.1:8787 --token bcp_...   # your personal token (dashboard: Project Settings › Keys & CLI access)
-# legacy, a backend without accounts: --secret-key bcs_... (the project's shared secret key)
+Tighten it with `redactKeys`, `redactPatterns`, `beforeRecord` /
+`beforeCheckpoint`, `BugCapsuleDio(exclude: ...)` / `BugCapsuleHttp(exclude: ...)`
+for endpoints you must not record, and `BugCapsuleGoRouter(sanitizeLocation: ...)`
+for secrets in paths. Your project settings can also add redaction keys, turn
+off body capture, lower sampling or switch capture off remotely.
 
-bugcapsule list                                   # capsules on the backend
-bugcapsule inspect <id|file|share-url>            # failure, eligibility, network, timeline
-bugcapsule run <id> -d "iPhone 18 Pro" -n 3       # replay on the capsule's commit (temporary git worktree)
-bugcapsule verify <id> -n 5                       # replay on your working tree; FIXED when it no longer fails
-bugcapsule regress add <id> && bugcapsule regress run  # keep it as a regression test (exit 1 on failure, for CI)
-bugcapsule share <id>                             # expiring public link
-bugcapsule capture --on | --off | --sample-rate 0.05   # remote kill switch and production sampling
-bugcapsule symbols upload --split-debug-info build/symbols  # debug files for symbolication (token with debug_files.upload)
-```
+Redaction is pattern-based. It does **not** find personal data that isn't a
+credential (names, emails, addresses) or secrets in URL paths. Inspect real
+capsules with `bugcapsule inspect` before a wider rollout. More:
+[Privacy and redaction](https://docs.bugcapsule.com/privacy.html).
 
-A personal token (`bcp_`) acts as you within its scopes, in one project, and
-stops working when it expires, is revoked, or you leave the project; other
-people's tokens are unaffected. In CI use a service token (`bcv_`) in
-`BUGCAPSULE_TOKEN`. `BUGCAPSULE_URL`, `BUGCAPSULE_TOKEN`,
-`BUGCAPSULE_SECRET_KEY` and `BUGCAPSULE_INGEST_KEY` override
-`~/.bugcapsule/config.json`; a token wins over a secret key. CLI 0.4.0 has no
-`--token` flag: pass the token as `--secret-key` there (newer versions store
-it as a token either way).
+## Going to production
 
-### Other runtimes (CLI 0.3)
+Production capture works, but it is the riskiest mode. Before rollout:
 
-The same CLI replays capsules from the native Android, native iOS and web
-SDKs: `bugcapsule run|verify|regress` pick the runtime from `--runtime`,
-`bugcapsule.json` or the project files, refuse capsules from another runtime
-(`INCOMPATIBLE`), and drive an emulator instrumentation, an XCUITest or a
-Playwright browser instead of `flutter run`. Every attempt gets its own token
-and attempt id on the loopback replay server, and late reports are rejected.
-See [docs/cli-runtimes.md](docs/cli-runtimes.md), the runtime contracts in
-[spec/runtimes-v1.md](spec/runtimes-v1.md) and the
-[feature matrix](docs/feature-matrix.md).
+1. **Test the kill switch.** `bugcapsule capture --on` stops capture for every
+   device at its next config refresh (5 minutes by default), and deletes
+   queued capsules. `bugcapsule capture --off` resumes it.
+2. **Set sampling.** A production session records with probability
+   `productionSampleRate` (default `0.1`), capped by your project's rate.
+3. **Review redaction** with a real login and payment flow.
+4. **Decide on bodies.** Turn off `captureNetworkBodies` (also possible
+   remotely) for endpoints you can't send.
+5. **Measure** cold start, frame times and memory on a low-end device with and
+   without BugCapsule.
+6. **Upload symbols** for every release build.
 
-### Verdicts
+Capture never crashes the app: if setup fails the app starts without it, and
+storage errors drop the capsule. Release builds never enter replay mode. Full
+details: [docs/how-it-works.md](docs/how-it-works.md) and the
+[production checklist](https://docs.bugcapsule.com/production.html).
 
-`run` and `verify` judge every attempt, then the batch:
+## Limitations
 
-* An attempt **reproduced** when the original failure assertion fired.
-* An attempt is **clean** only when it ran to the end as recorded: it has a
-  failure assertion to check, every recorded input was dispatched, no other
-  failure fired, and nothing *material* diverged. Material: unregistered
-  actions, untracked text fields, failed or missing restoration (an
-  integration that captured data is missing or failed to restore), requests
-  without a recorded response, responses replayed without their body, reused
-  responses, dispatch errors, values that were redacted on the device and
-  replayed as placeholders (a missing token or OTP can send the app down
-  another path), and any divergence this version does not know. Expected
-  differences do not count: a changed commit (`build.gitSha`), a different
-  screen size, and recorded responses the replay never asked for. To verify
-  flows behind a login, keep the login state out of the deny list for QA
-  builds (e.g. a test account whose token you allow) or exclude it from the
-  failing flow.
-* Anything else is **invalid**: errors, incompatible capsules, no assertion.
+- `DateTime.now()`, `Timer`s and animations are not virtualized; only
+  `clock.now()` and `BugCapsule.random` are deterministic.
+- Platform channels, native SDKs (Firebase, maps, payments) and WebSockets are
+  not captured. HTTP is captured for Dio and `package:http` clients only.
+- Redux has no integration yet.
+- Pointer replay assumes the same logical screen size; otherwise the CLI scales
+  coordinates and falls back to semantic actions where they exist.
+- Replay on Android (`flutter run` + `adb reverse`) is implemented but not yet
+  tested end to end. iOS simulators are the tested path.
 
-| `bugcapsule run` (replay) | `bugcapsule verify` | exit |
-|---|---|---|
-| `REPRODUCED` every requested attempt reproduced | `FIXED` every requested attempt clean | 0 |
-| `NOT REPRODUCED` every requested attempt clean | `STILL FAILING` reproduced, no clean attempt | 1 |
-| `FLAKY` both reproduced and clean attempts | `FLAKY` | 2 |
-| `INCONCLUSIVE` / `INCOMPATIBLE` anything else | `INCONCLUSIVE` / `INCOMPATIBLE` | 3 |
+Full list: [docs/how-it-works.md#limitations](docs/how-it-works.md#limitations).
 
-Attempts that never ran count against the requested number, so one clean
-attempt plus one error is `INCONCLUSIVE`, never `FIXED`. The verdict is
-recorded on the backend with the number of valid attempts; the backend moves a
-capsule to `fixed` only for a verify where every requested attempt was valid
-(and rejects contradictory results). `bugcapsule regress run` treats `INCONCLUSIVE`
-as a failure.
+## Demo app
 
-On an iOS simulator the CLI builds once, then launches the installed app for each attempt. It hands over the replay request through a file in the app's sandbox, because environment variables don't reach the app on recent simulator runtimes. Other devices use `flutter run` with a dart-define for each attempt.
-
-## Try the demo (≈10 minutes)
+[`example/bug_capsule_demo`](example/bug_capsule_demo) is a shop app with
+five planted "can't reproduce" bugs. With an SDK token and the CLI logged in:
 
 ```bash
-# backend: see bug_capsule_backend/README.md, then
-bugcapsule login --url http://127.0.0.1:8787 --secret-key bcs_... --ingest-key bci_...
 cd example/bug_capsule_demo
 flutter run -d <simulator> --dart-define=BUGCAPSULE_GIT_SHA=$(git rev-parse HEAD) \
-  --dart-define=BUGCAPSULE_TOKEN=bcsdk.v1....   # or BUGCAPSULE_BACKEND_URL + BUGCAPSULE_INGEST_KEY
+  --dart-define=BUGCAPSULE_TOKEN=bcsdk.v1.…
 ```
 
 | Bug | How to trigger | What replay needs |
 |---|---|---|
-| Profile/recommendations race | tap **Refresh picks** until it crashes (~1 in 4) | recorded response latencies |
-| Legacy cart cache | **Simulate upgrade from v0.9**, restart, open cart | storage from the launch checkpoint |
-| Negative total | open cart until subtotal < $100, apply `SAVE100` | typed text + server cart + custom assertion |
-| Discontinued item | open cart until "unavailable" shows, checkout | the server response with `price: null` |
-| Orders stuck loading | open **My orders** until it spins > 4s | the recorded `202` + watchdog assertion |
+| Profile/recommendations race | Tap **Refresh picks** until it crashes (~1 in 4) | Recorded response timing |
+| Legacy cart cache | **Simulate upgrade from v0.9**, restart, open the cart | Storage from the launch checkpoint |
+| Negative total | Open the cart until the subtotal is under $100, apply `SAVE100` | Typed text, server cart, custom assertion |
+| Discontinued item | Open the cart until "unavailable" shows, check out | The server response with `price: null` |
+| Orders stuck loading | Open **My orders** until it spins for more than 4 s | The recorded `202` and a watchdog assertion |
 
-Then `bugcapsule list`, `bugcapsule run <id>`, fix the bug, `bugcapsule verify <id>`.
+Then `bugcapsule list`, `bugcapsule run <id>`, fix the bug and
+`bugcapsule verify <id>`. A step-by-step walkthrough is in
+[docs/onboarding.md](docs/onboarding.md).
 
-Measured on an iPhone 18 Pro simulator (iOS 27, Flutter 3.47.7): the race, legacy-cache and coupon capsules each reproduced 3/3 with pointer replay. The race and legacy-cache capsules also reproduced 1/1 with semantic replay; the legacy-cache one ran on a freshly installed app. A fix for the race verified as `FIXED 2/2`.
+## Upgrading
 
-## Production checklist
+**To 0.4 (one package).** The twelve `bug_capsule_*` packages are now one
+package, `bug_capsule`, with the same API:
 
-Production capture works, but it is the riskiest mode. Before rollout:
+- Replace every `bug_capsule_*` dependency with `bug_capsule`.
+- Replace every `package:bug_capsule_*/…` import with
+  `import 'package:bug_capsule/bug_capsule.dart';`.
+- CLI: `dart pub global deactivate bug_capsule_cli`, then
+  [install the CLI](#install-the-cli) again.
 
-1. **Kill switch.** `bugcapsule capture --on` disables capture. The backend refuses uploads from that moment (`403`). Devices see it at their next config refresh: after `configTtlSeconds` (default 5 min), when the app returns to the foreground, or before any upload attempt with a config older than its TTL. They then stop recording, drop the buffer, delete queued and saved captures, and keep the switch across launches even offline. An upload already on the wire finishes. Re-enabling applies from the next app launch. Test it before you need it.
-2. **Remote config.** Fetched after startup, then refreshed on its TTL with exponential backoff (30 s to 30 min, `Retry-After` honoured) and on resume. It is cached per backend URL and ingest key, so a staging config never applies to production. With no cached config (first launch, offline), debug/QA builds record and production builds sample at the app's cap, but **nothing is uploaded until a config fetch succeeds**; a cached config older than `maxStaleConfig` (7 days) also stops uploads. A refused credential (a revoked, expired or unknown SDK token, or an inactive ingest key) stops capture and uploads for the session; the SDK prints the reason once and `BugCapsule.status` reports `rejected`. New body and redaction settings apply to the running session, including events already buffered.
-3. **Sampling.** A production session records with probability `min(productionSampleRate, backend sampleRate)`, decided at launch. Lowering the remote rate mid-session keeps a recording session with probability new/old, so the share of recording sessions follows the new rate; raising it applies from the next launch and never above the app's cap (default 0.1). Sessions that aren't sampled install no recorders.
-4. **Redaction.** Applied on the device to events and checkpoints alike, and again to everything integrations record. See the spec's [Redaction](spec/capsule-v1.md#redaction) section for exactly what is caught and what is not. Add `redactKeys`, `redactPatterns`, `beforeRecord` / `beforeCheckpoint` hooks, `BugCapsuleDio(exclude: ...)` / `BugCapsuleHttp(exclude: ...)` for endpoints you must not record and `BugCapsuleGoRouter(sanitizeLocation: ...)` for secrets in paths; then inspect real capsules (`bugcapsule inspect`) before widening the rollout.
-5. **Bodies.** Turn off `captureNetworkBodies` (remotely too) for endpoints you can't send; capsules then become `partial`. HTTP capture never buffers whole bodies: bytes stream to the app unchanged and only a bounded prefix is kept (`maxBodyBytes`, 256 KiB; binary 64 KiB). With bodies off nothing is kept for the recording; request bodies up to 64 KiB are still hashed (never stored) so replay can match requests.
-6. **Device storage.** At most 20 saved captures and an upload outbox of 10 capsules / 10 MiB / 7 days (`BugCapsuleConfig.outboxLimits`), oldest evicted first; failed uploads back off from 30 s to 1 h. Disk-full and corrupt files drop the capsule, never the app.
-7. **Isolation.** If storage, an integration's setup or anything else in capture setup fails, the app starts without capture. SDK errors are never thrown into the app's error handlers or callbacks.
-8. **Performance.** Measure cold start, frame times and memory on a low-end Android device with and without BugCapsule ([plan](docs/release-and-device-test-plan.md)). Pointer and HTTP capture and redaction run on the UI isolate; capsule encoding runs in a background isolate.
-9. **Release builds never enter replay mode** (`BUGCAPSULE_REPLAY_URL` and replay request files are ignored when `kReleaseMode`).
-10. **Monitoring.** On by default, independent of capsule sampling: every production session sends sessions and (sampled) error events. Set `errorSampleRate` / `tracesSampleRate` and `tracePropagationTargets` deliberately, check `beforeSend` output, upload symbols for every release build, and know that `monitoringEnabled: false` in the remote config stops it without touching capsules.
+Older upgrades: [docs/upgrading.md](docs/upgrading.md).
 
-## Known limitations (v0.2)
+## More documentation
 
-- Replay keeps recorded timing, except that idle gaps between inputs longer than 1.5 s shrink to about 0.3 s when the recording and the replayed app are both idle (no pending response, no recent BLoC activity, no pressed pointer; running animations get up to 2 s to finish). Recorded network latency is never shortened. `--no-compress-idle` replays in real time. App `Timer`s are not tracked, so a timer whose effect is not recorded (say, a plain `setState`) can be skipped over; use `--no-compress-idle` if replay depends on one.
-- `DateTime.now()`, `Timer`s and animations are not virtualized; only `clock.now()` and `BugCapsule.random` are deterministic.
-- Platform channels, native SDKs (Firebase, maps, payments) and WebSockets are not captured. Bugs that depend on them are partial at best. HTTP is captured for Dio and `package:http` clients only (`dart:io` `HttpClient` used directly, `cupertino_http` / `cronet_http` without an `http.Client` wrapper, and GraphQL subscriptions are not).
-- Redux has no integration yet; its state is re-executed by replay but not checkpointed or restored.
-- Riverpod, `ChangeNotifier`, GetX and MobX state injection from periodic checkpoints has the same limits as BLoC: instances are matched by initialization order (`cart#0`), and an `AsyncNotifier` whose `build` finishes after the restore overwrites the restored state.
-- BLoC state injection from periodic checkpoints matches instances by creation order (`CartBloc#0`). BLoCs that dispatch events in their constructor can overwrite restored state. Launch-checkpoint replay (the default for sessions within the 5-minute window) re-executes the session instead and avoids this.
-- Pointer replay assumes the same logical screen size; otherwise the CLI scales coordinates and falls back to semantic actions when they exist.
-- The Android path (`flutter run` + `adb reverse`) is implemented but has not been exercised end to end yet.
-- Redaction is pattern based. It does not recognise personal data that is not a credential (names, emails, addresses) or secrets in URL paths; use the hooks above.
-- A request whose server answers before the request body was fully sent is keyed without its body hash; replay may then report it as unrecorded.
-- Monitoring: app start is measured from `BugCapsule.init` (the first Dart code) to the first frame, not from process start, and only cold starts are reported. State-management breadcrumbs appear only in sessions that record a capsule (route, action, HTTP, lifecycle, log and error breadcrumbs always do). Trace headers are added only while a span is active (a screen transaction or `startSpan`). `enableUserInteractionTracing` covers `BugCapsule.action` callbacks only. Device model and manufacturer are not collected from Dart (no device-info dependency).
-- Capsules captured by SDK 0.1 with body capture off were keyed without body hashes; replaying them with 0.2 reports those requests as unrecorded.
+| Topic | Where |
+|---|---|
+| Flutter SDK guide | [docs.bugcapsule.com/flutter](https://docs.bugcapsule.com/flutter.html) |
+| Quickstart (30 minutes, capture to verified fix) | [docs.bugcapsule.com/quickstart](https://docs.bugcapsule.com/quickstart.html) |
+| CLI reference | [docs.bugcapsule.com/cli](https://docs.bugcapsule.com/cli.html) |
+| Replaying Android, iOS and web capsules with the CLI | [docs/cli-runtimes.md](docs/cli-runtimes.md) |
+| Capsule format | [spec/capsule-v1.md](spec/capsule-v1.md) |
+| How capture, uploads and replay work | [docs/how-it-works.md](docs/how-it-works.md) |
+| Feature matrix across SDKs | [docs.bugcapsule.com/feature-matrix](https://docs.bugcapsule.com/feature-matrix.html) |
+| Troubleshooting | [docs.bugcapsule.com/troubleshooting](https://docs.bugcapsule.com/troubleshooting.html) |
+| Working on this repository | [docs/development.md](docs/development.md) |
 
-## Upgrading to 0.4 (one package)
+## Support and license
 
-The twelve packages (`bug_capsule_core`, `bug_capsule_flutter`, `bug_capsule_bloc`,
-`bug_capsule_dio`, …, `bug_capsule_cli`) are now one package, `bug_capsule`. The API
-is unchanged; only the dependency and the imports change.
+Questions or access requests: [contact@bugcapsule.com](mailto:contact@bugcapsule.com).
 
-- In `pubspec.yaml`, replace every `bug_capsule_*` dependency with the single `bug_capsule` line above.
-- Replace every `package:bug_capsule_*/…` import with `import 'package:bug_capsule/bug_capsule.dart';`.
-- CLI: `dart pub global deactivate bug_capsule_cli`, then activate `bug_capsule` as shown in [The CLI](#the-cli).
-- Capsules still report `sdk.name: bug_capsule_flutter`, so the backend and older CLIs read them as before.
-
-## Upgrading from 0.1
-
-- `BugCapsuleSession` gained no members; `BugCapsule.resetForTest()` now returns a `Future` (await it in tests).
-- The upload outbox is now bounded; files left by 0.1 are kept and count toward the limits.
-- CLI 0.2 reports verdicts with `validAttempts`. The backend (0.2) no longer moves a capsule to `fixed` (or `not_reproduced`) on results from CLI 0.1, which could not tell an errored attempt from a passing one; update the CLI.
-
-## Development
-
-```bash
-flutter pub get                       # pub workspace: the package and the demo app
-(cd packages/bug_capsule && flutter test)   # core, CLI, runtime and every integration
-(cd example/bug_capsule_demo && flutter test)
-(cd packages/bug_capsule && dart run bugcapsule --help)
-```
-
-`spec/fixtures/connection-token-v1/vectors.json` holds the SDK token test
-vectors every BugCapsule SDK passes ([spec](spec/connection-token-v1.md)).
-
-`spec/fixtures/capsule-v1` holds valid and malformed capsules that both this
-SDK and the backend test against; change them here and copy them to the
-backend's `test/fixtures/capsule-v1` (its test suite fails when they differ).
-
-Release builds, real-device checks and the overhead budget:
-[docs/release-and-device-test-plan.md](docs/release-and-device-test-plan.md).
-End-to-end onboarding with the demo app: [docs/onboarding.md](docs/onboarding.md).
-
-## Release validation (2026-10-23)
-
-This repository is proprietary to Bug Capsule. Use, copying, modification, and distribution require prior written permission (see LICENSE). Local candidates are
-prepared without publishing. See `docs/release-readiness.md` for the current
-validation evidence and remaining release gates.
+This SDK is proprietary software of Bug Capsule. Use, copying, modification
+and distribution require prior written permission. See [LICENSE](LICENSE).
