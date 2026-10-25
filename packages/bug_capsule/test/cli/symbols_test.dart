@@ -79,19 +79,32 @@ Uint8List _note(List<int> id, Endian e) {
     ..setUint32(0, 4, e)
     ..setUint32(4, id.length, e)
     ..setUint32(8, 3, e);
-  return Uint8List.fromList([...head.buffer.asUint8List(), ...'GNU\x00'.codeUnits, ...id]);
+  return Uint8List.fromList([
+    ...head.buffer.asUint8List(),
+    ...'GNU\x00'.codeUnits,
+    ...id,
+  ]);
 }
 
 void main() {
   late Directory dir;
-  setUp(() async => dir = await Directory.systemTemp.createTemp('bugcapsule-symbols-'));
+  setUp(
+    () async =>
+        dir = await Directory.systemTemp.createTemp('bugcapsule-symbols-'),
+  );
   tearDown(() async => dir.delete(recursive: true));
 
   test('reads the GNU build id from section headers and program headers', () {
     expect(elfBuildId(elf64(buildId)), buildId);
     expect(elfBuildId(elf32be(buildId)), buildId);
-    expect(elfBuildId(Uint8List.fromList(utf8.encode('not an elf file at all, just text padding....')))
-        , isNull);
+    expect(
+      elfBuildId(
+        Uint8List.fromList(
+          utf8.encode('not an elf file at all, just text padding....'),
+        ),
+      ),
+      isNull,
+    );
   });
 
   test('reads the LC_UUID of Mach-O symbols (iOS / macOS), thin or fat', () {
@@ -104,68 +117,115 @@ void main() {
       ..setUint32(4, 1)
       ..setUint32(16, 32) // slice offset
       ..setUint32(20, thin.length);
-    expect(machoUuid(Uint8List.fromList([...fat.buffer.asUint8List(), ...thin])), uuid);
+    expect(
+      machoUuid(Uint8List.fromList([...fat.buffer.asUint8List(), ...thin])),
+      uuid,
+    );
     expect(machoUuid(elf64(buildId)), isNull);
   });
 
-  test('plans one elf upload per .symbols file and the obfuscation map', () async {
-    File('${dir.path}/app.android-arm64.symbols').writeAsBytesSync(elf64(buildId));
-    File('${dir.path}/app.android-x64.symbols').writeAsBytesSync(elf32be([1, 2, 3, 4]));
-    final map = File('${dir.path}/obfuscation.json')..writeAsStringSync('["MyClass","a"]');
-    final plan = await planSymbolUploads(
-      splitDebugInfo: dir.path,
-      obfuscationMap: map.path,
-      obfuscationId: '8F0E2A1C-1234-4ABC-8DEF-0123456789AB',
-      release: 'com.shop@1.4.0+52',
-    );
-    expect([for (final u in plan) u.kind], ['elf', 'elf', 'dart_obfuscation']);
-    expect(plan[0].query, {'debugId': 'a3a2a1a0-a5a4-a7a6-a8a9-aaabacadaeaf', 'arch': 'arm64', 'name': 'app.android-arm64.symbols'});
-    expect(plan[1].query['arch'], 'x86_64');
-    expect(plan[1].query['debugId'], '04030201-0000-0000-0000-000000000000');
-    expect(plan[2].query, {'debugId': '8f0e2a1c-1234-4abc-8def-0123456789ab', 'release': 'com.shop@1.4.0+52'});
-  });
+  test(
+    'plans one elf upload per .symbols file and the obfuscation map',
+    () async {
+      File(
+        '${dir.path}/app.android-arm64.symbols',
+      ).writeAsBytesSync(elf64(buildId));
+      File(
+        '${dir.path}/app.android-x64.symbols',
+      ).writeAsBytesSync(elf32be([1, 2, 3, 4]));
+      final map = File('${dir.path}/obfuscation.json')
+        ..writeAsStringSync('["MyClass","a"]');
+      final plan = await planSymbolUploads(
+        splitDebugInfo: dir.path,
+        obfuscationMap: map.path,
+        obfuscationId: '8F0E2A1C-1234-4ABC-8DEF-0123456789AB',
+        release: 'com.shop@1.4.0+52',
+      );
+      expect(
+        [for (final u in plan) u.kind],
+        ['elf', 'elf', 'dart_obfuscation'],
+      );
+      expect(plan[0].query, {
+        'debugId': 'a3a2a1a0-a5a4-a7a6-a8a9-aaabacadaeaf',
+        'arch': 'arm64',
+        'name': 'app.android-arm64.symbols',
+      });
+      expect(plan[1].query['arch'], 'x86_64');
+      expect(plan[1].query['debugId'], '04030201-0000-0000-0000-000000000000');
+      expect(plan[2].query, {
+        'debugId': '8f0e2a1c-1234-4abc-8def-0123456789ab',
+        'release': 'com.shop@1.4.0+52',
+      });
+    },
+  );
 
   test('refuses unusable input', () async {
     expect(() => planSymbolUploads(), throwsStateError);
-    expect(() => planSymbolUploads(splitDebugInfo: dir.path), throwsStateError, reason: 'no .symbols files');
+    expect(
+      () => planSymbolUploads(splitDebugInfo: dir.path),
+      throwsStateError,
+      reason: 'no .symbols files',
+    );
     File('${dir.path}/app.ios-arm64.symbols').writeAsStringSync('not elf');
-    expect(() => planSymbolUploads(splitDebugInfo: dir.path), throwsStateError, reason: 'no build id');
+    expect(
+      () => planSymbolUploads(splitDebugInfo: dir.path),
+      throwsStateError,
+      reason: 'no build id',
+    );
     final map = File('${dir.path}/map.json')..writeAsStringSync('[]');
-    expect(() => planSymbolUploads(obfuscationMap: map.path, obfuscationId: 'nope'), throwsStateError);
+    expect(
+      () => planSymbolUploads(obfuscationMap: map.path, obfuscationId: 'nope'),
+      throwsStateError,
+    );
   });
 
-  test('uploads to POST /v1/debug-files with the secret key, gzip-compressed', () async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final requests = <(String, Uri, String?, String?, String?, List<int>)>[];
-    server.listen((req) async {
-      final body = await req.fold<List<int>>([], (a, b) => a..addAll(b));
-      requests.add((
-        req.method,
-        req.uri,
-        req.headers.value('authorization'),
-        req.headers.value('content-encoding'),
-        req.headers.contentType?.mimeType,
-        gzip.decode(body),
-      ));
-      req.response
-        ..statusCode = 201
-        ..headers.contentType = ContentType.json
-        ..write('{"id":"df1"}');
-      await req.response.close();
-    });
-    addTearDown(() => server.close(force: true));
+  test(
+    'uploads to POST /v1/debug-files with the secret key, gzip-compressed',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final requests = <(String, Uri, String?, String?, String?, List<int>)>[];
+      server.listen((req) async {
+        final body = await req.fold<List<int>>([], (a, b) => a..addAll(b));
+        requests.add((
+          req.method,
+          req.uri,
+          req.headers.value('authorization'),
+          req.headers.value('content-encoding'),
+          req.headers.contentType?.mimeType,
+          gzip.decode(body),
+        ));
+        req.response
+          ..statusCode = 201
+          ..headers.contentType = ContentType.json
+          ..write('{"id":"df1"}');
+        await req.response.close();
+      });
+      addTearDown(() => server.close(force: true));
 
-    final client = BackendClient(Credentials(url: 'http://127.0.0.1:${server.port}/', secretKey: 'bcs_test'));
-    final file = elf64(buildId);
-    final res = await client.uploadDebugFile('elf', {'debugId': 'a3a2a1a0-a5a4-a7a6-a8a9-aaabacadaeaf', 'arch': 'arm64'}, file);
-    expect(res['id'], 'df1');
-    final (method, uri, auth, encoding, type, body) = requests.single;
-    expect(method, 'POST');
-    expect(uri.path, '/v1/debug-files');
-    expect(uri.queryParameters, {'kind': 'elf', 'debugId': 'a3a2a1a0-a5a4-a7a6-a8a9-aaabacadaeaf', 'arch': 'arm64'});
-    expect(auth, 'Bearer bcs_test');
-    expect(encoding, 'gzip');
-    expect(type, 'application/octet-stream');
-    expect(body, file);
-  });
+      final client = BackendClient(
+        Credentials(
+          url: 'http://127.0.0.1:${server.port}/',
+          secretKey: 'bcs_test',
+        ),
+      );
+      final file = elf64(buildId);
+      final res = await client.uploadDebugFile('elf', {
+        'debugId': 'a3a2a1a0-a5a4-a7a6-a8a9-aaabacadaeaf',
+        'arch': 'arm64',
+      }, file);
+      expect(res['id'], 'df1');
+      final (method, uri, auth, encoding, type, body) = requests.single;
+      expect(method, 'POST');
+      expect(uri.path, '/v1/debug-files');
+      expect(uri.queryParameters, {
+        'kind': 'elf',
+        'debugId': 'a3a2a1a0-a5a4-a7a6-a8a9-aaabacadaeaf',
+        'arch': 'arm64',
+      });
+      expect(auth, 'Bearer bcs_test');
+      expect(encoding, 'gzip');
+      expect(type, 'application/octet-stream');
+      expect(body, file);
+    },
+  );
 }

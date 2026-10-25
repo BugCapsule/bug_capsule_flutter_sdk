@@ -48,29 +48,34 @@ String _specRoot() {
 
 /// Exposed so the test can compare without touching the files.
 Map<String, Object?> buildConformanceFixtures() => {
-      'request-keys.json': _requestKeys(),
-      'signatures.json': _signatures(),
-      'redaction.json': _redaction(),
-      'verdicts.json': _verdicts(),
-    };
+  'request-keys.json': _requestKeys(),
+  'signatures.json': _signatures(),
+  'redaction.json': _redaction(),
+  'verdicts.json': _verdicts(),
+};
 
 Map<String, Object?> _header(String what) => {
-      'format': 'bugcapsule.conformance',
-      'version': 1,
-      'generatedBy': 'packages/bug_capsule/tool/generate_conformance.dart',
-      'description': what,
-    };
+  'format': 'bugcapsule.conformance',
+  'version': 1,
+  'generatedBy': 'packages/bug_capsule/tool/generate_conformance.dart',
+  'description': what,
+};
 
 Map<String, Object?> _requestKeys() {
   final cases = <Map<String, Object?>>[];
   for (final c in requestKeyCases) {
     final rules = [
-      for (final r in (c['rules'] as List? ?? const []).cast<Map<String, Object?>>())
+      for (final r
+          in (c['rules'] as List? ?? const []).cast<Map<String, Object?>>())
         EndpointRule(
           r['method'] as String,
           r['path'] as String,
-          ignoreQuery: {...(r['ignoreQuery'] as List? ?? const []).cast<String>()},
-          ignoreBodyFields: {...(r['ignoreBodyFields'] as List? ?? const []).cast<String>()},
+          ignoreQuery: {
+            ...(r['ignoreQuery'] as List? ?? const []).cast<String>(),
+          },
+          ignoreBodyFields: {
+            ...(r['ignoreBodyFields'] as List? ?? const []).cast<String>(),
+          },
           matchBodyFields: r['matchBodyFields'] == null
               ? null
               : {...(r['matchBodyFields'] as List).cast<String>()},
@@ -81,24 +86,34 @@ Map<String, Object?> _requestKeys() {
       globalIgnoreQuery: c.containsKey('globalIgnoreQuery')
           ? {...(c['globalIgnoreQuery'] as List).cast<String>()}
           : const {'_', 'ts', 'timestamp', 'nonce', 'cachebust'},
-      globalIgnoreBodyFields: {...(c['globalIgnoreBodyFields'] as List? ?? const []).cast<String>()},
+      globalIgnoreBodyFields: {
+        ...(c['globalIgnoreBodyFields'] as List? ?? const []).cast<String>(),
+      },
     );
-    final redactor = Redactor(extraKeys: (c['redactKeys'] as List? ?? const []).cast<String>());
+    final redactor = Redactor(
+      extraKeys: (c['redactKeys'] as List? ?? const []).cast<String>(),
+    );
     var uri = Uri.parse(c['url'] as String);
     var body = c['body'];
     if (c['redact'] == true) {
       uri = redactor.redactUri(uri);
-      if (body != null) body = redactor.redactJson(body is String ? _tryJson(body) : body);
+      if (body != null) {
+        body = redactor.redactJson(body is String ? _tryJson(body) : body);
+      }
     }
-    cases.add({...c, 'expectedKey': builder.keyFor(c['method'] as String, uri, body)});
+    cases.add({
+      ...c,
+      'expectedKey': builder.keyFor(c['method'] as String, uri, body),
+    });
   }
   return {
     ..._header(
-        'Request keys (spec capsule-v1 "Network matching"). Inputs: method, url, body (a JSON '
-        'value, or a string that is parsed as JSON when it is valid JSON and hashed as text '
-        'otherwise; null = no body), rules, globalIgnoreQuery (default: _, ts, timestamp, nonce, '
-        'cachebust), globalIgnoreBodyFields. With "redact": true the URL and body go through '
-        'the default redactor (plus redactKeys) first, as capture and replay do.'),
+      'Request keys (spec capsule-v1 "Network matching"). Inputs: method, url, body (a JSON '
+      'value, or a string that is parsed as JSON when it is valid JSON and hashed as text '
+      'otherwise; null = no body), rules, globalIgnoreQuery (default: _, ts, timestamp, nonce, '
+      'cachebust), globalIgnoreBodyFields. With "redact": true the URL and body go through '
+      'the default redactor (plus redactKeys) first, as capture and replay do.',
+    ),
     'cases': cases,
   };
 }
@@ -112,32 +127,47 @@ Object? _tryJson(String s) {
 }
 
 Map<String, Object?> _signatures() => {
-      ..._header('Failure signatures: <kind>:<type>:<normalized first line of the message>.'),
-      'cases': [
-        for (final c in signatureCases)
-          {
-            ...c,
-            'expected': FailureSignature.compute(
-                FailureKind.values.byName(c['kind'] as String), c['type'] as String, c['message'] as String),
-          },
-      ],
-    };
+  ..._header(
+    'Failure signatures: <kind>:<type>:<normalized first line of the message>.',
+  ),
+  'cases': [
+    for (final c in signatureCases)
+      {
+        ...c,
+        'expected': FailureSignature.compute(
+          FailureKind.values.byName(c['kind'] as String),
+          c['type'] as String,
+          c['message'] as String,
+        ),
+      },
+  ],
+};
 
 Map<String, Object?> _redaction() {
-  final r = Redactor(extraKeys: const ['loyaltyId'], extraHeaders: const ['x-tenant']);
+  final r = Redactor(
+    extraKeys: const ['loyaltyId'],
+    extraHeaders: const ['x-tenant'],
+  );
   return {
-    ..._header('Redaction with the default rules plus extraKeys ["loyaltyId"] and extraHeaders '
-        '["x-tenant"]. redactUrl: "params" lists the decoded query parameters of the output in '
-        'order; implementations must match them (and should match "output" exactly).'),
+    ..._header(
+      'Redaction with the default rules plus extraKeys ["loyaltyId"] and extraHeaders '
+      '["x-tenant"]. redactUrl: "params" lists the decoded query parameters of the output in '
+      'order; implementations must match them (and should match "output" exactly).',
+    ),
     'extraKeys': ['loyaltyId'],
     'extraHeaders': ['x-tenant'],
     'placeholder': Redactor.placeholder,
     'keys': [
       for (final k in redactionKeyCases)
-        {'key': k, 'sensitive': r.isSensitiveKey(k), 'sensitiveQuery': r.isSensitiveQueryKey(k)},
+        {
+          'key': k,
+          'sensitive': r.isSensitiveKey(k),
+          'sensitiveQuery': r.isSensitiveQueryKey(k),
+        },
     ],
     'headers': [
-      for (final h in redactionHeaderCases) {'name': h, 'sensitive': r.isSensitiveHeader(h)},
+      for (final h in redactionHeaderCases)
+        {'name': h, 'sensitive': r.isSensitiveHeader(h)},
     ],
     'scrubText': [
       for (final t in scrubTextCases) {'input': t, 'output': r.scrubText(t)},
@@ -158,7 +188,8 @@ Map<String, Object?> _redaction() {
         }(),
     ],
     'redactHeaders': [
-      for (final h in redactHeadersCases) {'input': h, 'output': r.redactHeaders(h)},
+      for (final h in redactHeadersCases)
+        {'input': h, 'output': r.redactHeaders(h)},
     ],
     'redactJson': [
       for (final j in redactJsonCases) {'input': j, 'output': r.redactJson(j)},
@@ -167,8 +198,11 @@ Map<String, Object?> _redaction() {
       for (final t in redactTextCases)
         {
           ...t,
-          'output': r.redactText(t['id'] as String, t['value'] as String,
-              sensitive: t['sensitive'] as bool? ?? false),
+          'output': r.redactText(
+            t['id'] as String,
+            t['value'] as String,
+            sensitive: t['sensitive'] as bool? ?? false,
+          ),
         },
     ],
   };
@@ -188,16 +222,29 @@ Map<String, Object?> _verdicts() {
           eventsDispatched: r['eventsDispatched'] as int? ?? 0,
           eventsExpected: r['eventsExpected'] as int?,
           divergences: [
-            for (final d in (r['divergences'] as List? ?? const []).cast<String>()) Divergence(d, 'x'),
+            for (final d
+                in (r['divergences'] as List? ?? const []).cast<String>())
+              Divergence(d, 'x'),
           ],
           otherFailures: [
-            for (final f in (r['otherFailures'] as List? ?? const []).cast<String>())
-              FailureRecord(kind: FailureKind.exception, signature: f, type: 'E', message: '', t: 0),
+            for (final f
+                in (r['otherFailures'] as List? ?? const []).cast<String>())
+              FailureRecord(
+                kind: FailureKind.exception,
+                signature: f,
+                type: 'E',
+                message: '',
+                t: 0,
+              ),
           ],
           message: r['message'] as String?,
         ),
     ];
-    final e = evaluateRun(RunKind.values.byName(c['kind'] as String), c['requested'] as int, reports);
+    final e = evaluateRun(
+      RunKind.values.byName(c['kind'] as String),
+      c['requested'] as int,
+      reports,
+    );
     cases.add({
       ...c,
       'verdict': e.verdict.name,
@@ -208,8 +255,10 @@ Map<String, Object?> _verdicts() {
     });
   }
   return {
-    ..._header('Attempt classification and batch verdicts (lib/src/core/verdict.dart evaluateRun). '
-        'Divergence types not listed in "expectedDivergences" are material.'),
+    ..._header(
+      'Attempt classification and batch verdicts (lib/src/core/verdict.dart evaluateRun). '
+      'Divergence types not listed in "expectedDivergences" are material.',
+    ),
     'expectedDivergences': DivergencePolicy.expected.toList()..sort(),
     'cases': cases,
   };

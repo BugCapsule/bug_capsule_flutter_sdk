@@ -67,5 +67,8 @@ abstract class BugCapsuleIntegration {
 
   Future<void> restore(Object? data, BugCapsuleSession session) async {}
 
-  void describeEligibility(EligibilityBuilder eligibility, RecordedWindow window) {}
+  void describeEligibility(
+    EligibilityBuilder eligibility,
+    RecordedWindow window,
+  ) {}
 }

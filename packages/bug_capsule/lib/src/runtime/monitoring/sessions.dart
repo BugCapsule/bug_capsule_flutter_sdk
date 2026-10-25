@@ -46,7 +46,10 @@ class SessionTracker {
       final foreground = state['foreground'] != false;
       final backgroundAt = DateTime.tryParse('${state['backgroundAt']}');
       s.status = foreground ? 'abnormal' : 'exited';
-      return s.payload(this, at: foreground ? s.lastUpdate : (backgroundAt ?? s.lastUpdate));
+      return s.payload(
+        this,
+        at: foreground ? s.lastUpdate : (backgroundAt ?? s.lastUpdate),
+      );
     } catch (_) {
       return null;
     }
@@ -117,11 +120,14 @@ class SessionTracker {
 class _Session {
   _Session(this.sid, this.started) : lastUpdate = started;
 
-  factory _Session.fromJson(Map<String, Object?> j) => _Session(j['sid'] as String, DateTime.parse(j['started'] as String))
-    ..seq = j['seq'] as int? ?? 0
-    ..errors = j['errors'] as int? ?? 0
-    ..did = j['did'] as String?
-    ..lastUpdate = DateTime.tryParse('${j['lastUpdate']}') ?? DateTime.parse(j['started'] as String);
+  factory _Session.fromJson(Map<String, Object?> j) =>
+      _Session(j['sid'] as String, DateTime.parse(j['started'] as String))
+        ..seq = j['seq'] as int? ?? 0
+        ..errors = j['errors'] as int? ?? 0
+        ..did = j['did'] as String?
+        ..lastUpdate =
+            DateTime.tryParse('${j['lastUpdate']}') ??
+            DateTime.parse(j['started'] as String);
 
   final String sid;
   final DateTime started;
@@ -156,14 +162,14 @@ class _Session {
   }
 
   Map<String, Object?> state() => {
-        'sid': sid,
-        'did': did,
-        'seq': seq,
-        'started': started.toUtc().toIso8601String(),
-        'errors': errors,
-        'status': status,
-        'foreground': foreground,
-        'backgroundAt': backgroundAt?.toUtc().toIso8601String(),
-        'lastUpdate': lastUpdate.toUtc().toIso8601String(),
-      };
+    'sid': sid,
+    'did': did,
+    'seq': seq,
+    'started': started.toUtc().toIso8601String(),
+    'errors': errors,
+    'status': status,
+    'foreground': foreground,
+    'backgroundAt': backgroundAt?.toUtc().toIso8601String(),
+    'lastUpdate': lastUpdate.toUtc().toIso8601String(),
+  };
 }

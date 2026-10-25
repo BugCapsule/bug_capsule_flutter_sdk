@@ -4,13 +4,17 @@ import 'package:bug_capsule/src/core/core.dart';
 import 'package:test/test.dart';
 
 // Synthetic secrets only. Each must disappear from redacted output.
-const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzeW50aGV0aWMifQ.c3ludGhldGljLXNpZw';
+const jwt =
+    'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzeW50aGV0aWMifQ.c3ludGhldGljLXNpZw';
 const bearer = 'synthBearerValue0123456789';
 const queryToken = 'synthQueryToken42';
 const card = '4242 4242 4242 4242';
 
 void main() {
-  final r = Redactor(extraKeys: ['loyaltyId'], patterns: [RegExp(r'EMP-\d{6}')]);
+  final r = Redactor(
+    extraKeys: ['loyaltyId'],
+    patterns: [RegExp(r'EMP-\d{6}')],
+  );
 
   group('scrubText', () {
     test('removes bearer tokens, JWTs and known key prefixes', () {
@@ -45,13 +49,19 @@ void main() {
     });
 
     test('applies app patterns', () {
-      expect(r.scrubText('employee EMP-123456 logged in'), 'employee [REDACTED] logged in');
+      expect(
+        r.scrubText('employee EMP-123456 logged in'),
+        'employee [REDACTED] logged in',
+      );
     });
 
     test('leaves ordinary messages untouched (same instance)', () {
       const msg = 'Bad state: Cart total is negative (-3)';
       expect(identical(r.scrubText(msg), msg), isTrue);
-      expect(r.scrubText('https://shop.test/cart?page=2'), 'https://shop.test/cart?page=2');
+      expect(
+        r.scrubText('https://shop.test/cart?page=2'),
+        'https://shop.test/cart?page=2',
+      );
     });
   });
 
@@ -59,7 +69,12 @@ void main() {
     test('redacts by key at any depth and scrubs string values', () {
       final out =
           r.redactJson({
-                'user': {'password': 'x', 'fcmToken': 'y', 'shipping': 'z', 'pin': '1234'},
+                'user': {
+                  'password': 'x',
+                  'fcmToken': 'y',
+                  'shipping': 'z',
+                  'pin': '1234',
+                },
                 'list': [
                   {'loyalty_id': 'L1', 'name': 'a'},
                 ],
@@ -70,25 +85,40 @@ void main() {
       final user = out['user'] as Map;
       expect(user['password'], Redactor.placeholder);
       expect(user['shipping'], 'z');
-      expect(((out['list'] as List).first as Map)['loyalty_id'], Redactor.placeholder);
+      expect(
+        ((out['list'] as List).first as Map)['loyalty_id'],
+        Redactor.placeholder,
+      );
       expect(jsonEncode(out), isNot(contains(queryToken)));
       expect(jsonEncode(out), isNot(contains(bearer)));
     });
 
-    test('redacts JSON embedded in strings and keeps unchanged strings byte-identical', () {
-      final embedded = jsonEncode({'accessToken': 'synthEmbedded', 'theme': 'dark'});
-      const untouched = '{ "theme":  "dark" }';
-      final out = r.redactJson({'auth_state': embedded, 'prefs': untouched}) as Map;
-      expect(out['auth_state'], isNot(contains('synthEmbedded')));
-      expect(jsonDecode(out['auth_state'] as String), {
-        'accessToken': Redactor.placeholder,
-        'theme': 'dark',
-      });
-      expect(out['prefs'], untouched);
-    });
+    test(
+      'redacts JSON embedded in strings and keeps unchanged strings byte-identical',
+      () {
+        final embedded = jsonEncode({
+          'accessToken': 'synthEmbedded',
+          'theme': 'dark',
+        });
+        const untouched = '{ "theme":  "dark" }';
+        final out =
+            r.redactJson({'auth_state': embedded, 'prefs': untouched}) as Map;
+        expect(out['auth_state'], isNot(contains('synthEmbedded')));
+        expect(jsonDecode(out['auth_state'] as String), {
+          'accessToken': Redactor.placeholder,
+          'theme': 'dark',
+        });
+        expect(out['prefs'], untouched);
+      },
+    );
 
     test('does not treat a failure signature field as sensitive', () {
-      final out = r.redactJson({'signature': 'exception:StateError:x', 'key': 'GET a/b'}) as Map;
+      final out =
+          r.redactJson({
+                'signature': 'exception:StateError:x',
+                'key': 'GET a/b',
+              })
+              as Map;
       expect(out['signature'], 'exception:StateError:x');
       expect(out['key'], 'GET a/b');
     });
@@ -142,12 +172,21 @@ void main() {
     });
   });
 
-  test('redactText redacts sensitive ids, explicit sensitive fields and secrets in text', () {
-    expect(r.redactText('login.password', 'hunter2'), Redactor.placeholder);
-    expect(r.redactText('field1', 'hunter2', sensitive: true), Redactor.placeholder);
-    expect(r.redactText('notes', 'my token=$queryToken'), isNot(contains(queryToken)));
-    expect(r.redactText('notes', 'hello'), 'hello');
-  });
+  test(
+    'redactText redacts sensitive ids, explicit sensitive fields and secrets in text',
+    () {
+      expect(r.redactText('login.password', 'hunter2'), Redactor.placeholder);
+      expect(
+        r.redactText('field1', 'hunter2', sensitive: true),
+        Redactor.placeholder,
+      );
+      expect(
+        r.redactText('notes', 'my token=$queryToken'),
+        isNot(contains(queryToken)),
+      );
+      expect(r.redactText('notes', 'hello'), 'hello');
+    },
+  );
 
   test('scrubText stays fast on 256 KB bodies (no per-position rescans)', () {
     final inputs = [
@@ -160,12 +199,18 @@ void main() {
     for (final input in inputs) {
       final watch = Stopwatch()..start();
       r.scrubText(input);
-      expect(watch.elapsedMilliseconds, lessThan(250), reason: input.substring(0, 12));
+      expect(
+        watch.elapsedMilliseconds,
+        lessThan(250),
+        reason: input.substring(0, 12),
+      );
     }
   });
 
   test('malformed URLs are redacted, never thrown', () {
-    final uri = r.redactUri(Uri.parse('https://x.io/a?q=%FF&token=synthBad#frag'));
+    final uri = r.redactUri(
+      Uri.parse('https://x.io/a?q=%FF&token=synthBad#frag'),
+    );
     expect(uri.toString(), 'https://x.io/a');
   });
 
@@ -175,7 +220,10 @@ void main() {
     final a = keys.keyFor('GET', uri, null);
     expect(a.length, lessThanOrEqualTo(RequestKeyBuilder.maxKeyLength));
     expect(keys.keyFor('GET', uri, null), a);
-    expect(keys.keyFor('GET', Uri.parse('https://x.io/a?q=${'w' * 20000}'), null), isNot(a));
+    expect(
+      keys.keyFor('GET', Uri.parse('https://x.io/a?q=${'w' * 20000}'), null),
+      isNot(a),
+    );
   });
 
   test('extend adds rules', () {
@@ -184,15 +232,18 @@ void main() {
     expect(extended.extraKeys, ['tenantId']);
   });
 
-  test('FailureRecord scrubs message and stack, and the signature uses the scrubbed message', () {
-    final f = FailureRecord.exception(
-      StateError('upload failed for https://api.test/x?token=$queryToken'),
-      StackTrace.fromString('#0 send (package:a/a.dart:1:1) Bearer $bearer'),
-      10,
-      scrub: r.scrubText,
-    );
-    expect(f.message, isNot(contains(queryToken)));
-    expect(f.stack, isNot(contains(bearer)));
-    expect(f.signature, isNot(contains(queryToken)));
-  });
+  test(
+    'FailureRecord scrubs message and stack, and the signature uses the scrubbed message',
+    () {
+      final f = FailureRecord.exception(
+        StateError('upload failed for https://api.test/x?token=$queryToken'),
+        StackTrace.fromString('#0 send (package:a/a.dart:1:1) Bearer $bearer'),
+        10,
+        scrub: r.scrubText,
+      );
+      expect(f.message, isNot(contains(queryToken)));
+      expect(f.stack, isNot(contains(bearer)));
+      expect(f.signature, isNot(contains(queryToken)));
+    },
+  );
 }

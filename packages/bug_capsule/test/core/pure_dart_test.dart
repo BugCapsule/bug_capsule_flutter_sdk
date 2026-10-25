@@ -8,12 +8,17 @@ import 'package:test/test.dart';
 void main() {
   test('core and CLI import nothing that needs Flutter', () {
     final allowed = RegExp(
-        r"^import '(dart:(?!ui)|package:args/|package:bug_capsule/src/(core|cli)/|(?![a-z]+:)(?!.*(runtime|integrations)/))");
+      r"^import '(dart:(?!ui)|package:args/|package:bug_capsule/src/(core|cli)/|(?![a-z]+:)(?!.*(runtime|integrations)/))",
+    );
     final offenders = <String>[];
     for (final dir in ['lib/src/core', 'lib/src/cli', 'bin']) {
-      for (final file in Directory(dir).listSync(recursive: true).whereType<File>()) {
+      for (final file in Directory(
+        dir,
+      ).listSync(recursive: true).whereType<File>()) {
         for (final line in file.readAsLinesSync()) {
-          if (line.startsWith('import ') && !allowed.hasMatch(line)) offenders.add('${file.path}: $line');
+          if (line.startsWith('import ') && !allowed.hasMatch(line)) {
+            offenders.add('${file.path}: $line');
+          }
         }
       }
     }

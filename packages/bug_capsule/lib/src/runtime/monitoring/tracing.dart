@@ -86,7 +86,8 @@ class SpanImpl implements BugCapsuleSpan {
   bool get finished => endTimestamp != null;
 
   @override
-  BugCapsuleSpan startChild(String op, {String? description}) => transaction._startChild(this, op, description);
+  BugCapsuleSpan startChild(String op, {String? description}) =>
+      transaction._startChild(this, op, description);
 
   @override
   void setData(String key, Object? value) => data[key] = value;
@@ -108,24 +109,24 @@ class SpanImpl implements BugCapsuleSpan {
 
   @override
   String toBaggage() => Baggage.format(
-        traceId: traceId,
-        release: transaction._sink.release,
-        environment: transaction._sink.environment,
-        sampleRate: transaction.sampleRate,
-        sampled: sampled,
-      );
+    traceId: traceId,
+    release: transaction._sink.release,
+    environment: transaction._sink.environment,
+    sampleRate: transaction.sampleRate,
+    sampled: sampled,
+  );
 
   Map<String, Object?> toJson() => {
-        'spanId': spanId,
-        'parentSpanId': parentSpanId,
-        'op': cut(op, 100),
-        if (description != null) 'description': cut(description!, 2000),
-        'startTimestamp': isoTimestamp(startTimestamp),
-        'timestamp': isoTimestamp(endTimestamp ?? DateTime.now()),
-        'status': status ?? SpanStatus.ok,
-        if (data.isNotEmpty) 'data': data,
-        if (tags.isNotEmpty) 'tags': sanitizeTags(tags),
-      };
+    'spanId': spanId,
+    'parentSpanId': parentSpanId,
+    'op': cut(op, 100),
+    if (description != null) 'description': cut(description!, 2000),
+    'startTimestamp': isoTimestamp(startTimestamp),
+    'timestamp': isoTimestamp(endTimestamp ?? DateTime.now()),
+    'status': status ?? SpanStatus.ok,
+    if (data.isNotEmpty) 'data': data,
+    if (tags.isNotEmpty) 'tags': sanitizeTags(tags),
+  };
 }
 
 class TransactionImpl extends SpanImpl implements BugCapsuleTransaction {
@@ -143,13 +144,21 @@ class TransactionImpl extends SpanImpl implements BugCapsuleTransaction {
     super.startTimestamp,
     this.idleTimeout,
     this.maxDuration = const Duration(seconds: 30),
-  })  : _name = name,
-        _sink = sink,
-        super._(null, traceId: traceId ?? newTraceId(), spanId: newSpanId(), description: null) {
+  }) : _name = name,
+       _sink = sink,
+       super._(
+         null,
+         traceId: traceId ?? newTraceId(),
+         spanId: newSpanId(),
+         description: null,
+       ) {
     _transaction = this;
     if (idleTimeout != null) {
       _restartIdle();
-      _deadline = Timer(maxDuration, () => _finish(status: SpanStatus.deadlineExceeded));
+      _deadline = Timer(
+        maxDuration,
+        () => _finish(status: SpanStatus.deadlineExceeded),
+      );
     }
   }
 
@@ -185,8 +194,14 @@ class TransactionImpl extends SpanImpl implements BugCapsuleTransaction {
       measurements[name] = {'value': value, 'unit': unit};
 
   SpanImpl _startChild(SpanImpl parent, String op, String? description) {
-    final child = SpanImpl._(this,
-        traceId: traceId, spanId: newSpanId(), parentSpanId: parent.spanId, op: op, description: description);
+    final child = SpanImpl._(
+      this,
+      traceId: traceId,
+      spanId: newSpanId(),
+      parentSpanId: parent.spanId,
+      op: op,
+      description: description,
+    );
     if (finished || children.length >= 1000) return child;
     children.add(child);
     _open++;
@@ -214,7 +229,8 @@ class TransactionImpl extends SpanImpl implements BugCapsuleTransaction {
   }
 
   @override
-  void finish({String? status, DateTime? endTimestamp}) => _finish(status: status, endTimestamp: endTimestamp);
+  void finish({String? status, DateTime? endTimestamp}) =>
+      _finish(status: status, endTimestamp: endTimestamp);
 
   void _finish({String? status, DateTime? endTimestamp}) {
     if (finished) return;
@@ -248,23 +264,23 @@ class TransactionImpl extends SpanImpl implements BugCapsuleTransaction {
   }
 
   Map<String, Object?> payload() => {
-        'eventId': eventId,
-        'traceId': traceId,
-        'spanId': spanId,
-        'parentSpanId': parentSpanId,
-        'name': cut(name, 200),
-        'op': cut(op, 100),
-        'startTimestamp': isoTimestamp(startTimestamp),
-        'timestamp': isoTimestamp(endTimestamp ?? DateTime.now()),
-        'status': status ?? SpanStatus.ok,
-        'runtime': 'flutter',
-        'release': ?_sink.release,
-        'environment': ?_sink.environment,
-        'tags': sanitizeTags(tags),
-        if (data.isNotEmpty) 'extra': data,
-        'measurements': measurements,
-        'spans': [for (final c in children.take(1000)) c.toJson()],
-      };
+    'eventId': eventId,
+    'traceId': traceId,
+    'spanId': spanId,
+    'parentSpanId': parentSpanId,
+    'name': cut(name, 200),
+    'op': cut(op, 100),
+    'startTimestamp': isoTimestamp(startTimestamp),
+    'timestamp': isoTimestamp(endTimestamp ?? DateTime.now()),
+    'status': status ?? SpanStatus.ok,
+    'runtime': 'flutter',
+    'release': ?_sink.release,
+    'environment': ?_sink.environment,
+    'tags': sanitizeTags(tags),
+    if (data.isNotEmpty) 'extra': data,
+    'measurements': measurements,
+    'spans': [for (final c in children.take(1000)) c.toJson()],
+  };
 }
 
 /// The span `startSpan` made active in the current zone, if still open.

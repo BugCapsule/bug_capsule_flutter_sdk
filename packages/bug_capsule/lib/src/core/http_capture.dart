@@ -32,8 +32,9 @@ abstract final class HttpBodies {
   }) {
     if (bytes.isEmpty) return (null, 'json');
     final type = (contentType ?? '').toLowerCase();
-    (Object?, String) binary() =>
-        bytes.length > maxBinaryBytes ? (null, 'truncated') : (base64Encode(bytes), 'base64');
+    (Object?, String) binary() => bytes.length > maxBinaryBytes
+        ? (null, 'truncated')
+        : (base64Encode(bytes), 'base64');
     if (isText(type)) {
       final String text;
       try {
@@ -62,38 +63,56 @@ abstract final class HttpBodies {
 
   /// The bytes replay serves for a recorded body.
   static List<int> encode(Object? body, String encoding) => switch (encoding) {
-        'json' => body == null ? const [] : utf8.encode(jsonEncode(body)),
-        'text' => utf8.encode(body as String? ?? ''),
-        'form' => utf8.encode(Uri(queryParameters: (body as Map).cast<String, String>()).query),
-        'base64' => base64Decode(body as String),
-        _ => const [],
-      };
+    'json' => body == null ? const [] : utf8.encode(jsonEncode(body)),
+    'text' => utf8.encode(body as String? ?? ''),
+    'form' => utf8.encode(
+      Uri(queryParameters: (body as Map).cast<String, String>()).query,
+    ),
+    'base64' => base64Decode(body as String),
+    _ => const [],
+  };
 
   /// Response headers replay can serve as recorded: length and transfer
   /// encodings described the original bytes, not the re-encoded body.
   static Map<String, String> replayHeaders(Map<String, String> recorded) => {
-        for (final e in recorded.entries)
-          if (e.key != 'content-length' && e.key != 'content-encoding' && e.key != 'transfer-encoding')
-            e.key: e.value,
-      };
+    for (final e in recorded.entries)
+      if (e.key != 'content-length' &&
+          e.key != 'content-encoding' &&
+          e.key != 'transfer-encoding')
+        e.key: e.value,
+  };
 
-  static final _occurrences = Expando<Map<String, int>>('bugcapsule.httpOccurrences');
+  static final _occurrences = Expando<Map<String, int>>(
+    'bugcapsule.httpOccurrences',
+  );
 
   /// The 0-based count of earlier requests with [key] in [session]. Shared
   /// by every HTTP integration of the session, so requests sent through
   /// different clients are numbered in one order, as replay serves them.
   static int nextOccurrence(Object session, String key) =>
-      (_occurrences[session] ??= {}).update(key, (n) => n + 1, ifAbsent: () => 0);
+      (_occurrences[session] ??= {}).update(
+        key,
+        (n) => n + 1,
+        ifAbsent: () => 0,
+      );
 
   /// Reports recorded responses without a body: the capsule is then partial.
-  static void describeEligibility(EligibilityBuilder eligibility, RecordedWindow window) {
-    final missing = window.events.where((e) =>
-        e.type == EventTypes.http &&
-        e.data['error'] == null &&
-        (e.data['bodyEncoding'] == 'omitted' || e.data['bodyEncoding'] == 'truncated'));
+  static void describeEligibility(
+    EligibilityBuilder eligibility,
+    RecordedWindow window,
+  ) {
+    final missing = window.events.where(
+      (e) =>
+          e.type == EventTypes.http &&
+          e.data['error'] == null &&
+          (e.data['bodyEncoding'] == 'omitted' ||
+              e.data['bodyEncoding'] == 'truncated'),
+    );
     if (missing.isNotEmpty) {
-      eligibility.missing('network.bodies',
-          '${missing.length} recorded responses have no body (capture disabled, excluded or too large)');
+      eligibility.missing(
+        'network.bodies',
+        '${missing.length} recorded responses have no body (capture disabled, excluded or too large)',
+      );
     }
   }
 }
@@ -102,7 +121,14 @@ abstract final class HttpBodies {
 /// bytes. Pause, resume and cancel reach the source; errors reach the
 /// listener. [complete] turns true when the source is done.
 class BodyTap<T extends List<int>> {
-  BodyTap(Stream<T> source, this.limit, {this.onDone, this.onError, this.onCancel, this.onOverflow}) {
+  BodyTap(
+    Stream<T> source,
+    this.limit, {
+    this.onDone,
+    this.onError,
+    this.onCancel,
+    this.onOverflow,
+  }) {
     late final StreamSubscription<T> sub;
     _controller = StreamController<T>(
       sync: true,
@@ -178,7 +204,10 @@ class BodyTap<T extends List<int>> {
 class PrefetchedBody<T extends List<int>> {
   PrefetchedBody._();
 
-  static Future<PrefetchedBody<T>> read<T extends List<int>>(Stream<T> source, int limit) {
+  static Future<PrefetchedBody<T>> read<T extends List<int>>(
+    Stream<T> source,
+    int limit,
+  ) {
     final p = PrefetchedBody<T>._();
     final ready = Completer<PrefetchedBody<T>>();
     void settle() {

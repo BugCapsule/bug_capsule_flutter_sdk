@@ -44,14 +44,13 @@ class BugCapsuleGetx extends TrackedStateIntegration {
     required String id,
     Object? Function(C controller)? toJson,
     void Function(C controller, Map<String, Object?> json)? restore,
-  }) =>
-      trackObject(
-        controller,
-        id: id,
-        toJson: toJson,
-        restore: restore,
-        subscribe: (c, onChange) => c.addListener(onChange),
-      );
+  }) => trackObject(
+    controller,
+    id: id,
+    toJson: toJson,
+    restore: restore,
+    subscribe: (c, onChange) => c.addListener(onChange),
+  );
 
   /// Records an `Rx` value (`.obs`, `RxList`, `RxMap`, `RxSet`, ...): every
   /// emitted value is a change, and replay sets `value` from the checkpoint.
@@ -66,7 +65,8 @@ class BugCapsuleGetx extends TrackedStateIntegration {
     V Function(Map<String, Object?> json)? fromJson,
   }) {
     final encode = toJson ?? (V value) => {'value': value};
-    final decode = fromJson ?? (Map<String, Object?> json) => json['value'] as V;
+    final decode =
+        fromJson ?? (Map<String, Object?> json) => json['value'] as V;
     return trackObject(
       rx,
       id: id,
@@ -77,7 +77,8 @@ class BugCapsuleGetx extends TrackedStateIntegration {
   }
 
   @override
-  void unsubscribe(Object object, Object subscription) => switch (subscription) {
+  void unsubscribe(Object object, Object subscription) =>
+      switch (subscription) {
         StreamSubscription<Object?>() => unawaited(subscription.cancel()),
         final void Function() dispose => dispose(),
         _ => null,

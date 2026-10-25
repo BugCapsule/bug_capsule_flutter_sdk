@@ -22,7 +22,12 @@ import 'tracing.dart';
 /// for `beforeSend` (and, when a capsule is written for the same failure,
 /// for that capsule's id).
 class PreparedEvent {
-  PreparedEvent(this.event, this.hint, {required this.sampledOut, this.sessionUpdate});
+  PreparedEvent(
+    this.event,
+    this.hint, {
+    required this.sampledOut,
+    this.sessionUpdate,
+  });
 
   final ErrorEvent event;
   final EventHint hint;
@@ -32,11 +37,11 @@ class PreparedEvent {
   /// What the capsule written for this failure records in
   /// `manifest.monitoring`.
   CapsuleMonitoring monitoringInfo() => CapsuleMonitoring(
-        eventId: event.eventId,
-        traceId: (event.contexts['trace'] as Map?)?['traceId'] as String?,
-        release: event.release,
-        environment: event.environment,
-      );
+    eventId: event.eventId,
+    traceId: (event.contexts['trace'] as Map?)?['traceId'] as String?,
+    release: event.release,
+    environment: event.environment,
+  );
 }
 
 /// What the hub needs from the capture runtime.
@@ -60,7 +65,8 @@ class MonitoringHost {
   final Future<void> Function() refreshConfig;
 
   /// Writes a capsule now (feedback); returns its id.
-  final Future<String?> Function(String note, CapsuleMonitoring? monitoring) writeCapsule;
+  final Future<String?> Function(String note, CapsuleMonitoring? monitoring)
+  writeCapsule;
   final bool Function() isRecording;
 }
 
@@ -142,22 +148,34 @@ class MonitoringHub implements TransactionSink {
       };
 
   InAppRules get inAppRules => InAppRules(
-        includes: options.inAppIncludes.isNotEmpty ? options.inAppIncludes : [?appPackage],
-        excludes: options.inAppExcludes,
-      );
+    includes: options.inAppIncludes.isNotEmpty
+        ? options.inAppIncludes
+        : [?appPackage],
+    excludes: options.inAppExcludes,
+  );
 
-  double get errorSampleRate => min(options.errorSampleRate, _remote?.errorSampleRate ?? 1.0).clamp(0.0, 1.0);
+  double get errorSampleRate => min(
+    options.errorSampleRate,
+    _remote?.errorSampleRate ?? 1.0,
+  ).clamp(0.0, 1.0);
 
   double get tracesSampleRate =>
-      (_remote?.tracesSampleRate ?? options.tracesSampleRate ?? 0).clamp(0.0, 1.0).toDouble();
+      (_remote?.tracesSampleRate ?? options.tracesSampleRate ?? 0)
+          .clamp(0.0, 1.0)
+          .toDouble();
 
-  PropagationTargets get propagationTargets =>
-      PropagationTargets(_remote?.tracePropagationTargets ?? options.tracePropagationTargets);
+  PropagationTargets get propagationTargets => PropagationTargets(
+    _remote?.tracePropagationTargets ?? options.tracePropagationTargets,
+  );
 
-  bool get _sessionTracking => options.enableAutoSessionTracking && (_remote?.sessionTracking ?? true);
+  bool get _sessionTracking =>
+      options.enableAutoSessionTracking && (_remote?.sessionTracking ?? true);
 
   /// The backend's `monitoringEnabled` (and the kill switch) allow sending.
-  bool get _sendingAllowed => !_disposed && (_remote?.monitoringEnabled ?? true) && (_remote?.enabled ?? true);
+  bool get _sendingAllowed =>
+      !_disposed &&
+      (_remote?.monitoringEnabled ?? true) &&
+      (_remote?.enabled ?? true);
 
   String? get lastEventId => _lastEventId;
   bool get inForeground => _inForeground;
@@ -168,34 +186,50 @@ class MonitoringHub implements TransactionSink {
     final root = storage;
     if (root != null) {
       if (transport != null) {
-        _outbox = await UploadOutbox.open(Directory('${root.path}/envelopes'),
-            limits: options.outboxLimits, extension: '.envelope');
+        _outbox = await UploadOutbox.open(
+          Directory('${root.path}/envelopes'),
+          limits: options.outboxLimits,
+          extension: '.envelope',
+        );
       }
       _installId = _readInstallId(root);
     }
     _baseContexts = _defaultContexts();
-    _inForeground = lifecycle == null || lifecycle == AppLifecycleState.resumed || lifecycle == AppLifecycleState.inactive;
+    _inForeground =
+        lifecycle == null ||
+        lifecycle == AppLifecycleState.resumed ||
+        lifecycle == AppLifecycleState.inactive;
 
     final sessions = _sessions = SessionTracker(
       release: release,
       environment: environment,
       distinctId: () => Scope.root.user?.id ?? _installId,
       send: (payload) {
-        if (_sessionTracking) _enqueue([EnvelopeItem(EnvelopeItemType.session, payload)]);
+        if (_sessionTracking) {
+          _enqueue([EnvelopeItem(EnvelopeItemType.session, payload)]);
+        }
       },
       persist: _persistSession,
     );
     final previous = sessions.recover(_readSession());
-    if (previous != null) _enqueue([EnvelopeItem(EnvelopeItemType.session, previous)]);
+    if (previous != null) {
+      _enqueue([EnvelopeItem(EnvelopeItemType.session, previous)]);
+    }
     _persistSession(null);
     if (_sessionTracking && _inForeground) sessions.start();
 
     if (options.captureIsolateErrors) _listenToIsolate(Isolate.current);
     if (options.enableFramesTracking) {
-      SchedulerBinding.instance.addTimingsCallback(_timingsCallback = _onTimings);
+      SchedulerBinding.instance.addTimingsCallback(
+        _timingsCallback = _onTimings,
+      );
     }
     if (options.enableAppStartTracking) {
-      unawaited(WidgetsBinding.instance.waitUntilFirstFrameRasterized.then((_) => _appStarted()));
+      unawaited(
+        WidgetsBinding.instance.waitUntilFirstFrameRasterized.then(
+          (_) => _appStarted(),
+        ),
+      );
     }
     current = this;
   }
@@ -213,7 +247,8 @@ class MonitoringHub implements TransactionSink {
     }
   }
 
-  File? get _sessionFile => storage == null ? null : File('${storage!.path}/session.json');
+  File? get _sessionFile =>
+      storage == null ? null : File('${storage!.path}/session.json');
 
   Map<String, Object?>? _readSession() {
     try {
@@ -256,7 +291,11 @@ class MonitoringHub implements TransactionSink {
     try {
       final view = WidgetsBinding.instance.platformDispatcher.views.first;
       final logical = view.physicalSize / view.devicePixelRatio;
-      contexts['screen'] = {'width': logical.width, 'height': logical.height, 'density': view.devicePixelRatio};
+      contexts['screen'] = {
+        'width': logical.width,
+        'height': logical.height,
+        'density': view.devicePixelRatio,
+      };
     } catch (_) {
       // No view (headless): no screen context.
     }
@@ -264,25 +303,33 @@ class MonitoringHub implements TransactionSink {
   }
 
   static String _osName() => switch (Platform.operatingSystem) {
-        'android' => 'Android',
-        'ios' => 'iOS',
-        'macos' => 'macOS',
-        'windows' => 'Windows',
-        'linux' => 'Linux',
-        final other => other,
-      };
+    'android' => 'Android',
+    'ios' => 'iOS',
+    'macos' => 'macOS',
+    'windows' => 'Windows',
+    'linux' => 'Linux',
+    final other => other,
+  };
 
   static String _arch() {
     final abi = Abi.current().toString();
     final arch = abi.substring(abi.indexOf('_') + 1);
-    return switch (arch) { 'x64' => 'x86_64', 'ia32' => 'x86', _ => arch };
+    return switch (arch) {
+      'x64' => 'x86_64',
+      'ia32' => 'x86',
+      _ => arch,
+    };
   }
 
   // ------------------------------------------------------------ breadcrumbs
 
   /// A flight-recorder event (already redacted) as a breadcrumb.
   void onRecorded(String type, Map<String, Object?> data) {
-    final crumb = BreadcrumbMapper.fromEvent(type, data, previousRoute: _lastRoute);
+    final crumb = BreadcrumbMapper.fromEvent(
+      type,
+      data,
+      previousRoute: _lastRoute,
+    );
     if (type == EventTypes.route) _lastRoute = data['location'] as String?;
     if (crumb != null) addBreadcrumb(crumb, redacted: true);
   }
@@ -300,17 +347,22 @@ class MonitoringHub implements TransactionSink {
         // A throwing hook keeps the breadcrumb.
       }
     }
-    _breadcrumbs.max = min(options.maxBreadcrumbs, _remote?.maxBreadcrumbs ?? 100).clamp(0, 100);
+    _breadcrumbs.max = min(
+      options.maxBreadcrumbs,
+      _remote?.maxBreadcrumbs ?? 100,
+    ).clamp(0, 100);
     _breadcrumbs.add(b);
   }
 
   void navigationBreadcrumb(String to, {String? from}) {
     final location = host.redactor().redactUrl(to);
-    addBreadcrumb(Breadcrumb(
-      type: BreadcrumbType.navigation,
-      category: 'navigation',
-      data: {'from': ?(from ?? _lastRoute), 'to': location},
-    ));
+    addBreadcrumb(
+      Breadcrumb(
+        type: BreadcrumbType.navigation,
+        category: 'navigation',
+        data: {'from': ?(from ?? _lastRoute), 'to': location},
+      ),
+    );
     _lastRoute = location;
   }
 
@@ -334,7 +386,9 @@ class MonitoringHub implements TransactionSink {
   }) {
     if (_disposed) return null;
     final trace = stack ?? (error is Error ? error.stackTrace : null);
-    final parsed = trace == null ? null : parseDartStack(trace.toString(), rules: inAppRules);
+    final parsed = trace == null
+        ? null
+        : parseDartStack(trace.toString(), rules: inAppRules);
     final value = valueOverride ?? _safeToString(error);
     final exception = ExceptionValue(
       type: typeOverride ?? error.runtimeType.toString(),
@@ -354,16 +408,24 @@ class MonitoringHub implements TransactionSink {
     event.debugImages.addAll(parsed?.debugImages ?? const []);
     _addObfuscationImage(event);
     if (unhandled) _rememberUnhandled(value);
-    return _prepared(event, EventHint(error: error, stackTrace: trace, mechanism: mechanism));
+    return _prepared(
+      event,
+      EventHint(error: error, stackTrace: trace, mechanism: mechanism),
+    );
   }
 
-  PreparedEvent? prepareMessage(String message, {EventLevel level = EventLevel.info, Map<String, String>? tags}) {
+  PreparedEvent? prepareMessage(
+    String message, {
+    EventLevel level = EventLevel.info,
+    Map<String, String>? tags,
+  }) {
     if (_disposed) return null;
     final event = _buildEvent(level: level, tags: tags)..message = message;
     if (options.attachStacktrace) {
-      final frames = parseDartStack(StackTrace.current.toString(), rules: inAppRules).frames
-          .where((f) => f.package != 'bug_capsule')
-          .toList();
+      final frames = parseDartStack(
+        StackTrace.current.toString(),
+        rules: inAppRules,
+      ).frames.where((f) => f.package != 'bug_capsule').toList();
       if (frames.isNotEmpty) {
         event.threads = [
           {
@@ -371,7 +433,9 @@ class MonitoringHub implements TransactionSink {
             'name': 'main',
             'crashed': false,
             'current': true,
-            'stacktrace': {'frames': [for (final f in frames) f.toJson()]},
+            'stacktrace': {
+              'frames': [for (final f in frames) f.toJson()],
+            },
           },
         ];
       }
@@ -381,13 +445,24 @@ class MonitoringHub implements TransactionSink {
   }
 
   PreparedEvent _prepared(ErrorEvent event, EventHint hint) {
-    final countsAsError = event.level == EventLevel.fatal || event.level == EventLevel.error;
+    final countsAsError =
+        event.level == EventLevel.fatal || event.level == EventLevel.error;
     final sessionUpdate = countsAsError && _sessionTracking
-        ? _sessions?.onError(crashed: event.level == EventLevel.fatal && event.unhandled)
+        ? _sessions?.onError(
+            crashed: event.level == EventLevel.fatal && event.unhandled,
+          )
         : null;
-    final sampledOut = (event.level != EventLevel.fatal && _random.nextDouble() >= errorSampleRate) || _flooding(event);
+    final sampledOut =
+        (event.level != EventLevel.fatal &&
+            _random.nextDouble() >= errorSampleRate) ||
+        _flooding(event);
     if (!sampledOut) _lastEventId = event.eventId;
-    return PreparedEvent(event, hint, sampledOut: sampledOut, sessionUpdate: sessionUpdate);
+    return PreparedEvent(
+      event,
+      hint,
+      sampledOut: sampledOut,
+      sessionUpdate: sessionUpdate,
+    );
   }
 
   /// Events of one error per minute beyond which repeats are dropped (an
@@ -397,7 +472,8 @@ class MonitoringHub implements TransactionSink {
 
   bool _flooding(ErrorEvent event) {
     final key = [
-      for (final e in event.exceptions) '${e.type}:${e.value}:${e.frames.isEmpty ? '' : e.frames.last.function}',
+      for (final e in event.exceptions)
+        '${e.type}:${e.value}:${e.frames.isEmpty ? '' : e.frames.last.function}',
       event.message ?? '',
     ].join('|');
     final now = DateTime.now();
@@ -436,7 +512,12 @@ class MonitoringHub implements TransactionSink {
         ..._contexts(),
         ...scope.contexts,
         ...?contexts,
-        if (span != null) 'trace': {'traceId': span.traceId, 'spanId': span.spanId, 'op': span.op},
+        if (span != null)
+          'trace': {
+            'traceId': span.traceId,
+            'spanId': span.spanId,
+            'op': span.op,
+          },
       },
       breadcrumbs: _breadcrumbs.snapshot(),
       extra: {...scope.extras, ...?extra},
@@ -445,9 +526,12 @@ class MonitoringHub implements TransactionSink {
   }
 
   Map<String, Object?> _contexts() => {
-        ..._baseContexts,
-        'app': {...(_baseContexts['app'] as Map? ?? const {}), 'inForeground': _inForeground},
-      };
+    ..._baseContexts,
+    'app': {
+      ...(_baseContexts['app'] as Map? ?? const {}),
+      'inForeground': _inForeground,
+    },
+  };
 
   MonitoringUser? _user(Scope scope) {
     final user = scope.user;
@@ -465,7 +549,9 @@ class MonitoringHub implements TransactionSink {
   void _addObfuscationImage(ErrorEvent event) {
     const fromDefine = String.fromEnvironment('BUGCAPSULE_OBFUSCATION_ID');
     final id = debugObfuscationId ?? fromDefine;
-    if (id.isNotEmpty) event.debugImages.add({'type': 'dart_obfuscation', 'debugId': id});
+    if (id.isNotEmpty) {
+      event.debugImages.add({'type': 'dart_obfuscation', 'debugId': id});
+    }
   }
 
   static String _safeToString(Object error) {
@@ -489,10 +575,12 @@ class MonitoringHub implements TransactionSink {
   void submit(PreparedEvent prepared, {Future<String?>? capsule}) {
     if (capsule == null) return _finish(prepared, linked: false);
     _lastEventId = prepared.event.eventId;
-    unawaited(capsule.then((id) => id, onError: (Object _) => null).then((id) {
-      prepared.event.capsuleId = id;
-      _finish(prepared, linked: id != null);
-    }));
+    unawaited(
+      capsule.then((id) => id, onError: (Object _) => null).then((id) {
+        prepared.event.capsuleId = id;
+        _finish(prepared, linked: id != null);
+      }),
+    );
   }
 
   void _finish(PreparedEvent prepared, {required bool linked}) {
@@ -504,14 +592,20 @@ class MonitoringHub implements TransactionSink {
         try {
           event = hook(prepared.event, prepared.hint);
         } catch (e) {
-          debugPrint('[bugcapsule] beforeSend threw ($e); sending the event unchanged');
+          debugPrint(
+            '[bugcapsule] beforeSend threw ($e); sending the event unchanged',
+          );
           event = prepared.event;
         }
       }
-      if (event != null) items.add(EnvelopeItem(EnvelopeItemType.event, event.toJson()));
+      if (event != null) {
+        items.add(EnvelopeItem(EnvelopeItemType.event, event.toJson()));
+      }
     }
     final session = prepared.sessionUpdate;
-    if (session != null) items.add(EnvelopeItem(EnvelopeItemType.session, session));
+    if (session != null) {
+      items.add(EnvelopeItem(EnvelopeItemType.session, session));
+    }
     if (items.isNotEmpty) _enqueue(items);
   }
 
@@ -535,9 +629,16 @@ class MonitoringHub implements TransactionSink {
   void _onIsolateError(String error, String stack) {
     // The same error often reached PlatformDispatcher.onError first.
     if (_recentUnhandled.any((e) => e.$1 == error)) return;
-    final type = RegExp(r'^([A-Za-z_$][\w$]*)(?::|$)').firstMatch(error)?[1] ?? 'IsolateError';
-    final prepared = prepareException(_IsolateError(error), StackTrace.fromString(stack),
-        mechanism: Mechanism.uncaught, valueOverride: error, typeOverride: type);
+    final type =
+        RegExp(r'^([A-Za-z_$][\w$]*)(?::|$)').firstMatch(error)?[1] ??
+        'IsolateError';
+    final prepared = prepareException(
+      _IsolateError(error),
+      StackTrace.fromString(stack),
+      mechanism: Mechanism.uncaught,
+      valueOverride: error,
+      typeOverride: type,
+    );
     if (prepared != null) submit(prepared);
   }
 
@@ -559,7 +660,9 @@ class MonitoringHub implements TransactionSink {
     final feedbackId = uuidV4();
     String? capsuleId;
     final withCapsule =
-        captureCapsule ?? options.captureCapsuleWithFeedback ?? (_config.mode == CaptureMode.qa);
+        captureCapsule ??
+        options.captureCapsuleWithFeedback ??
+        (_config.mode == CaptureMode.qa);
     if (withCapsule && host.isRecording()) {
       try {
         capsuleId = await host.writeCapsule(
@@ -567,7 +670,11 @@ class MonitoringHub implements TransactionSink {
           eventId == null
               ? null
               : CapsuleMonitoring(
-                  eventId: eventId, traceId: span?.traceId, release: release, environment: environment),
+                  eventId: eventId,
+                  traceId: span?.traceId,
+                  release: release,
+                  environment: environment,
+                ),
         );
       } catch (e) {
         debugPrint('[bugcapsule] feedback capsule failed: $e');
@@ -586,7 +693,10 @@ class MonitoringHub implements TransactionSink {
         'environment': environment,
         'runtime': 'flutter',
         if (_user(scope) != null) 'user': _user(scope)!.toJson(),
-        'contexts': {if (span != null) 'trace': {'traceId': span.traceId, 'spanId': span.spanId}},
+        'contexts': {
+          if (span != null)
+            'trace': {'traceId': span.traceId, 'spanId': span.spanId},
+        },
         'tags': sanitizeTags({...scope.tags, ...?tags}),
         'capsuleId': capsuleId,
       }),
@@ -621,7 +731,12 @@ class MonitoringHub implements TransactionSink {
           decided = null;
         }
       }
-      rate = (decided ?? (sampler != null ? options.tracesSampleRate ?? 0 : tracesSampleRate)).clamp(0.0, 1.0);
+      rate =
+          (decided ??
+                  (sampler != null
+                      ? options.tracesSampleRate ?? 0
+                      : tracesSampleRate))
+              .clamp(0.0, 1.0);
       sampled = !_disposed && _random.nextDouble() < rate;
     }
     final tx = TransactionImpl(
@@ -636,7 +751,9 @@ class MonitoringHub implements TransactionSink {
       idleTimeout: idleTimeout,
     );
     _open.add(tx);
-    if (options.enableFramesTracking && sampled && (op == 'navigation' || op == 'ui.load')) {
+    if (options.enableFramesTracking &&
+        sampled &&
+        (op == 'navigation' || op == 'ui.load')) {
       final counter = _frames[tx] = _FrameCounter();
       tx.beforeFinish.add((t) {
         _frames.remove(t);
@@ -655,21 +772,33 @@ class MonitoringHub implements TransactionSink {
     final routeName = name.startsWith('/') ? parameterizePath(name) : name;
     final previous = _navigation;
     if (previous != null && !previous.finished) {
-      if (previous.name == routeName && DateTime.now().difference(previous.startTimestamp).inMilliseconds < 500) {
+      if (previous.name == routeName &&
+          DateTime.now().difference(previous.startTimestamp).inMilliseconds <
+              500) {
         return; // the router integration and a NavigatorObserver saw the same change
       }
       previous.finish();
     }
-    final tx = _navigation = startTransaction(routeName, 'navigation',
-        bindToScope: true, idleTimeout: options.idleTimeout);
-    final ttid = tx.startChild('ui.load.initial_display', description: '$routeName initial display');
+    final tx = _navigation = startTransaction(
+      routeName,
+      'navigation',
+      bindToScope: true,
+      idleTimeout: options.idleTimeout,
+    );
+    final ttid = tx.startChild(
+      'ui.load.initial_display',
+      description: '$routeName initial display',
+    );
     try {
       SchedulerBinding.instance.addPostFrameCallback((_) {
         if (ttid.finished) return;
         ttid.finish();
         final span = ttid as SpanImpl;
-        tx.setMeasurement('time_to_initial_display',
-            span.endTimestamp!.difference(span.startTimestamp).inMilliseconds, unit: 'millisecond');
+        tx.setMeasurement(
+          'time_to_initial_display',
+          span.endTimestamp!.difference(span.startTimestamp).inMilliseconds,
+          unit: 'millisecond',
+        );
       });
       SchedulerBinding.instance.ensureVisualUpdate();
     } catch (_) {
@@ -679,15 +808,29 @@ class MonitoringHub implements TransactionSink {
 
   /// `BugCapsule.action` with `enableUserInteractionTracing`.
   void onUserAction(String id) {
-    if (_disposed || !options.enableUserInteractionTracing || Scope.current.activeSpan != null) return;
-    startTransaction(id, 'ui.action.click', bindToScope: true, idleTimeout: options.idleTimeout);
+    if (_disposed ||
+        !options.enableUserInteractionTracing ||
+        Scope.current.activeSpan != null) {
+      return;
+    }
+    startTransaction(
+      id,
+      'ui.action.click',
+      bindToScope: true,
+      idleTimeout: options.idleTimeout,
+    );
   }
 
   void _appStarted() {
     if (_disposed) return;
-    final tx = startTransaction('App Start', 'app.start.cold', startTimestamp: startedAt);
+    final tx = startTransaction(
+      'App Start',
+      'app.start.cold',
+      startTimestamp: startedAt,
+    );
     final ms = DateTime.now().difference(startedAt).inMilliseconds;
-    (tx.startChild('app.start.cold', description: 'Cold start') as SpanImpl).finish();
+    (tx.startChild('app.start.cold', description: 'Cold start') as SpanImpl)
+        .finish();
     tx.setMeasurement('app_start_cold', ms, unit: 'millisecond');
     tx.finish();
   }
@@ -696,11 +839,19 @@ class MonitoringHub implements TransactionSink {
     if (_frames.isEmpty) return;
     double refresh = 60;
     try {
-      refresh = WidgetsBinding.instance.platformDispatcher.views.first.display.refreshRate;
+      refresh = WidgetsBinding
+          .instance
+          .platformDispatcher
+          .views
+          .first
+          .display
+          .refreshRate;
     } catch (_) {
       // keep 60 Hz
     }
-    onFrameDurations([for (final t in timings) t.totalSpan], refreshRate: refresh);
+    onFrameDurations([
+      for (final t in timings) t.totalSpan,
+    ], refreshRate: refresh);
   }
 
   @visibleForTesting
@@ -717,7 +868,11 @@ class MonitoringHub implements TransactionSink {
   /// headers to add: `traceparent` / `baggage` for URLs matching
   /// `tracePropagationTargets` (never when the request already has a
   /// `traceparent`). Returns null when monitoring is off.
-  HttpSpan? startHttpSpan(String method, Uri url, Map<String, Object?> existingHeaders) {
+  HttpSpan? startHttpSpan(
+    String method,
+    Uri url,
+    Map<String, Object?> existingHeaders,
+  ) {
     if (_disposed) return null;
     final redactor = host.redactor();
     final redacted = redactor.redactUri(url);
@@ -725,33 +880,69 @@ class MonitoringHub implements TransactionSink {
     BugCapsuleSpan? span;
     final headers = <String, String>{};
     if (parent != null) {
-      final base = redacted.replace(query: '', fragment: '').toString().replaceAll(RegExp(r'[?#]+$'), '');
-      span = parent.startChild('http.client', description: '${method.toUpperCase()} $base')
-        ..setData('http.request.method', method.toUpperCase())
-        ..setData('url', base);
+      final base = redacted
+          .replace(query: '', fragment: '')
+          .toString()
+          .replaceAll(RegExp(r'[?#]+$'), '');
+      span =
+          parent.startChild(
+              'http.client',
+              description: '${method.toUpperCase()} $base',
+            )
+            ..setData('http.request.method', method.toUpperCase())
+            ..setData('url', base);
       final lower = {for (final k in existingHeaders.keys) k.toLowerCase(): k};
-      if (!lower.containsKey('traceparent') && propagationTargets.matches(url.toString())) {
+      if (!lower.containsKey('traceparent') &&
+          propagationTargets.matches(url.toString())) {
         headers['traceparent'] = span.toTraceparent();
         final existing = existingHeaders[lower['baggage']];
         headers['baggage'] = Baggage.merge(
-            existing is List ? existing.join(',') : existing?.toString(), span.toBaggage());
+          existing is List ? existing.join(',') : existing?.toString(),
+          span.toBaggage(),
+        );
       }
     }
-    return HttpSpan._(this, span, headers, method.toUpperCase(), redacted.toString());
+    return HttpSpan._(
+      this,
+      span,
+      headers,
+      method.toUpperCase(),
+      redacted.toString(),
+    );
   }
 
   // ---------------------------------------------------------------- sending
 
   static const _structural = {
-    'eventId', 'feedbackId', 'sid', 'did', 'seq', 'init', 'traceId', 'spanId', 'parentSpanId',
-    'timestamp', 'startTimestamp', 'started', 'capsuleId', 'release', 'environment', 'runtime',
-    'debugImages', 'level', 'status', 'errors', 'duration', 'measurements',
+    'eventId',
+    'feedbackId',
+    'sid',
+    'did',
+    'seq',
+    'init',
+    'traceId',
+    'spanId',
+    'parentSpanId',
+    'timestamp',
+    'startTimestamp',
+    'started',
+    'capsuleId',
+    'release',
+    'environment',
+    'runtime',
+    'debugImages',
+    'level',
+    'status',
+    'errors',
+    'duration',
+    'measurements',
   };
 
   /// Every string of the payload through the capture redactor; ids,
   /// timestamps and debug images are kept byte for byte.
   Map<String, Object?> _redact(Map<String, Object?> payload) {
-    final out = (host.redactor().redactJson(payload) as Map).cast<String, Object?>();
+    final out = (host.redactor().redactJson(payload) as Map)
+        .cast<String, Object?>();
     for (final k in _structural) {
       if (payload.containsKey(k)) out[k] = payload[k];
     }
@@ -763,19 +954,22 @@ class MonitoringHub implements TransactionSink {
     if (outbox == null || !_sendingAllowed) return;
     final List<int> bytes;
     try {
-      bytes = EnvelopeCodec.encode(
-        [for (final i in items) EnvelopeItem(i.type, _redact(i.payload))],
-        sdkVersion: sdkVersion,
-      );
+      bytes = EnvelopeCodec.encode([
+        for (final i in items) EnvelopeItem(i.type, _redact(i.payload)),
+      ], sdkVersion: sdkVersion);
     } catch (e) {
       debugPrint('[bugcapsule] dropping a monitoring envelope: $e');
       return;
     }
     if (bytes.length > 1024 * 1024) {
-      debugPrint('[bugcapsule] dropping a monitoring envelope of ${bytes.length} bytes (limit 1 MiB)');
+      debugPrint(
+        '[bugcapsule] dropping a monitoring envelope of ${bytes.length} bytes (limit 1 MiB)',
+      );
       return;
     }
-    _writes = _writes.then((_) => outbox.enqueue(uuidV4(), bytes)).then((_) {}, onError: (Object _) {});
+    _writes = _writes
+        .then((_) => outbox.enqueue(uuidV4(), bytes))
+        .then((_) {}, onError: (Object _) {});
     _scheduleFlush();
   }
 
@@ -797,8 +991,12 @@ class MonitoringHub implements TransactionSink {
       await outbox
           .flush(
             upload: (bytes) async {
-              final result = await transport.sendEnvelope(EnvelopeCodec.restamp(bytes, DateTime.now()));
-              if (result.message == 'capture_disabled' || result.unauthorized) unawaited(host.refreshConfig());
+              final result = await transport.sendEnvelope(
+                EnvelopeCodec.restamp(bytes, DateTime.now()),
+              );
+              if (result.message == 'capture_disabled' || result.unauthorized) {
+                unawaited(host.refreshConfig());
+              }
               return result;
             },
             allowed: () => _canUpload,
@@ -820,7 +1018,9 @@ class MonitoringHub implements TransactionSink {
     switch (state) {
       case AppLifecycleState.resumed:
         _inForeground = true;
-        if (_sessionTracking) _sessions?.onForeground(options.sessionBackgroundTimeout);
+        if (_sessionTracking) {
+          _sessions?.onForeground(options.sessionBackgroundTimeout);
+        }
         unawaited(flush());
       case AppLifecycleState.paused || AppLifecycleState.hidden:
         if (!_inForeground) return;
@@ -854,7 +1054,11 @@ class MonitoringHub implements TransactionSink {
     if (!tx.sampled || tx.discarded || _disposed) return;
     final scope = Scope.current;
     Map<String, Object?>? payload = tx.payload()
-      ..['tags'] = sanitizeTags({if (options.dist != null) 'dist': options.dist!, ...scope.tags, ...tx.tags})
+      ..['tags'] = sanitizeTags({
+        if (options.dist != null) 'dist': options.dist!,
+        ...scope.tags,
+        ...tx.tags,
+      })
       ..['contexts'] = {
         ..._contexts(),
         ...scope.contexts,
@@ -870,7 +1074,9 @@ class MonitoringHub implements TransactionSink {
         // A throwing hook keeps the transaction as it was.
       }
     }
-    if (payload != null) _enqueue([EnvelopeItem(EnvelopeItemType.transaction, payload)]);
+    if (payload != null) {
+      _enqueue([EnvelopeItem(EnvelopeItemType.transaction, payload)]);
+    }
   }
 
   /// Ends the session, uploads what is queued and stops.
@@ -904,7 +1110,8 @@ class MonitoringHub implements TransactionSink {
 
 /// An outgoing request's `http.client` span and the trace headers to add.
 class HttpSpan {
-  HttpSpan._(this._hub, this.span, this.headers, this._method, this._url) : _sw = Stopwatch()..start();
+  HttpSpan._(this._hub, this.span, this.headers, this._method, this._url)
+    : _sw = Stopwatch()..start();
 
   final MonitoringHub _hub;
   final BugCapsuleSpan? span;
@@ -919,28 +1126,39 @@ class HttpSpan {
 
   /// Ends the span. [breadcrumb]: also add an `http` breadcrumb (when the
   /// capsule recorder is not running; otherwise it derives one itself).
-  void finish({int? statusCode, Object? error, bool cancelled = false, bool breadcrumb = false}) {
+  void finish({
+    int? statusCode,
+    Object? error,
+    bool cancelled = false,
+    bool breadcrumb = false,
+  }) {
     if (_done) return;
     _done = true;
     final s = span;
     if (s != null) {
-      if (statusCode != null && statusCode > 0) s.setData('http.response.status_code', statusCode);
+      if (statusCode != null && statusCode > 0) {
+        s.setData('http.response.status_code', statusCode);
+      }
       s.finish(
         status: cancelled
             ? SpanStatus.cancelled
             : statusCode != null && statusCode > 0
-                ? SpanStatus.fromHttp(statusCode)
-                : SpanStatus.internalError,
+            ? SpanStatus.fromHttp(statusCode)
+            : SpanStatus.internalError,
       );
     }
     if (breadcrumb) {
-      _hub.addBreadcrumb(BreadcrumbMapper.http(
-        method: _method,
-        url: _url,
-        status: statusCode,
-        durationMs: _sw.elapsedMilliseconds,
-        error: error == null ? null : (cancelled ? 'cancel' : 'connectionError'),
-      ));
+      _hub.addBreadcrumb(
+        BreadcrumbMapper.http(
+          method: _method,
+          url: _url,
+          status: statusCode,
+          durationMs: _sw.elapsedMilliseconds,
+          error: error == null
+              ? null
+              : (cancelled ? 'cancel' : 'connectionError'),
+        ),
+      );
     }
   }
 }

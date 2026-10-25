@@ -2,7 +2,7 @@
 
 No package has been published. Versions remain Flutter/Android/iOS 0.4.0 and Web 0.3.0. Review the readiness ledger before release: a distributable archive does not close outstanding device/feature gates.
 
-All four SDKs and both CLIs are subject to the Bug Capsule Proprietary License. Copyright 2026 Bug Capsule. All rights reserved. Use, copying, modification, and distribution require prior written permission. Third-party licenses and rights validly granted for earlier versions remain unaffected. Previously generated release candidates must be rebuilt before distribution to include the current license.
+The Flutter SDK and its bundled CLI are available under the MIT License. Copyright (c) 2026 Bug Capsule. See the repository and package LICENSE files. Other SDKs and CLIs retain their own licenses. Third-party licenses remain unaffected. Rebuild release candidates to include the current license.
 
 ## Flutter and multi-runtime CLI
 

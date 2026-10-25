@@ -25,7 +25,9 @@ class IdleCompressor {
     if (to - from <= minGapMs) return null;
     var since = from;
     for (final e in events) {
-      final start = e.type == EventTypes.http ? e.t - (e.data['durationMs'] as int? ?? 0) : e.t;
+      final start = e.type == EventTypes.http
+          ? e.t - (e.data['durationMs'] as int? ?? 0)
+          : e.t;
       if (start >= to) continue;
       final end = e.t < to ? e.t : to;
       if (end > since) since = end;
@@ -42,6 +44,5 @@ class IdleCompressor {
     required int idleSince,
     required int busy,
     required int quietMs,
-  }) =>
-      busy == 0 && quietMs >= collapseToMs && now >= idleSince + collapseToMs;
+  }) => busy == 0 && quietMs >= collapseToMs && now >= idleSince + collapseToMs;
 }

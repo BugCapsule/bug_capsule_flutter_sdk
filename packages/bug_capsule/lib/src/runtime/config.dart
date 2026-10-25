@@ -62,11 +62,11 @@ class BugCapsuleConfig {
     this.labels = const {},
     this.replayUrl,
     this.monitoring = const MonitoringOptions(),
-  })  : _appVersion = appVersion,
-        _appBuild = appBuild,
-        _mode = mode,
-        _gitSha = gitSha,
-        _showOverlay = showOverlay;
+  }) : _appVersion = appVersion,
+       _appBuild = appBuild,
+       _mode = mode,
+       _gitSha = gitSha,
+       _showOverlay = showOverlay;
 
   /// SDK connection token from the BugCapsule dashboard
   /// (`bcsdk.v1.<payload>`): the API URL and an upload-only credential in one
@@ -143,7 +143,8 @@ class BugCapsuleConfig {
   /// Last look at every recorded event, after built-in redaction. Return the
   /// data to keep (possibly modified), or null to drop the event. If it
   /// throws, the event is dropped.
-  final Map<String, Object?>? Function(String type, Map<String, Object?> data)? beforeRecord;
+  final Map<String, Object?>? Function(String type, Map<String, Object?> data)?
+  beforeRecord;
 
   /// Last look at each integration's checkpoint snapshot, after built-in
   /// redaction. Return null to leave the integration out of the checkpoint

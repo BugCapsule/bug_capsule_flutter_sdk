@@ -76,22 +76,28 @@ class BugCapsuleMobx extends TrackedStateIntegration {
     required String id,
     Object? Function(S store)? toJson,
     void Function(S store, Map<String, Object?> json)? restore,
-  }) =>
-      trackObject(
-        store,
-        id: id,
-        toJson: toJson,
-        restore: restore,
-        subscribe: (s, onChange) => toJson == null
-            ? null
-            : reaction<Object?>((_) => toJson(s), (_) => onChange(), name: '$_ownPrefix$id', context: _context),
-      );
+  }) => trackObject(
+    store,
+    id: id,
+    toJson: toJson,
+    restore: restore,
+    subscribe: (s, onChange) => toJson == null
+        ? null
+        : reaction<Object?>(
+            (_) => toJson(s),
+            (_) => onChange(),
+            name: '$_ownPrefix$id',
+            context: _context,
+          ),
+  );
 
   @override
-  void runRestore(void Function() body) => runInAction(body, name: '${_ownPrefix}restore', context: _context);
+  void runRestore(void Function() body) =>
+      runInAction(body, name: '${_ownPrefix}restore', context: _context);
 
   @override
-  void unsubscribe(Object object, Object subscription) => (subscription as ReactionDisposer)();
+  void unsubscribe(Object object, Object subscription) =>
+      (subscription as ReactionDisposer)();
 
   void _onSpy(SpyEvent event) {
     try {
@@ -99,14 +105,23 @@ class BugCapsuleMobx extends TrackedStateIntegration {
       if (session == null) return;
       switch (event) {
         // Creation reports the initial value as a finished (`isEnd`) event.
-        case ObservableValueSpyEvent(:final name, :final newValue, isEnd: false):
+        case ObservableValueSpyEvent(
+          :final name,
+          :final newValue,
+          isEnd: false,
+        ):
           session.replay?.activity();
           if (recordObservables && session.isRecording) {
-            session.record(EventTypes.mobxObservable, _describeWrite(session, name, newValue));
+            session.record(
+              EventTypes.mobxObservable,
+              _describeWrite(session, name, newValue),
+            );
           }
         case ActionSpyEvent(:final name) when !name.startsWith(_ownPrefix):
           session.replay?.activity();
-          if (session.isRecording) session.record(EventTypes.mobxAction, {'name': name});
+          if (session.isRecording) {
+            session.record(EventTypes.mobxAction, {'name': name});
+          }
         default:
           break;
       }
@@ -118,14 +133,22 @@ class BugCapsuleMobx extends TrackedStateIntegration {
   /// `{name, type, value?}`. Only primitive values are kept (collections
   /// and objects are described by tracked stores), redacted by the
   /// observable's field name: `_LoginStore.password` is a password.
-  Map<String, Object?> _describeWrite(BugCapsuleSession session, String name, Object? value) {
-    final keep = (recordStateData ?? session.mode != CaptureMode.production) &&
+  Map<String, Object?> _describeWrite(
+    BugCapsuleSession session,
+    String name,
+    Object? value,
+  ) {
+    final keep =
+        (recordStateData ?? session.mode != CaptureMode.production) &&
         (value == null || value is num || value is bool || value is String);
-    final field = name.contains('.') ? name.substring(name.lastIndexOf('.') + 1) : name;
+    final field = name.contains('.')
+        ? name.substring(name.lastIndexOf('.') + 1)
+        : name;
     return {
       'name': name,
       'type': value.runtimeType.toString(),
-      if (keep) 'value': (session.redactor.redactJson({field: value}) as Map)[field],
+      if (keep)
+        'value': (session.redactor.redactJson({field: value}) as Map)[field],
     };
   }
 
@@ -134,7 +157,9 @@ class BugCapsuleMobx extends TrackedStateIntegration {
       final session = this.session;
       if (session == null) return;
       // MobX wraps what the reaction threw; the failure is the original.
-      final (error, stack) = caught is MobXCaughtException ? (caught.exception, caught.stackTrace) : (caught, null);
+      final (error, stack) = caught is MobXCaughtException
+          ? (caught.exception, caught.stackTrace)
+          : (caught, null);
       session.replay?.activity();
       session.record(EventTypes.mobxError, {
         'reaction': reaction.name,

@@ -15,11 +15,14 @@ class Redactor {
     Iterable<String> extraKeys = const [],
     Iterable<String> extraHeaders = const [],
     Iterable<RegExp> patterns = const [],
-  })  : extraKeys = List.unmodifiable(extraKeys),
-        extraHeaders = List.unmodifiable(extraHeaders),
-        _extraKeys = {for (final k in extraKeys) _normalize(k)},
-        _headers = {..._defaultHeaders, for (final h in extraHeaders) h.toLowerCase()},
-        _patterns = List.unmodifiable(patterns);
+  }) : extraKeys = List.unmodifiable(extraKeys),
+       extraHeaders = List.unmodifiable(extraHeaders),
+       _extraKeys = {for (final k in extraKeys) _normalize(k)},
+       _headers = {
+         ..._defaultHeaders,
+         for (final h in extraHeaders) h.toLowerCase(),
+       },
+       _patterns = List.unmodifiable(patterns);
 
   static const placeholder = '[REDACTED]';
 
@@ -35,18 +38,41 @@ class Redactor {
   /// Matched exactly: short names that would cause false positives as
   /// substrings (`pin` in `shipping`).
   static const _exactKeys = {
-    'pin', 'pan', 'otp', 'ssn', 'cvv', 'cvc', 'passcode', 'iban',
+    'pin',
+    'pan',
+    'otp',
+    'ssn',
+    'cvv',
+    'cvc',
+    'passcode',
+    'iban',
   };
 
   /// Matched as substrings: `fcmToken`, `user_password`, `clientSecret`.
   static const _substringKeys = {
-    'password', 'passwd', 'token', 'secret', 'apikey', 'authorization',
-    'cookie', 'cardnumber', 'creditcard', 'privatekey', 'sessionid',
+    'password',
+    'passwd',
+    'token',
+    'secret',
+    'apikey',
+    'authorization',
+    'cookie',
+    'cardnumber',
+    'creditcard',
+    'privatekey',
+    'sessionid',
   };
 
   /// Only sensitive as URL query/fragment parameters (OAuth codes, presigned
   /// URL signatures); as JSON keys these names are too common to redact.
-  static const _exactQueryKeys = {'code', 'sig', 'key', 'auth', 'sid', 'session'};
+  static const _exactQueryKeys = {
+    'code',
+    'sig',
+    'key',
+    'auth',
+    'sid',
+    'session',
+  };
   static const _substringQueryKeys = {'signature', 'credential'};
 
   /// Keys the app added (config and remote config), as given.
@@ -60,19 +86,19 @@ class Redactor {
   final List<RegExp> _patterns;
 
   static final _normalizeChars = RegExp(r'[_\-\s.]');
-  static String _normalize(String key) => key.toLowerCase().replaceAll(_normalizeChars, '');
+  static String _normalize(String key) =>
+      key.toLowerCase().replaceAll(_normalizeChars, '');
 
   /// A redactor with this one's rules plus [keys], [headers] and [patterns].
   Redactor extend({
     Iterable<String> keys = const [],
     Iterable<String> headers = const [],
     Iterable<RegExp> patterns = const [],
-  }) =>
-      Redactor(
-        extraKeys: {...extraKeys, ...keys},
-        extraHeaders: {...extraHeaders, ...headers},
-        patterns: [..._patterns, ...patterns],
-      );
+  }) => Redactor(
+    extraKeys: {...extraKeys, ...keys},
+    extraHeaders: {...extraHeaders, ...headers},
+    patterns: [..._patterns, ...patterns],
+  );
 
   bool isSensitiveKey(String key) {
     final n = _normalize(key);
@@ -162,9 +188,13 @@ class Redactor {
 
   // ------------------------------------------------------------ free text
 
-  static final _authScheme =
-      RegExp(r'\b(Bearer|Basic|Token|Digest)\s+[A-Za-z0-9\-._~+/]{6,}=*', caseSensitive: false);
-  static final _jwt = RegExp(r'\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*');
+  static final _authScheme = RegExp(
+    r'\b(Bearer|Basic|Token|Digest)\s+[A-Za-z0-9\-._~+/]{6,}=*',
+    caseSensitive: false,
+  );
+  static final _jwt = RegExp(
+    r'\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*',
+  );
   static final _knownKeys = RegExp(
     r'\b(?:(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{8,}'
     r'|AKIA[0-9A-Z]{16}'
@@ -173,15 +203,18 @@ class Redactor {
     r'|AIza[0-9A-Za-z_-]{30,}'
     r'|bc[is]_[A-Za-z0-9_-]{20,})',
   );
-  static final _quotedPair =
-      RegExp(r'''(["'])([^"'\\]{1,100})\1(\s*[:=]\s*)(["'])((?:[^"'\\]|\\.)*)\4''');
+  static final _quotedPair = RegExp(
+    r'''(["'])([^"'\\]{1,100})\1(\s*[:=]\s*)(["'])((?:[^"'\\]|\\.)*)\4''',
+  );
   // The lookbehinds anchor each match at the start of a key, so a long run of
   // key characters is scanned once instead of once per position (linear on
   // 256 KB bodies rather than seconds on the UI isolate).
-  static final _equalsPair =
-      RegExp(r'''(?<![A-Za-z0-9_\-.\[\]])([A-Za-z0-9_\-.\[\]]{1,100})=([^&\s"'#;,)<>]+)''');
-  static final _colonPair =
-      RegExp(r'''(?<![A-Za-z0-9_\-.])([A-Za-z0-9_\-.]{2,100})(\s*:\s*)([^,\s}{\]\[]+)''');
+  static final _equalsPair = RegExp(
+    r'''(?<![A-Za-z0-9_\-.\[\]])([A-Za-z0-9_\-.\[\]]{1,100})=([^&\s"'#;,)<>]+)''',
+  );
+  static final _colonPair = RegExp(
+    r'''(?<![A-Za-z0-9_\-.])([A-Za-z0-9_\-.]{2,100})(\s*:\s*)([^,\s}{\]\[]+)''',
+  );
 
   /// Card-number shaped: 13-19 digits (optionally grouped) starting with a
   /// card network prefix; confirmed with a Luhn check.
@@ -206,12 +239,17 @@ class Redactor {
     out = out.replaceAllMapped(_colonPair, (m) {
       final value = m[3]!;
       // `https://...` is a URL scheme, not a key.
-      if (value.startsWith('//') || !isSensitiveKey(m[1]!) || value.contains(placeholder)) {
+      if (value.startsWith('//') ||
+          !isSensitiveKey(m[1]!) ||
+          value.contains(placeholder)) {
         return m[0]!;
       }
       return '${m[1]}${m[2]}$placeholder';
     });
-    out = out.replaceAllMapped(_digits, (m) => _luhn(m[0]!) ? placeholder : m[0]!);
+    out = out.replaceAllMapped(
+      _digits,
+      (m) => _luhn(m[0]!) ? placeholder : m[0]!,
+    );
     for (final p in _patterns) {
       out = out.replaceAll(p, placeholder);
     }
@@ -240,13 +278,15 @@ class Redactor {
   /// Lowercases names, joins multi-value headers, redacts sensitive ones and
   /// scrubs the values of the rest (e.g. a `location` URL with a token).
   Map<String, String> redactHeaders(Map<String, Object?> headers) => {
-        for (final entry in headers.entries)
-          entry.key.toLowerCase(): isSensitiveHeader(entry.key)
-              ? placeholder
-              : scrubText(entry.value is List
+    for (final entry in headers.entries)
+      entry.key.toLowerCase(): isSensitiveHeader(entry.key)
+          ? placeholder
+          : scrubText(
+              entry.value is List
                   ? (entry.value as List).join(', ')
-                  : '${entry.value}'),
-      };
+                  : '${entry.value}',
+            ),
+  };
 
   /// Redacts user info (`user:pass@`), sensitive query parameters and
   /// sensitive `key=value` pairs in the fragment (OAuth implicit flow).

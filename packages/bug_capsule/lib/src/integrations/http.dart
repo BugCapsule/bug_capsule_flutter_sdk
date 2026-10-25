@@ -32,17 +32,23 @@ import '../runtime/runtime.dart';
 class BugCapsuleHttp extends BugCapsuleIntegration {
   BugCapsuleHttp({
     List<EndpointRule> rules = const [],
-    Set<String> ignoreQuery = const {'_', 'ts', 'timestamp', 'nonce', 'cachebust'},
+    Set<String> ignoreQuery = const {
+      '_',
+      'ts',
+      'timestamp',
+      'nonce',
+      'cachebust',
+    },
     Set<String> ignoreBodyFields = const {},
     this.maxBinaryBytes = 64 * 1024,
     this.maxKeyBodyBytes = 64 * 1024,
     this.maxBodyWait = const Duration(seconds: 30),
     this.exclude,
   }) : keys = RequestKeyBuilder(
-          rules: rules,
-          globalIgnoreQuery: ignoreQuery,
-          globalIgnoreBodyFields: ignoreBodyFields,
-        );
+         rules: rules,
+         globalIgnoreQuery: ignoreQuery,
+         globalIgnoreBodyFields: ignoreBodyFields,
+       );
 
   final RequestKeyBuilder keys;
   final int maxBinaryBytes;
@@ -71,14 +77,22 @@ class BugCapsuleHttp extends BugCapsuleIntegration {
 
   /// A client that records (or replays) every request it sends through
   /// [inner], a new [http.Client] by default. Closing it closes [inner].
-  http.Client client([http.Client? inner]) => _BugCapsuleClient(this, inner ?? http.Client());
+  http.Client client([http.Client? inner]) =>
+      _BugCapsuleClient(this, inner ?? http.Client());
 
   @override
-  void describeEligibility(EligibilityBuilder eligibility, RecordedWindow window) =>
-      HttpBodies.describeEligibility(eligibility, window);
+  void describeEligibility(
+    EligibilityBuilder eligibility,
+    RecordedWindow window,
+  ) => HttpBodies.describeEligibility(eligibility, window);
 
   (Object?, String) _decode(List<int> bytes, String? contentType) =>
-      HttpBodies.decode(bytes, contentType, _session!.redactor, maxBinaryBytes: maxBinaryBytes);
+      HttpBodies.decode(
+        bytes,
+        contentType,
+        _session!.redactor,
+        maxBinaryBytes: maxBinaryBytes,
+      );
 
   /// The request key. Capture and replay both call this before the request
   /// is sent, with the same prefetched body prefix, whatever the capture
@@ -87,13 +101,17 @@ class BugCapsuleHttp extends BugCapsuleIntegration {
     final uri = _session!.redactor.redactUri(request.url);
     Object? keyBody;
     final contentType = _contentType(request);
-    if (body != null && body.complete && body.length <= maxKeyBodyBytes && !HttpBodies.isMultipart(contentType)) {
+    if (body != null &&
+        body.complete &&
+        body.length <= maxKeyBodyBytes &&
+        !HttpBodies.isMultipart(contentType)) {
       keyBody = _decode(body.bytes, contentType).$1;
     }
     return keys.keyFor(request.method, uri, keyBody);
   }
 
-  static String? _contentType(http.BaseRequest request) => request.headers['content-type'];
+  static String? _contentType(http.BaseRequest request) =>
+      request.headers['content-type'];
 }
 
 class _BugCapsuleClient extends http.BaseClient {
@@ -111,7 +129,11 @@ class _BugCapsuleClient extends http.BaseClient {
     // Monitoring: an http.client span, and trace headers for propagation
     // targets. The capsule records the app's headers (request keys never
     // include headers).
-    final span = MonitoringHub.current?.startHttpSpan(request.method, request.url, request.headers);
+    final span = MonitoringHub.current?.startHttpSpan(
+      request.method,
+      request.url,
+      request.headers,
+    );
     if (!session.isRecording) {
       if (span != null) request.headers.addAll(span.headers);
       try {
@@ -119,22 +141,35 @@ class _BugCapsuleClient extends http.BaseClient {
         span?.finish(statusCode: response.statusCode, breadcrumb: true);
         return response;
       } catch (e) {
-        span?.finish(error: e, cancelled: e is http.RequestAbortedException, breadcrumb: true);
+        span?.finish(
+          error: e,
+          cancelled: e is http.RequestAbortedException,
+          breadcrumb: true,
+        );
         rethrow;
       }
     }
     return _capture(session, request, span);
   }
 
-  Future<http.StreamedResponse> _capture(BugCapsuleSession session, http.BaseRequest original, HttpSpan? span) async {
+  Future<http.StreamedResponse> _capture(
+    BugCapsuleSession session,
+    http.BaseRequest original,
+    HttpSpan? span,
+  ) async {
     final started = Stopwatch()..start();
     final excluded = _bugCapsule.exclude?.call(original) ?? false;
     final captureBodies = session.captureNetworkBodies && !excluded;
     final requestType = BugCapsuleHttp._contentType(original);
     final requestLimit = captureBodies && !HttpBodies.isMultipart(requestType)
-        ? (session.maxBodyBytes > _bugCapsule.maxKeyBodyBytes ? session.maxBodyBytes : _bugCapsule.maxKeyBodyBytes)
+        ? (session.maxBodyBytes > _bugCapsule.maxKeyBodyBytes
+              ? session.maxBodyBytes
+              : _bugCapsule.maxKeyBodyBytes)
         : _bugCapsule.maxKeyBodyBytes;
-    final prefetched = await PrefetchedBody.read<List<int>>(original.finalize(), _bugCapsule.maxKeyBodyBytes);
+    final prefetched = await PrefetchedBody.read<List<int>>(
+      original.finalize(),
+      _bugCapsule.maxKeyBodyBytes,
+    );
     // Key and occurrence are fixed when the request starts, in request order,
     // exactly as replay looks them up.
     String? key;
@@ -153,11 +188,19 @@ class _BugCapsuleClient extends http.BaseClient {
       if (prefetched.length > 0) {
         if (!captureBodies || HttpBodies.isMultipart(requestType)) {
           requestEncoding = 'omitted';
-        } else if (request.complete && !request.overflowed(session.maxBodyBytes)) {
-          (requestBody, requestEncoding) = _bugCapsule._decode(request.bytes, requestType);
-        } else if (prefetched.complete && prefetched.length <= session.maxBodyBytes) {
+        } else if (request.complete &&
+            !request.overflowed(session.maxBodyBytes)) {
+          (requestBody, requestEncoding) = _bugCapsule._decode(
+            request.bytes,
+            requestType,
+          );
+        } else if (prefetched.complete &&
+            prefetched.length <= session.maxBodyBytes) {
           // The transport never read the body (e.g. connection refused).
-          (requestBody, requestEncoding) = _bugCapsule._decode(prefetched.bytes, requestType);
+          (requestBody, requestEncoding) = _bugCapsule._decode(
+            prefetched.bytes,
+            requestType,
+          );
         } else {
           requestEncoding = 'truncated';
         }
@@ -169,7 +212,8 @@ class _BugCapsuleClient extends http.BaseClient {
         'occurrence': occurrence!,
         'method': original.method.toUpperCase(),
         'url': session.redactor.redactUri(original.url).toString(),
-        if (!excluded) 'requestHeaders': session.redactor.redactHeaders(original.headers),
+        if (!excluded)
+          'requestHeaders': session.redactor.redactHeaders(original.headers),
         'requestBody': requestBody,
         'requestEncoding': requestEncoding,
         if (excluded) 'excluded': true,
@@ -185,35 +229,48 @@ class _BugCapsuleClient extends http.BaseClient {
     } catch (e) {
       span?.finish(error: e, cancelled: e is http.RequestAbortedException);
       if (key != null) {
-        _record(session, () => {
-              ...base(),
-              'status': 0,
-              'durationMs': started.elapsedMilliseconds,
-              'bodyEncoding': 'omitted',
-              'error': _errorJson(session, e),
-            });
+        _record(
+          session,
+          () => {
+            ...base(),
+            'status': 0,
+            'durationMs': started.elapsedMilliseconds,
+            'bodyEncoding': 'omitted',
+            'error': _errorJson(session, e),
+          },
+        );
       }
       rethrow;
     }
     if (key == null) return response;
 
     Map<String, Object?> head() => {
-          ...base(),
-          'status': response.statusCode,
-          'statusMessage': response.reasonPhrase,
-          if (!excluded) 'responseHeaders': session.redactor.redactHeaders(response.headers),
-        };
+      ...base(),
+      'status': response.statusCode,
+      'statusMessage': response.reasonPhrase,
+      if (!excluded)
+        'responseHeaders': session.redactor.redactHeaders(response.headers),
+    };
 
     final contentType = response.headers['content-type'];
     final sse = contentType?.toLowerCase().contains('event-stream') ?? false;
     if (sse || !captureBodies) {
       // Nothing to keep: record now and hand the stream over untouched.
-      _record(session, () => {...head(), 'durationMs': started.elapsedMilliseconds, 'bodyEncoding': 'omitted'});
+      _record(
+        session,
+        () => {
+          ...head(),
+          'durationMs': started.elapsedMilliseconds,
+          'bodyEncoding': 'omitted',
+        },
+      );
       return response;
     }
 
     final type = (contentType ?? '').toLowerCase();
-    final limit = HttpBodies.isText(type) ? session.maxBodyBytes : _bugCapsule.maxBinaryBytes;
+    final limit = HttpBodies.isText(type)
+        ? session.maxBodyBytes
+        : _bugCapsule.maxBinaryBytes;
     var recorded = false;
     Timer? wait;
     late final BodyTap<List<int>> tap;
@@ -221,7 +278,10 @@ class _BugCapsuleClient extends http.BaseClient {
       if (recorded) return;
       recorded = true;
       wait?.cancel();
-      _record(session, () => {...head(), 'durationMs': started.elapsedMilliseconds, ...extra});
+      _record(
+        session,
+        () => {...head(), 'durationMs': started.elapsedMilliseconds, ...extra},
+      );
       tap.release();
     }
 
@@ -237,39 +297,56 @@ class _BugCapsuleClient extends http.BaseClient {
           finish({'bodyEncoding': 'truncated'});
         }
       },
-      onError: (e) => finish({'bodyEncoding': 'truncated', 'error': _errorJson(session, e)}),
+      onError: (e) => finish({
+        'bodyEncoding': 'truncated',
+        'error': _errorJson(session, e),
+      }),
       onCancel: () => finish({
         'bodyEncoding': 'truncated',
         'error': {'type': 'cancel', 'message': 'response stream cancelled'},
       }),
       onOverflow: () => finish({'bodyEncoding': 'truncated'}),
     );
-    wait = Timer(_bugCapsule.maxBodyWait, () => finish({'bodyEncoding': 'truncated'}));
+    wait = Timer(
+      _bugCapsule.maxBodyWait,
+      () => finish({'bodyEncoding': 'truncated'}),
+    );
     return _withStream(response, tap.stream);
   }
 
-  static http.StreamedResponse _withStream(http.StreamedResponse r, Stream<List<int>> stream) =>
-      r is http.BaseResponseWithUrl
-          ? _StreamedResponseWithUrl(stream, r.statusCode,
-              url: (r as http.BaseResponseWithUrl).url,
-              contentLength: r.contentLength,
-              request: r.request,
-              headers: r.headers,
-              isRedirect: r.isRedirect,
-              persistentConnection: r.persistentConnection,
-              reasonPhrase: r.reasonPhrase)
-          : http.StreamedResponse(stream, r.statusCode,
-              contentLength: r.contentLength,
-              request: r.request,
-              headers: r.headers,
-              isRedirect: r.isRedirect,
-              persistentConnection: r.persistentConnection,
-              reasonPhrase: r.reasonPhrase);
+  static http.StreamedResponse _withStream(
+    http.StreamedResponse r,
+    Stream<List<int>> stream,
+  ) => r is http.BaseResponseWithUrl
+      ? _StreamedResponseWithUrl(
+          stream,
+          r.statusCode,
+          url: (r as http.BaseResponseWithUrl).url,
+          contentLength: r.contentLength,
+          request: r.request,
+          headers: r.headers,
+          isRedirect: r.isRedirect,
+          persistentConnection: r.persistentConnection,
+          reasonPhrase: r.reasonPhrase,
+        )
+      : http.StreamedResponse(
+          stream,
+          r.statusCode,
+          contentLength: r.contentLength,
+          request: r.request,
+          headers: r.headers,
+          isRedirect: r.isRedirect,
+          persistentConnection: r.persistentConnection,
+          reasonPhrase: r.reasonPhrase,
+        );
 
   /// Recorded when the exchange completes (or when the recording stops
   /// following it), so the event's `t` is that time; the request was sent at
   /// `t - durationMs`.
-  void _record(BugCapsuleSession session, Map<String, Object?> Function() data) {
+  void _record(
+    BugCapsuleSession session,
+    Map<String, Object?> Function() data,
+  ) {
     try {
       session.record(EventTypes.http, data());
     } catch (_) {
@@ -278,16 +355,21 @@ class _BugCapsuleClient extends http.BaseClient {
   }
 
   Map<String, Object?> _errorJson(BugCapsuleSession session, Object e) => {
-        'type': e is http.RequestAbortedException ? 'cancel' : 'connectionError',
-        'message': session.redactor.scrubText(e is http.ClientException ? e.message : '$e'),
-      };
+    'type': e is http.RequestAbortedException ? 'cancel' : 'connectionError',
+    'message': session.redactor.scrubText(
+      e is http.ClientException ? e.message : '$e',
+    ),
+  };
 
   Future<http.StreamedResponse> _replay(
     BugCapsuleSession session,
     ReplayContext replay,
     http.BaseRequest original,
   ) async {
-    final request = await PrefetchedBody.read<List<int>>(original.finalize(), _bugCapsule.maxKeyBodyBytes);
+    final request = await PrefetchedBody.read<List<int>>(
+      original.finalize(),
+      _bugCapsule.maxKeyBodyBytes,
+    );
     final key = _bugCapsule._keyFor(original, request);
     final lookup = replay.fixtures.take(key);
     if (lookup == null) {
@@ -295,13 +377,18 @@ class _BugCapsuleClient extends http.BaseClient {
       if (!replay.settings.strictNetwork) {
         final done = replay.beginWork();
         try {
-          return await _inner.send(_ForwardedRequest(original, request.stream()));
+          return await _inner.send(
+            _ForwardedRequest(original, request.stream()),
+          );
         } finally {
           done();
         }
       }
       await request.stream().drain<void>();
-      throw http.ClientException('BugCapsule replay: no recorded response for $key', original.url);
+      throw http.ClientException(
+        'BugCapsule replay: no recorded response for $key',
+        original.url,
+      );
     }
     // Consume the upload as a server would.
     await request.stream().drain<void>();
@@ -311,11 +398,15 @@ class _BugCapsuleClient extends http.BaseClient {
 
     // Keep the recorded latency so response ordering (and races) replay.
     // While it runs, idle compression leaves the replay clock alone.
-    final abortTrigger = original is http.Abortable ? original.abortTrigger : null;
+    final abortTrigger = original is http.Abortable
+        ? original.abortTrigger
+        : null;
     var aborted = false;
     final done = replay.beginWork();
     try {
-      final delay = Future<void>.delayed(Duration(milliseconds: fixture.durationMs));
+      final delay = Future<void>.delayed(
+        Duration(milliseconds: fixture.durationMs),
+      );
       if (abortTrigger != null) {
         await Future.any([delay, abortTrigger.then((_) => aborted = true)]);
       } else {
@@ -328,8 +419,13 @@ class _BugCapsuleClient extends http.BaseClient {
 
     final error = fixture.error;
     if (error != null && fixture.status == 0) {
-      if (error['type'] == 'cancel') throw http.RequestAbortedException(original.url);
-      throw http.ClientException(error['message'] as String? ?? 'connection error', original.url);
+      if (error['type'] == 'cancel') {
+        throw http.RequestAbortedException(original.url);
+      }
+      throw http.ClientException(
+        error['message'] as String? ?? 'connection error',
+        original.url,
+      );
     }
     if (!fixture.hasBody && fixture.status != 204) {
       replay.diverge('network.noBody', key);
@@ -349,7 +445,8 @@ class _BugCapsuleClient extends http.BaseClient {
   void close() => _inner.close();
 }
 
-class _StreamedResponseWithUrl extends http.StreamedResponse implements http.BaseResponseWithUrl {
+class _StreamedResponseWithUrl extends http.StreamedResponse
+    implements http.BaseResponseWithUrl {
   _StreamedResponseWithUrl(
     super.stream,
     super.statusCode, {
@@ -370,8 +467,8 @@ class _StreamedResponseWithUrl extends http.StreamedResponse implements http.Bas
 /// went through capture). [original] is finalized and cannot be sent itself.
 class _ForwardedRequest extends http.BaseRequest with http.Abortable {
   _ForwardedRequest(http.BaseRequest original, this._body)
-      : abortTrigger = original is http.Abortable ? original.abortTrigger : null,
-        super(original.method, original.url) {
+    : abortTrigger = original is http.Abortable ? original.abortTrigger : null,
+      super(original.method, original.url) {
     headers.addAll(original.headers);
     followRedirects = original.followRedirects;
     maxRedirects = original.maxRedirects;

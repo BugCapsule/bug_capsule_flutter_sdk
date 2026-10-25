@@ -20,10 +20,12 @@ class BugCapsuleNavigatorObserver extends NavigatorObserver {
   final String? Function(Route<dynamic> route)? routeName;
 
   @override
-  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) => _changed(route, previousRoute);
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _changed(route, previousRoute);
 
   @override
-  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) => _changed(newRoute, oldRoute);
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) =>
+      _changed(newRoute, oldRoute);
 
   /// Closing a dialog or popup returns to the same screen: not a navigation.
   @override
@@ -44,5 +46,6 @@ class BugCapsuleNavigatorObserver extends NavigatorObserver {
     }
   }
 
-  String? _name(Route<dynamic> route) => routeName == null ? route.settings.name : routeName!(route);
+  String? _name(Route<dynamic> route) =>
+      routeName == null ? route.settings.name : routeName!(route);
 }

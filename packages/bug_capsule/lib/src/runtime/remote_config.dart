@@ -24,7 +24,10 @@ class RemoteCaptureConfig {
 
   /// Parses the `/v1/sdk/config` body (or the cache file). Throws
   /// [FormatException] on wrong types; values are clamped to sane ranges.
-  factory RemoteCaptureConfig.fromJson(Map<String, Object?> j, {int? fetchedAtMs}) {
+  factory RemoteCaptureConfig.fromJson(
+    Map<String, Object?> j, {
+    int? fetchedAtMs,
+  }) {
     T? field<T>(String key) {
       final v = j[key];
       if (v == null || v is T) return v as T?;
@@ -45,15 +48,21 @@ class RemoteCaptureConfig {
       sampleRate: rate.isNaN ? 0 : rate.clamp(0, 1).toDouble(),
       maxCapsuleBytes: maxBytes < 1 ? 1 : maxBytes,
       captureNetworkBodies: field<bool>('captureNetworkBodies') ?? true,
-      redactKeys: [for (final k in field<List<Object?>>('redactKeys') ?? const []) '$k'],
+      redactKeys: [
+        for (final k in field<List<Object?>>('redactKeys') ?? const []) '$k',
+      ],
       configTtlSeconds: ttl.clamp(0, 86400),
       fetchedAtMs: fetchedAtMs ?? field<int>('fetchedAtMs') ?? 0,
       monitoringEnabled: field<bool>('monitoringEnabled') ?? true,
       errorSampleRate: rateOf('errorSampleRate', 1),
-      tracesSampleRate: j['tracesSampleRate'] == null ? null : rateOf('tracesSampleRate', 0),
+      tracesSampleRate: j['tracesSampleRate'] == null
+          ? null
+          : rateOf('tracesSampleRate', 0),
       sessionTracking: field<bool>('sessionTracking') ?? true,
       maxBreadcrumbs: (field<int>('maxBreadcrumbs') ?? 100).clamp(0, 100),
-      tracePropagationTargets: targets == null ? null : [for (final t in targets) '$t'],
+      tracePropagationTargets: targets == null
+          ? null
+          : [for (final t in targets) '$t'],
     );
   }
 
@@ -84,20 +93,20 @@ class RemoteCaptureConfig {
   final List<String>? tracePropagationTargets;
 
   Map<String, Object?> toJson() => {
-        'enabled': enabled,
-        'sampleRate': sampleRate,
-        'maxCapsuleBytes': maxCapsuleBytes,
-        'captureNetworkBodies': captureNetworkBodies,
-        'redactKeys': redactKeys,
-        'configTtlSeconds': configTtlSeconds,
-        'fetchedAtMs': fetchedAtMs,
-        'monitoringEnabled': monitoringEnabled,
-        'errorSampleRate': errorSampleRate,
-        'tracesSampleRate': tracesSampleRate,
-        'sessionTracking': sessionTracking,
-        'maxBreadcrumbs': maxBreadcrumbs,
-        'tracePropagationTargets': tracePropagationTargets,
-      };
+    'enabled': enabled,
+    'sampleRate': sampleRate,
+    'maxCapsuleBytes': maxCapsuleBytes,
+    'captureNetworkBodies': captureNetworkBodies,
+    'redactKeys': redactKeys,
+    'configTtlSeconds': configTtlSeconds,
+    'fetchedAtMs': fetchedAtMs,
+    'monitoringEnabled': monitoringEnabled,
+    'errorSampleRate': errorSampleRate,
+    'tracesSampleRate': tracesSampleRate,
+    'sessionTracking': sessionTracking,
+    'maxBreadcrumbs': maxBreadcrumbs,
+    'tracePropagationTargets': tracePropagationTargets,
+  };
 }
 
 /// Result of one `GET /v1/sdk/config`.
@@ -111,7 +120,13 @@ class ConfigFetched extends ConfigFetchResult {
 }
 
 class ConfigFetchFailed extends ConfigFetchResult {
-  const ConfigFetchFailed(this.message, {this.status, this.retryAfter, this.reason, this.detail});
+  const ConfigFetchFailed(
+    this.message, {
+    this.status,
+    this.retryAfter,
+    this.reason,
+    this.detail,
+  });
   final String message;
 
   /// HTTP status, null for network errors.
@@ -129,7 +144,8 @@ class ConfigFetchFailed extends ConfigFetchResult {
 
   /// Network error, timeout, 5xx, 408 or 429: the backend can't be reached
   /// right now.
-  bool get transient => status == null || status! >= 500 || status == 408 || status == 429;
+  bool get transient =>
+      status == null || status! >= 500 || status == 408 || status == 429;
 }
 
 /// Where the last good config is persisted between launches.
@@ -171,8 +187,8 @@ class RemoteConfigController {
     this.onRejected,
     DateTime Function()? now,
     Random? random,
-  })  : _now = now ?? DateTime.now,
-        _random = random ?? Random();
+  }) : _now = now ?? DateTime.now,
+       _random = random ?? Random();
 
   final Future<ConfigFetchResult> Function() fetch;
   final RemoteConfigCache cache;
@@ -180,7 +196,8 @@ class RemoteConfigController {
 
   /// Called with the previous and the new config whenever a fetch (or a
   /// rejected key) changes what applies.
-  final void Function(RemoteCaptureConfig? previous, RemoteCaptureConfig next) onChange;
+  final void Function(RemoteCaptureConfig? previous, RemoteCaptureConfig next)
+  onChange;
   final Duration maxStale;
   final Duration minInterval;
   final Duration maxBackoff;
@@ -219,7 +236,9 @@ class RemoteConfigController {
 
   Duration? get age => _current == null
       ? null
-      : Duration(milliseconds: _now().millisecondsSinceEpoch - _current!.fetchedAtMs);
+      : Duration(
+          milliseconds: _now().millisecondsSinceEpoch - _current!.fetchedAtMs,
+        );
 
   bool get isFresh => age != null && age! < _ttl;
 
@@ -228,7 +247,10 @@ class RemoteConfigController {
   bool get captureAllowed => !_keyRejected && (_current?.enabled ?? true);
 
   bool get uploadsAllowed =>
-      !_keyRejected && _current != null && _current!.enabled && age! <= maxStale;
+      !_keyRejected &&
+      _current != null &&
+      _current!.enabled &&
+      age! <= maxStale;
 
   Future<void> loadCached() async {
     try {
@@ -279,8 +301,10 @@ class RemoteConfigController {
           _keyRejected = true;
           final rejected = onRejected;
           if (rejected == null) {
-            debugPrint('[bugcapsule] ingest key rejected (${result.reason ?? 'HTTP ${result.status}'})'
-                '${result.detail == null ? '' : ': ${result.detail}'}; capture stopped');
+            debugPrint(
+              '[bugcapsule] ingest key rejected (${result.reason ?? 'HTTP ${result.status}'})'
+              '${result.detail == null ? '' : ': ${result.detail}'}; capture stopped',
+            );
           } else {
             try {
               rejected(result);
@@ -307,7 +331,8 @@ class RemoteConfigController {
     }
   }
 
-  RemoteCaptureConfig _disabledLike(RemoteCaptureConfig? c) => RemoteCaptureConfig(
+  RemoteCaptureConfig _disabledLike(RemoteCaptureConfig? c) =>
+      RemoteCaptureConfig(
         enabled: false,
         sampleRate: c?.sampleRate ?? 0,
         maxCapsuleBytes: c?.maxCapsuleBytes ?? 0,
@@ -318,8 +343,10 @@ class RemoteConfigController {
         monitoringEnabled: false,
       );
 
-  Duration _jitter(Duration d) =>
-      Duration(milliseconds: (d.inMilliseconds * (0.8 + _random.nextDouble() * 0.4)).round());
+  Duration _jitter(Duration d) => Duration(
+    milliseconds: (d.inMilliseconds * (0.8 + _random.nextDouble() * 0.4))
+        .round(),
+  );
 
   void _schedule(Duration delay) {
     _timer?.cancel();

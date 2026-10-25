@@ -77,15 +77,15 @@ class BugCapsuleConnectionStatus {
   final DateTime? firstCapsuleAcceptedAt;
 
   Map<String, Object?> toJson() => {
-        'state': state.code,
-        'source': source?.name,
-        'apiUrl': apiUrl,
-        'reason': reason,
-        'message': message,
-        'configFetchedAt': configFetchedAt?.toUtc().toIso8601String(),
-        'firstEventAcceptedAt': firstEventAcceptedAt?.toUtc().toIso8601String(),
-        'firstCapsuleAcceptedAt': firstCapsuleAcceptedAt?.toUtc().toIso8601String(),
-      };
+    'state': state.code,
+    'source': source?.name,
+    'apiUrl': apiUrl,
+    'reason': reason,
+    'message': message,
+    'configFetchedAt': configFetchedAt?.toUtc().toIso8601String(),
+    'firstEventAcceptedAt': firstEventAcceptedAt?.toUtc().toIso8601String(),
+    'firstCapsuleAcceptedAt': firstCapsuleAcceptedAt?.toUtc().toIso8601String(),
+  };
 
   @override
   String toString() => 'BugCapsuleConnectionStatus(${toJson()})';
@@ -126,13 +126,13 @@ class BugCapsuleInstrumentationStatus {
   final List<String> missing;
 
   Map<String, Object?> toJson() => {
-        'recording': recording,
-        'network': network,
-        'navigation': navigation,
-        'appState': appState,
-        'integrations': integrations,
-        'missing': missing,
-      };
+    'recording': recording,
+    'network': network,
+    'navigation': navigation,
+    'appState': appState,
+    'integrations': integrations,
+    'missing': missing,
+  };
 
   @override
   String toString() => 'BugCapsuleInstrumentationStatus(${toJson()})';
@@ -141,12 +141,18 @@ class BugCapsuleInstrumentationStatus {
 /// Connection and instrumentation, for setup checks and support
 /// (`BugCapsule.status`).
 class BugCapsuleStatus {
-  const BugCapsuleStatus({required this.connection, required this.instrumentation});
+  const BugCapsuleStatus({
+    required this.connection,
+    required this.instrumentation,
+  });
 
   final BugCapsuleConnectionStatus connection;
   final BugCapsuleInstrumentationStatus instrumentation;
 
-  Map<String, Object?> toJson() => {'connection': connection.toJson(), 'instrumentation': instrumentation.toJson()};
+  Map<String, Object?> toJson() => {
+    'connection': connection.toJson(),
+    'instrumentation': instrumentation.toJson(),
+  };
 
   @override
   String toString() => 'BugCapsuleStatus(${toJson()})';

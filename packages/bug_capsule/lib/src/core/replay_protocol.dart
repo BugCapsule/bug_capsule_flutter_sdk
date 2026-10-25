@@ -42,15 +42,15 @@ class ReplaySettings {
   });
 
   factory ReplaySettings.fromJson(Map<String, Object?> j) => ReplaySettings(
-        strategy: ReplayStrategy.values.byName(j['strategy'] as String? ?? 'auto'),
-        settleTimeoutMs: j['settleTimeoutMs'] as int? ?? 8000,
-        attempt: j['attempt'] as int? ?? 1,
-        kind: j['kind'] as String? ?? 'replay',
-        strictNetwork: j['strictNetwork'] as bool? ?? true,
-        idleCompression: j['idleCompression'] as bool? ?? true,
-        attemptId: j['attemptId'] as String?,
-        runtime: j['runtime'] as String?,
-      );
+    strategy: ReplayStrategy.values.byName(j['strategy'] as String? ?? 'auto'),
+    settleTimeoutMs: j['settleTimeoutMs'] as int? ?? 8000,
+    attempt: j['attempt'] as int? ?? 1,
+    kind: j['kind'] as String? ?? 'replay',
+    strictNetwork: j['strictNetwork'] as bool? ?? true,
+    idleCompression: j['idleCompression'] as bool? ?? true,
+    attemptId: j['attemptId'] as String?,
+    runtime: j['runtime'] as String?,
+  );
 
   final ReplayStrategy strategy;
 
@@ -77,15 +77,15 @@ class ReplaySettings {
   final String? runtime;
 
   Map<String, Object?> toJson() => {
-        'strategy': strategy.name,
-        'settleTimeoutMs': settleTimeoutMs,
-        'attempt': attempt,
-        'kind': kind,
-        'strictNetwork': strictNetwork,
-        'idleCompression': idleCompression,
-        if (attemptId != null) 'attemptId': attemptId,
-        if (runtime != null) 'runtime': runtime,
-      };
+    'strategy': strategy.name,
+    'settleTimeoutMs': settleTimeoutMs,
+    'attempt': attempt,
+    'kind': kind,
+    'strictNetwork': strictNetwork,
+    'idleCompression': idleCompression,
+    if (attemptId != null) 'attemptId': attemptId,
+    if (runtime != null) 'runtime': runtime,
+  };
 }
 
 enum ReplayOutcome {
@@ -107,8 +107,10 @@ enum ReplayOutcome {
   const ReplayOutcome(this.wire);
   final String wire;
 
-  static ReplayOutcome parse(String wire) =>
-      values.firstWhere((o) => o.wire == wire, orElse: () => ReplayOutcome.error);
+  static ReplayOutcome parse(String wire) => values.firstWhere(
+    (o) => o.wire == wire,
+    orElse: () => ReplayOutcome.error,
+  );
 }
 
 class Divergence {
@@ -123,7 +125,11 @@ class Divergence {
   final String detail;
   final int? t;
 
-  Map<String, Object?> toJson() => {'type': type, 'detail': detail, if (t != null) 't': t};
+  Map<String, Object?> toJson() => {
+    'type': type,
+    'detail': detail,
+    if (t != null) 't': t,
+  };
 
   @override
   String toString() => '$type: $detail';
@@ -151,32 +157,34 @@ class ReplayReport {
   });
 
   factory ReplayReport.fromJson(Map<String, Object?> j) => ReplayReport(
-        outcome: ReplayOutcome.parse(j['outcome'] as String),
-        attempt: j['attempt'] as int? ?? 1,
-        durationMs: j['durationMs'] as int? ?? 0,
-        strategy: ReplayStrategy.values.byName(j['strategy'] as String? ?? 'auto'),
-        expectedSignature: j['expectedSignature'] as String?,
-        observed: j['observed'] == null
-            ? null
-            : FailureRecord.fromJson((j['observed'] as Map).cast<String, Object?>()),
-        otherFailures: [
-          for (final f in (j['otherFailures'] as List?) ?? const [])
-            FailureRecord.fromJson((f as Map).cast<String, Object?>()),
-        ],
-        divergences: [
-          for (final d in (j['divergences'] as List?) ?? const [])
-            Divergence.fromJson((d as Map).cast<String, Object?>()),
-        ],
-        eventsDispatched: j['eventsDispatched'] as int? ?? 0,
-        eventsExpected: j['eventsExpected'] as int?,
-        fixturesServed: j['fixturesServed'] as int? ?? 0,
-        compressedMs: j['compressedMs'] as int? ?? 0,
-        gapsCompressed: j['gapsCompressed'] as int? ?? 0,
-        buildGitSha: j['buildGitSha'] as String?,
-        message: j['message'] as String?,
-        attemptId: j['attemptId'] as String?,
-        runtime: j['runtime'] as String?,
-      );
+    outcome: ReplayOutcome.parse(j['outcome'] as String),
+    attempt: j['attempt'] as int? ?? 1,
+    durationMs: j['durationMs'] as int? ?? 0,
+    strategy: ReplayStrategy.values.byName(j['strategy'] as String? ?? 'auto'),
+    expectedSignature: j['expectedSignature'] as String?,
+    observed: j['observed'] == null
+        ? null
+        : FailureRecord.fromJson(
+            (j['observed'] as Map).cast<String, Object?>(),
+          ),
+    otherFailures: [
+      for (final f in (j['otherFailures'] as List?) ?? const [])
+        FailureRecord.fromJson((f as Map).cast<String, Object?>()),
+    ],
+    divergences: [
+      for (final d in (j['divergences'] as List?) ?? const [])
+        Divergence.fromJson((d as Map).cast<String, Object?>()),
+    ],
+    eventsDispatched: j['eventsDispatched'] as int? ?? 0,
+    eventsExpected: j['eventsExpected'] as int?,
+    fixturesServed: j['fixturesServed'] as int? ?? 0,
+    compressedMs: j['compressedMs'] as int? ?? 0,
+    gapsCompressed: j['gapsCompressed'] as int? ?? 0,
+    buildGitSha: j['buildGitSha'] as String?,
+    message: j['message'] as String?,
+    attemptId: j['attemptId'] as String?,
+    runtime: j['runtime'] as String?,
+  );
 
   final ReplayOutcome outcome;
   final int attempt;
@@ -210,42 +218,42 @@ class ReplayReport {
   /// Same report with [divergences] appended (e.g. by a runner that saw
   /// requests escape the app's network hooks).
   ReplayReport withDivergences(List<Divergence> extra) => ReplayReport(
-        outcome: outcome,
-        attempt: attempt,
-        durationMs: durationMs,
-        strategy: strategy,
-        expectedSignature: expectedSignature,
-        observed: observed,
-        otherFailures: otherFailures,
-        divergences: [...divergences, ...extra],
-        eventsDispatched: eventsDispatched,
-        eventsExpected: eventsExpected,
-        fixturesServed: fixturesServed,
-        compressedMs: compressedMs,
-        gapsCompressed: gapsCompressed,
-        buildGitSha: buildGitSha,
-        message: message,
-        attemptId: attemptId,
-        runtime: runtime,
-      );
+    outcome: outcome,
+    attempt: attempt,
+    durationMs: durationMs,
+    strategy: strategy,
+    expectedSignature: expectedSignature,
+    observed: observed,
+    otherFailures: otherFailures,
+    divergences: [...divergences, ...extra],
+    eventsDispatched: eventsDispatched,
+    eventsExpected: eventsExpected,
+    fixturesServed: fixturesServed,
+    compressedMs: compressedMs,
+    gapsCompressed: gapsCompressed,
+    buildGitSha: buildGitSha,
+    message: message,
+    attemptId: attemptId,
+    runtime: runtime,
+  );
 
   Map<String, Object?> toJson() => {
-        'outcome': outcome.wire,
-        'attempt': attempt,
-        'durationMs': durationMs,
-        'strategy': strategy.name,
-        'expectedSignature': expectedSignature,
-        'observed': observed?.toJson(),
-        'otherFailures': [for (final f in otherFailures) f.toJson()],
-        'divergences': [for (final d in divergences) d.toJson()],
-        'eventsDispatched': eventsDispatched,
-        'eventsExpected': eventsExpected,
-        'fixturesServed': fixturesServed,
-        'compressedMs': compressedMs,
-        'gapsCompressed': gapsCompressed,
-        'buildGitSha': buildGitSha,
-        'message': message,
-        if (attemptId != null) 'attemptId': attemptId,
-        if (runtime != null) 'runtime': runtime,
-      };
+    'outcome': outcome.wire,
+    'attempt': attempt,
+    'durationMs': durationMs,
+    'strategy': strategy.name,
+    'expectedSignature': expectedSignature,
+    'observed': observed?.toJson(),
+    'otherFailures': [for (final f in otherFailures) f.toJson()],
+    'divergences': [for (final d in divergences) d.toJson()],
+    'eventsDispatched': eventsDispatched,
+    'eventsExpected': eventsExpected,
+    'fixturesServed': fixturesServed,
+    'compressedMs': compressedMs,
+    'gapsCompressed': gapsCompressed,
+    'buildGitSha': buildGitSha,
+    'message': message,
+    if (attemptId != null) 'attemptId': attemptId,
+    if (runtime != null) 'runtime': runtime,
+  };
 }

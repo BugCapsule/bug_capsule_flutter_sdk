@@ -65,28 +65,34 @@ class _BugCapsuleOverlayState extends State<BugCapsuleOverlay> {
   }
 
   Widget _button() => Semantics(
-        button: true,
-        label: 'BugCapsule capture',
-        child: GestureDetector(
-          onTap: () => setState(() {
-            _open = true;
-            _result = null;
-            _error = null;
-          }),
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: const BoxDecoration(
-              color: Color(0xE61D4ED8),
-              shape: BoxShape.circle,
-              boxShadow: [BoxShadow(blurRadius: 6, color: Color(0x40000000))],
-            ),
-            alignment: Alignment.center,
-            child: const Text('R',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 18)),
+    button: true,
+    label: 'BugCapsule capture',
+    child: GestureDetector(
+      onTap: () => setState(() {
+        _open = true;
+        _result = null;
+        _error = null;
+      }),
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: const BoxDecoration(
+          color: Color(0xE61D4ED8),
+          shape: BoxShape.circle,
+          boxShadow: [BoxShadow(blurRadius: 6, color: Color(0x40000000))],
+        ),
+        alignment: Alignment.center,
+        child: const Text(
+          'R',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: 18,
           ),
         ),
-      );
+      ),
+    ),
+  );
 
   Widget _panel(BuildContext context) {
     final theme = Theme.of(context);
@@ -107,34 +113,51 @@ class _BugCapsuleOverlayState extends State<BugCapsuleOverlay> {
           Text('BugCapsule', style: theme.textTheme.titleMedium),
           const SizedBox(height: 6),
           if (result == null)
-            Text('Save the last few minutes of this session as a capsule a developer can replay.',
-                style: theme.textTheme.bodySmall)
+            Text(
+              'Save the last few minutes of this session as a capsule a developer can replay.',
+              style: theme.textTheme.bodySmall,
+            )
           else ...[
-            Text('Capsule ${result.capsuleId.substring(0, 8)}', style: theme.textTheme.bodyMedium),
-            Text('Eligibility: ${result.eligibility.status.name}',
-                style: theme.textTheme.bodySmall),
+            Text(
+              'Capsule ${result.capsuleId.substring(0, 8)}',
+              style: theme.textTheme.bodyMedium,
+            ),
+            Text(
+              'Eligibility: ${result.eligibility.status.name}',
+              style: theme.textTheme.bodySmall,
+            ),
             Text(
               upload == null
                   ? 'Saved on device (no backend configured)'
                   : switch (upload.status) {
                       UploadStatus.uploaded => 'Uploaded ✓',
                       UploadStatus.retryLater => 'Upload pending (will retry)',
-                      UploadStatus.rejected => 'Upload rejected: ${upload.message}',
+                      UploadStatus.rejected =>
+                        'Upload rejected: ${upload.message}',
                     },
               style: theme.textTheme.bodySmall,
             ),
           ],
           if (_error != null)
-            Text(_error!, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
+            Text(
+              _error!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              TextButton(onPressed: () => setState(() => _open = false), child: const Text('Close')),
+              TextButton(
+                onPressed: () => setState(() => _open = false),
+                child: const Text('Close'),
+              ),
               if (result != null)
                 TextButton(
-                  onPressed: () =>
-                      Clipboard.setData(ClipboardData(text: upload?.serverId ?? result.capsuleId)),
+                  onPressed: () => Clipboard.setData(
+                    ClipboardData(text: upload?.serverId ?? result.capsuleId),
+                  ),
                   child: const Text('Copy ID'),
                 )
               else

@@ -16,16 +16,24 @@ class ReplayChannel {
 
   final String baseUrl;
 
-  Uri _uri(String path) => Uri.parse('${baseUrl.replaceAll(RegExp(r'/+$'), '')}$path');
+  Uri _uri(String path) =>
+      Uri.parse('${baseUrl.replaceAll(RegExp(r'/+$'), '')}$path');
 
   Future<(Capsule, ReplaySettings)> fetch() async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     try {
-      final settingsRes = await (await client.getUrl(_uri(ReplayProtocol.settingsPath))).close();
-      final settingsJson = jsonDecode(await utf8.decodeStream(settingsRes)) as Map;
-      final capsuleRes = await (await client.getUrl(_uri(ReplayProtocol.capsulePath))).close();
+      final settingsRes = await (await client.getUrl(
+        _uri(ReplayProtocol.settingsPath),
+      )).close();
+      final settingsJson =
+          jsonDecode(await utf8.decodeStream(settingsRes)) as Map;
+      final capsuleRes = await (await client.getUrl(
+        _uri(ReplayProtocol.capsulePath),
+      )).close();
       if (capsuleRes.statusCode != 200) {
-        throw StateError('capsule download failed: HTTP ${capsuleRes.statusCode}');
+        throw StateError(
+          'capsule download failed: HTTP ${capsuleRes.statusCode}',
+        );
       }
       final bytes = <int>[];
       await for (final chunk in capsuleRes) {
@@ -70,8 +78,8 @@ class ReplayEngine implements ReplayContext {
     required this.settings,
     required this.actions,
     required this.buildGitSha,
-  })  : fixtures = FixtureStore(capsule.events),
-        _idle = IdleCompressor(capsule.events);
+  }) : fixtures = FixtureStore(capsule.events),
+       _idle = IdleCompressor(capsule.events);
 
   @override
   final Capsule capsule;
@@ -104,7 +112,8 @@ class ReplayEngine implements ReplayContext {
   /// time (skipped idle time included), so `clock.now()` sees the same dates
   /// as during capture.
   DateTime now() => DateTime.fromMillisecondsSinceEpoch(
-      _baseWallClockMs + _sinceRestore.elapsedMilliseconds + _skippedMs);
+    _baseWallClockMs + _sinceRestore.elapsedMilliseconds + _skippedMs,
+  );
 
   /// Replay clock in recorded milliseconds since [run] started.
   int elapsed() => _clock.elapsedMilliseconds + _skippedMs;
@@ -112,7 +121,9 @@ class ReplayEngine implements ReplayContext {
   @override
   void diverge(String type, String detail) {
     final t = _clock.isRunning ? elapsed() : null;
-    if (_divergences.length < 200) _divergences.add(Divergence(type, detail, t: t));
+    if (_divergences.length < 200) {
+      _divergences.add(Divergence(type, detail, t: t));
+    }
   }
 
   @override
@@ -146,7 +157,8 @@ class ReplayEngine implements ReplayContext {
   /// recently started animations.
   int get _busy {
     final scheduler = SchedulerBinding.instance;
-    final animating = scheduler.transientCallbackCount > 0 || scheduler.hasScheduledFrame;
+    final animating =
+        scheduler.transientCallbackCount > 0 || scheduler.hasScheduledFrame;
     final settling = animating && _quietMs < _maxAnimationWaitMs;
     return _work + _lastPointerPosition.length + (settling ? 1 : 0);
   }
@@ -181,12 +193,15 @@ class ReplayEngine implements ReplayContext {
         final view = WidgetsBinding.instance.platformDispatcher.views.first;
         final size = view.physicalSize / view.devicePixelRatio;
         final p = capsule.manifest.platform;
-        final sameScreen = (size.width - p.screenWidth).abs() < 1 &&
+        final sameScreen =
+            (size.width - p.screenWidth).abs() < 1 &&
             (size.height - p.screenHeight).abs() < 1;
         if (hasPointers && (sameScreen || !hasActions)) {
           if (!sameScreen) {
-            diverge('screen.size',
-                'recorded ${p.screenWidth}x${p.screenHeight}, replay ${size.width}x${size.height}; pointers are scaled');
+            diverge(
+              'screen.size',
+              'recorded ${p.screenWidth}x${p.screenHeight}, replay ${size.width}x${size.height}; pointers are scaled',
+            );
           }
           return ReplayStrategy.pointer;
         }
@@ -199,7 +214,9 @@ class ReplayEngine implements ReplayContext {
     _clock.start();
     _strategy = _chooseStrategy();
     final expected = capsule.manifest.failure;
-    final base = capsule.checkpoint.kind == CheckpointKind.launch ? 0 : capsule.checkpoint.t;
+    final base = capsule.checkpoint.kind == CheckpointKind.launch
+        ? 0
+        : capsule.checkpoint.t;
 
     final toDispatch = [
       for (final e in capsule.events)
@@ -212,7 +229,9 @@ class ReplayEngine implements ReplayContext {
       if (_reproduced.isCompleted) break;
       final due = event.t - base;
       lastT = due;
-      final idleSince = settings.idleCompression ? _idle.idleSince(previous, event.t) : null;
+      final idleSince = settings.idleCompression
+          ? _idle.idleSince(previous, event.t)
+          : null;
       previous = event.t;
       while (!_reproduced.isCompleted) {
         final wait = due - elapsed();
@@ -230,7 +249,10 @@ class ReplayEngine implements ReplayContext {
         }
         // Inside a compressible gap, re-check idleness every 50 ms.
         final step = idleSince == null || wait < 50 ? wait : 50;
-        await Future.any([Future<void>.delayed(Duration(milliseconds: step)), _reproduced.future]);
+        await Future.any([
+          Future<void>.delayed(Duration(milliseconds: step)),
+          _reproduced.future,
+        ]);
       }
       if (_reproduced.isCompleted) break;
       _dispatch(event);
@@ -239,12 +261,15 @@ class ReplayEngine implements ReplayContext {
     FailureRecord? observed;
     if (!_reproduced.isCompleted) {
       final failureDue = expected == null ? 0 : expected.t - base;
-      final deadline = (failureDue > lastT ? failureDue : lastT) +
+      final deadline =
+          (failureDue > lastT ? failureDue : lastT) +
           (expected == null ? 1500 : settings.settleTimeoutMs);
       final remaining = deadline - elapsed();
       if (remaining > 0) {
-        observed = await _reproduced.future
-            .timeout(Duration(milliseconds: remaining), onTimeout: () => _notObserved);
+        observed = await _reproduced.future.timeout(
+          Duration(milliseconds: remaining),
+          onTimeout: () => _notObserved,
+        );
         if (identical(observed, _notObserved)) observed = null;
       }
     } else {
@@ -258,8 +283,8 @@ class ReplayEngine implements ReplayContext {
     final outcome = expected == null
         ? ReplayOutcome.noAssertion
         : observed != null
-            ? ReplayOutcome.reproduced
-            : ReplayOutcome.notReproduced;
+        ? ReplayOutcome.reproduced
+        : ReplayOutcome.notReproduced;
     return ReplayReport(
       outcome: outcome,
       attempt: settings.attempt,
@@ -278,15 +303,18 @@ class ReplayEngine implements ReplayContext {
     );
   }
 
-  static final _notObserved =
-      FailureRecord.assertion('__bugcapsule_not_observed__', '', 0);
+  static final _notObserved = FailureRecord.assertion(
+    '__bugcapsule_not_observed__',
+    '',
+    0,
+  );
 
   bool _shouldDispatch(String type) => switch (type) {
-        EventTypes.lifecycle || EventTypes.text => true,
-        EventTypes.pointer => _strategy == ReplayStrategy.pointer,
-        EventTypes.action => _strategy == ReplayStrategy.semantic,
-        _ => false,
-      };
+    EventTypes.lifecycle || EventTypes.text => true,
+    EventTypes.pointer => _strategy == ReplayStrategy.pointer,
+    EventTypes.action => _strategy == ReplayStrategy.semantic,
+    _ => false,
+  };
 
   void _dispatch(BugCapsuleEvent event) {
     try {
@@ -295,7 +323,8 @@ class ReplayEngine implements ReplayContext {
           _dispatchPointer(event.data);
         case EventTypes.action:
           final id = event.data['id'] as String;
-          final payload = (event.data['payload'] as Map?)?.cast<String, Object?>();
+          final payload = (event.data['payload'] as Map?)
+              ?.cast<String, Object?>();
           if (!actions.invoke(id, payload)) {
             diverge('action.unregistered', id);
             return;
@@ -303,13 +332,17 @@ class ReplayEngine implements ReplayContext {
         case EventTypes.text:
           final id = event.data['id'] as String;
           final value = event.data['value'] as String? ?? '';
-          if (value.contains(Redactor.placeholder)) diverge('text.redacted', id);
+          if (value.contains(Redactor.placeholder)) {
+            diverge('text.redacted', id);
+          }
           if (!actions.setText(id, value)) {
             diverge('text.untracked', id);
             return;
           }
         case EventTypes.lifecycle:
-          final state = AppLifecycleState.values.byName(event.data['state'] as String);
+          final state = AppLifecycleState.values.byName(
+            event.data['state'] as String,
+          );
           // ignore: invalid_use_of_protected_member
           WidgetsBinding.instance.handleAppLifecycleStateChanged(state);
       }
@@ -326,25 +359,46 @@ class ReplayEngine implements ReplayContext {
     final p = capsule.manifest.platform;
     final sx = p.screenWidth > 0 ? size.width / p.screenWidth : 1.0;
     final sy = p.screenHeight > 0 ? size.height / p.screenHeight : 1.0;
-    final position = Offset((d['x'] as num).toDouble() * sx, (d['y'] as num).toDouble() * sy);
+    final position = Offset(
+      (d['x'] as num).toDouble() * sx,
+      (d['y'] as num).toDouble() * sy,
+    );
     final pointer = 100000 + (d['pointer'] as int);
-    final kind = PointerDeviceKind.values.asNameMap()[d['kind']] ?? PointerDeviceKind.touch;
+    final kind =
+        PointerDeviceKind.values.asNameMap()[d['kind']] ??
+        PointerDeviceKind.touch;
     final buttons = d['buttons'] as int? ?? kPrimaryButton;
     final ts = Duration(milliseconds: _clock.elapsedMilliseconds);
     final last = _lastPointerPosition[pointer] ?? position;
 
     final PointerEvent event = switch (d['phase']) {
       'down' => PointerDownEvent(
-          timeStamp: ts, pointer: pointer, kind: kind, position: position, buttons: buttons),
+        timeStamp: ts,
+        pointer: pointer,
+        kind: kind,
+        position: position,
+        buttons: buttons,
+      ),
       'move' => PointerMoveEvent(
-          timeStamp: ts,
-          pointer: pointer,
-          kind: kind,
-          position: position,
-          delta: position - last,
-          buttons: buttons),
-      'up' => PointerUpEvent(timeStamp: ts, pointer: pointer, kind: kind, position: position),
-      _ => PointerCancelEvent(timeStamp: ts, pointer: pointer, kind: kind, position: position),
+        timeStamp: ts,
+        pointer: pointer,
+        kind: kind,
+        position: position,
+        delta: position - last,
+        buttons: buttons,
+      ),
+      'up' => PointerUpEvent(
+        timeStamp: ts,
+        pointer: pointer,
+        kind: kind,
+        position: position,
+      ),
+      _ => PointerCancelEvent(
+        timeStamp: ts,
+        pointer: pointer,
+        kind: kind,
+        position: position,
+      ),
     };
     if (event is PointerUpEvent || event is PointerCancelEvent) {
       _lastPointerPosition.remove(pointer);

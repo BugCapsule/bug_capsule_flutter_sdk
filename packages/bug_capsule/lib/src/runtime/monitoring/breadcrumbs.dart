@@ -6,10 +6,23 @@ import '../../core/core.dart';
 /// lifecycle, log, state, failure), so no integration is instrumented twice.
 abstract final class BreadcrumbMapper {
   static const _state = {
-    EventTypes.blocCreate, EventTypes.blocClose, EventTypes.blocEvent, EventTypes.blocState, EventTypes.blocError,
-    EventTypes.riverpodAdd, EventTypes.riverpodUpdate, EventTypes.riverpodError, EventTypes.riverpodDispose,
-    EventTypes.notifierCreate, EventTypes.notifierChange, EventTypes.getxCreate, EventTypes.getxChange,
-    EventTypes.mobxCreate, EventTypes.mobxChange, EventTypes.mobxObservable, EventTypes.mobxAction,
+    EventTypes.blocCreate,
+    EventTypes.blocClose,
+    EventTypes.blocEvent,
+    EventTypes.blocState,
+    EventTypes.blocError,
+    EventTypes.riverpodAdd,
+    EventTypes.riverpodUpdate,
+    EventTypes.riverpodError,
+    EventTypes.riverpodDispose,
+    EventTypes.notifierCreate,
+    EventTypes.notifierChange,
+    EventTypes.getxCreate,
+    EventTypes.getxChange,
+    EventTypes.mobxCreate,
+    EventTypes.mobxChange,
+    EventTypes.mobxObservable,
+    EventTypes.mobxAction,
     EventTypes.mobxError,
   };
 
@@ -25,7 +38,11 @@ abstract final class BreadcrumbMapper {
       _state.contains(type);
 
   /// [data] is already redacted by the recorder's sanitizer.
-  static Breadcrumb? fromEvent(String type, Map<String, Object?> data, {String? previousRoute}) {
+  static Breadcrumb? fromEvent(
+    String type,
+    Map<String, Object?> data, {
+    String? previousRoute,
+  }) {
     switch (type) {
       case EventTypes.route:
         return Breadcrumb(
@@ -34,7 +51,11 @@ abstract final class BreadcrumbMapper {
           data: {'from': ?previousRoute, 'to': data['location']},
         );
       case EventTypes.action:
-        return Breadcrumb(type: BreadcrumbType.user, category: 'ui.action', message: '${data['id']}');
+        return Breadcrumb(
+          type: BreadcrumbType.user,
+          category: 'ui.action',
+          message: '${data['id']}',
+        );
       case EventTypes.http:
         return http(
           method: '${data['method']}',
@@ -44,7 +65,10 @@ abstract final class BreadcrumbMapper {
           error: (data['error'] as Map?)?['type'] as String?,
         );
       case EventTypes.lifecycle:
-        return Breadcrumb(category: 'app.lifecycle', data: {'state': data['state']});
+        return Breadcrumb(
+          category: 'app.lifecycle',
+          data: {'state': data['state']},
+        );
       case EventTypes.log:
         return Breadcrumb(
           type: BreadcrumbType.debug,
@@ -61,42 +85,58 @@ abstract final class BreadcrumbMapper {
         );
     }
     if (_state.contains(type)) {
-      return Breadcrumb(type: BreadcrumbType.state, category: type, data: _scalars(data));
+      return Breadcrumb(
+        type: BreadcrumbType.state,
+        category: type,
+        data: _scalars(data),
+      );
     }
     return null;
   }
 
-  static Breadcrumb http({required String method, required String url, int? status, int? durationMs, String? error}) =>
-      Breadcrumb(
-        type: BreadcrumbType.http,
-        category: 'http',
-        level: status == null || status == 0 || status >= 500
-            ? EventLevel.error
-            : status >= 400
-                ? EventLevel.warning
-                : EventLevel.info,
-        data: {
-          'method': method,
-          'url': url,
-          if (status != null && status > 0) 'status_code': status,
-          'duration_ms': ?durationMs,
-          'error': ?error,
-        },
-      );
+  static Breadcrumb http({
+    required String method,
+    required String url,
+    int? status,
+    int? durationMs,
+    String? error,
+  }) => Breadcrumb(
+    type: BreadcrumbType.http,
+    category: 'http',
+    level: status == null || status == 0 || status >= 500
+        ? EventLevel.error
+        : status >= 400
+        ? EventLevel.warning
+        : EventLevel.info,
+    data: {
+      'method': method,
+      'url': url,
+      if (status != null && status > 0) 'status_code': status,
+      'duration_ms': ?durationMs,
+      'error': ?error,
+    },
+  );
 
   static EventLevel _level(String level) => switch (level) {
-        'error' || 'severe' || 'shout' => EventLevel.error,
-        'warning' || 'warn' => EventLevel.warning,
-        'debug' || 'fine' || 'finer' || 'finest' || 'trace' || 'verbose' => EventLevel.debug,
-        _ => EventLevel.info,
-      };
+    'error' || 'severe' || 'shout' => EventLevel.error,
+    'warning' || 'warn' => EventLevel.warning,
+    'debug' ||
+    'fine' ||
+    'finer' ||
+    'finest' ||
+    'trace' ||
+    'verbose' => EventLevel.debug,
+    _ => EventLevel.info,
+  };
 
   /// Names and short values only: state payloads can be large.
   static Map<String, Object?> _scalars(Map<String, Object?> data) => {
-        for (final e in data.entries.take(10))
-          if (e.value is num || e.value is bool) e.key: e.value
-          else if (e.value is String) e.key: cut(e.value! as String, 200),
-      };
+    for (final e in data.entries.take(10))
+      if (e.value is num || e.value is bool)
+        e.key: e.value
+      else if (e.value is String)
+        e.key: cut(e.value! as String, 200),
+  };
 }
 
 /// Ring of the most recent breadcrumbs, oldest first.

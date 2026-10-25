@@ -35,8 +35,8 @@ class FlightRecorder {
     this.maxEvents = 20000,
     this.windowMs = 5 * 60 * 1000,
     this.maxCheckpoints = 4,
-  })  : assert(launch.kind == CheckpointKind.launch),
-        _launch = launch;
+  }) : assert(launch.kind == CheckpointKind.launch),
+       _launch = launch;
 
   final int maxEvents;
   final int windowMs;
@@ -57,7 +57,11 @@ class FlightRecorder {
   int get droppedEvents => _dropped;
   bool get launchCoversWindow => _dropped == 0;
 
-  BugCapsuleEvent add(int t, String type, [Map<String, Object?> data = const {}]) {
+  BugCapsuleEvent add(
+    int t,
+    String type, [
+    Map<String, Object?> data = const {},
+  ]) {
     final event = BugCapsuleEvent(seq: ++_seq, t: t, type: type, data: data);
     _events.addLast(event);
     _evict(t);
@@ -106,13 +110,22 @@ class FlightRecorder {
     required int t,
     required int wallClockMs,
     required Map<String, Object?> data,
-  }) =>
-      Checkpoint(kind: kind, t: t, wallClockMs: wallClockMs, afterSeq: _seq, data: data);
+  }) => Checkpoint(
+    kind: kind,
+    t: t,
+    wallClockMs: wallClockMs,
+    afterSeq: _seq,
+    data: data,
+  );
 
   RecordedWindow window() {
     if (launchCoversWindow) {
       return RecordedWindow(
-          checkpoint: _launch, events: List.of(_events), droppedEvents: 0, hasGap: false);
+        checkpoint: _launch,
+        events: List.of(_events),
+        droppedEvents: 0,
+        hasGap: false,
+      );
     }
     Checkpoint? chosen;
     for (final cp in _periodic) {
@@ -126,7 +139,10 @@ class FlightRecorder {
     final from = chosen.afterSeq;
     return RecordedWindow(
       checkpoint: chosen,
-      events: [for (final e in _events) if (e.seq > from) e],
+      events: [
+        for (final e in _events)
+          if (e.seq > from) e,
+      ],
       droppedEvents: _dropped,
       hasGap: hasGap,
     );
@@ -144,7 +160,9 @@ class FlightRecorder {
   /// Keeps periodic checkpoints that can still start a complete window; when
   /// none can, keeps only the newest as a best-effort fallback.
   void _prune() {
-    final firstValid = _periodic.indexWhere((cp) => cp.afterSeq >= _lastEvictedSeq);
+    final firstValid = _periodic.indexWhere(
+      (cp) => cp.afterSeq >= _lastEvictedSeq,
+    );
     final keepFrom = firstValid == -1 ? _periodic.length - 1 : firstValid;
     if (keepFrom > 0) _periodic.removeRange(0, keepFrom);
     while (_periodic.length > maxCheckpoints) {

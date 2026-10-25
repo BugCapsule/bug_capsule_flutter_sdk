@@ -112,7 +112,10 @@ class _BugCapsuleFeedbackFormState extends State<BugCapsuleFeedbackForm> {
               enabled: !_sending,
               maxLength: 200,
               textInputAction: TextInputAction.next,
-              decoration: InputDecoration(labelText: widget.nameLabel, counterText: ''),
+              decoration: InputDecoration(
+                labelText: widget.nameLabel,
+                counterText: '',
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -123,7 +126,10 @@ class _BugCapsuleFeedbackFormState extends State<BugCapsuleFeedbackForm> {
               maxLength: 200,
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
-              decoration: InputDecoration(labelText: widget.emailLabel, counterText: ''),
+              decoration: InputDecoration(
+                labelText: widget.emailLabel,
+                counterText: '',
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -134,18 +140,27 @@ class _BugCapsuleFeedbackFormState extends State<BugCapsuleFeedbackForm> {
             minLines: 3,
             maxLines: 6,
             maxLength: 5000,
-            decoration: InputDecoration(labelText: widget.messageLabel, errorText: _error),
+            decoration: InputDecoration(
+              labelText: widget.messageLabel,
+              errorText: _error,
+            ),
           ),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              TextButton(onPressed: _sending ? null : widget.onCancel, child: Text(widget.cancelLabel)),
+              TextButton(
+                onPressed: _sending ? null : widget.onCancel,
+                child: Text(widget.cancelLabel),
+              ),
               const SizedBox(width: 8),
               FilledButton(
                 onPressed: _sending ? null : _submit,
                 child: _sending
-                    ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : Text(widget.submitLabel),
               ),
             ],
@@ -158,7 +173,11 @@ class _BugCapsuleFeedbackFormState extends State<BugCapsuleFeedbackForm> {
 
 /// Shows [BugCapsuleFeedbackForm] in a modal bottom sheet. Completes with
 /// the feedback id, or null when cancelled (or monitoring is off).
-Future<String?> showBugCapsuleFeedback(BuildContext context, {String? eventId, bool? captureCapsule}) async {
+Future<String?> showBugCapsuleFeedback(
+  BuildContext context, {
+  String? eventId,
+  bool? captureCapsule,
+}) async {
   String? feedbackId;
   await showModalBottomSheet<void>(
     context: context,
@@ -250,7 +269,8 @@ class BugCapsuleShakeToReport extends StatefulWidget {
   final bool enabled;
 
   @override
-  State<BugCapsuleShakeToReport> createState() => _BugCapsuleShakeToReportState();
+  State<BugCapsuleShakeToReport> createState() =>
+      _BugCapsuleShakeToReportState();
 }
 
 class _BugCapsuleShakeToReportState extends State<BugCapsuleShakeToReport> {
@@ -267,24 +287,35 @@ class _BugCapsuleShakeToReportState extends State<BugCapsuleShakeToReport> {
   @override
   void didUpdateWidget(BugCapsuleShakeToReport old) {
     super.didUpdateWidget(old);
-    if (old.accelerometer != widget.accelerometer || old.enabled != widget.enabled) _listen();
+    if (old.accelerometer != widget.accelerometer ||
+        old.enabled != widget.enabled) {
+      _listen();
+    }
   }
 
   void _listen() {
     unawaited(_sub?.cancel());
-    _sub = widget.enabled ? widget.accelerometer.listen(_onSample, onError: (Object _) {}) : null;
+    _sub = widget.enabled
+        ? widget.accelerometer.listen(_onSample, onError: (Object _) {})
+        : null;
   }
 
   void _onSample(List<double> s) {
-    if (s.length < 3 || !_detector.add(s[0], s[1], s[2], DateTime.now())) return;
+    if (s.length < 3 || !_detector.add(s[0], s[1], s[2], DateTime.now())) {
+      return;
+    }
     final onShake = widget.onShake;
     if (onShake != null) return onShake();
     if (_open) return;
     final target = widget.navigatorKey?.currentContext ?? context;
     if (!target.mounted) return;
     _open = true;
-    unawaited(showBugCapsuleFeedback(target, eventId: BugCapsule.lastEventId())
-        .whenComplete(() => _open = false));
+    unawaited(
+      showBugCapsuleFeedback(
+        target,
+        eventId: BugCapsule.lastEventId(),
+      ).whenComplete(() => _open = false),
+    );
   }
 
   @override

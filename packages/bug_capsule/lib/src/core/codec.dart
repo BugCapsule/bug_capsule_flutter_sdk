@@ -24,24 +24,29 @@ abstract final class CapsuleCodec {
   static const maxDecompressedBytes = 200 * 1024 * 1024;
 
   static Map<String, Object?> toJson(Capsule capsule) => {
-        'format': format,
-        'specVersion': specVersion,
-        'manifest': capsule.manifest.toJson(),
-        'checkpoint': capsule.checkpoint.toJson(),
-        'events': [for (final e in capsule.events) e.toJson()],
-      };
+    'format': format,
+    'specVersion': specVersion,
+    'manifest': capsule.manifest.toJson(),
+    'checkpoint': capsule.checkpoint.toJson(),
+    'events': [for (final e in capsule.events) e.toJson()],
+  };
 
   static List<int> encode(Capsule capsule) =>
       gzip.encode(utf8.encode(jsonEncode(toJson(capsule))));
 
-  static Capsule decode(List<int> bytes, {int maxDecompressedBytes = maxDecompressedBytes}) {
+  static Capsule decode(
+    List<int> bytes, {
+    int maxDecompressedBytes = maxDecompressedBytes,
+  }) {
     if (bytes.length < 2 || bytes[0] != 0x1f || bytes[1] != 0x8b) {
       throw CapsuleFormatException('not a gzip file');
     }
     final raw = _gunzip(bytes, maxDecompressedBytes);
-    if (_countJsonValues(raw, CapsuleLimits.maxJsonValues) > CapsuleLimits.maxJsonValues) {
+    if (_countJsonValues(raw, CapsuleLimits.maxJsonValues) >
+        CapsuleLimits.maxJsonValues) {
       throw CapsuleFormatException(
-          '\$ has more than ${CapsuleLimits.maxJsonValues} JSON values');
+        '\$ has more than ${CapsuleLimits.maxJsonValues} JSON values',
+      );
     }
     final Object? json;
     try {
@@ -49,7 +54,9 @@ abstract final class CapsuleCodec {
     } on FormatException catch (e) {
       throw CapsuleFormatException('invalid JSON: ${e.message}');
     }
-    if (json is! Map) throw CapsuleFormatException('top level is not an object');
+    if (json is! Map) {
+      throw CapsuleFormatException('top level is not an object');
+    }
     return fromJson(json.cast<String, Object?>());
   }
 
@@ -73,20 +80,32 @@ abstract final class CapsuleCodec {
   /// with a type error in the middle of a replay.
   static Capsule fromJson(Map<String, Object?> json) {
     if (json['format'] != format) {
-      throw CapsuleFormatException('\$.format must be "$format" (got "${json['format']}")');
+      throw CapsuleFormatException(
+        '\$.format must be "$format" (got "${json['format']}")',
+      );
     }
     final version = json['specVersion'];
-    if (version is! int) throw CapsuleFormatException('\$.specVersion must be an integer');
+    if (version is! int) {
+      throw CapsuleFormatException('\$.specVersion must be an integer');
+    }
     if (version > specVersion) {
-      throw CapsuleFormatException('\$.specVersion $version is newer than this reader '
-          '(v$specVersion); update bugcapsule');
+      throw CapsuleFormatException(
+        '\$.specVersion $version is newer than this reader '
+        '(v$specVersion); update bugcapsule',
+      );
     }
     final problem = validateCapsuleDocument(json);
-    if (problem != null) throw CapsuleFormatException('malformed capsule: $problem');
+    if (problem != null) {
+      throw CapsuleFormatException('malformed capsule: $problem');
+    }
     try {
       return Capsule(
-        manifest: CapsuleManifest.fromJson((json['manifest'] as Map).cast<String, Object?>()),
-        checkpoint: Checkpoint.fromJson((json['checkpoint'] as Map).cast<String, Object?>()),
+        manifest: CapsuleManifest.fromJson(
+          (json['manifest'] as Map).cast<String, Object?>(),
+        ),
+        checkpoint: Checkpoint.fromJson(
+          (json['checkpoint'] as Map).cast<String, Object?>(),
+        ),
         events: [
           for (final e in json['events'] as List)
             BugCapsuleEvent.fromJson((e as Map).cast<String, Object?>()),

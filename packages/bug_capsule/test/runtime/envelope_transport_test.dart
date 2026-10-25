@@ -34,9 +34,15 @@ void main() {
     tearDown(() => server.close(force: true));
 
     BugCapsuleBackendClient client() => BugCapsuleBackendClient(
-        BugCapsuleBackendConfig(url: 'http://127.0.0.1:${server.port}/', ingestKey: 'bci_test'));
+      BugCapsuleBackendConfig(
+        url: 'http://127.0.0.1:${server.port}/',
+        ingestKey: 'bci_test',
+      ),
+    );
 
-    final envelope = EnvelopeCodec.encode([const EnvelopeItem('event', {'eventId': 'e'})], sdkVersion: 't');
+    final envelope = EnvelopeCodec.encode([
+      const EnvelopeItem('event', {'eventId': 'e'}),
+    ], sdkVersion: 't');
 
     test('sends gzip JSON with the ingest key', () async {
       final r = await client().sendEnvelope(envelope);
@@ -46,71 +52,108 @@ void main() {
       expect(headers.value('authorization'), 'Bearer bci_test');
       expect(headers.value('content-encoding'), 'gzip');
       expect(headers.contentType?.mimeType, 'application/json');
-      expect(jsonDecode(utf8.decode(gzip.decode(body))), containsPair('items', isNotEmpty));
+      expect(
+        jsonDecode(utf8.decode(gzip.decode(body))),
+        containsPair('items', isNotEmpty),
+      );
     });
 
     test('rejected items are not retried', () async {
       reply = '{"accepted":0,"rejected":[{"index":0,"reason":"bad"}]}';
-      expect((await client().sendEnvelope(envelope)).status, UploadStatus.uploaded);
+      expect(
+        (await client().sendEnvelope(envelope)).status,
+        UploadStatus.uploaded,
+      );
     });
 
-    test('429 and 503 retry later with Retry-After; 400 and capture_disabled are dropped', () async {
-      status = 429;
-      replyHeaders = {'retry-after': '7'};
-      reply = '{"code":"rate_limited"}';
-      final limited = await client().sendEnvelope(envelope);
-      expect(limited.status, UploadStatus.retryLater);
-      expect(limited.retryAfter, const Duration(seconds: 7));
+    test(
+      '429 and 503 retry later with Retry-After; 400 and capture_disabled are dropped',
+      () async {
+        status = 429;
+        replyHeaders = {'retry-after': '7'};
+        reply = '{"code":"rate_limited"}';
+        final limited = await client().sendEnvelope(envelope);
+        expect(limited.status, UploadStatus.retryLater);
+        expect(limited.retryAfter, const Duration(seconds: 7));
 
-      status = 503;
-      expect((await client().sendEnvelope(envelope)).status, UploadStatus.retryLater);
+        status = 503;
+        expect(
+          (await client().sendEnvelope(envelope)).status,
+          UploadStatus.retryLater,
+        );
 
-      status = 400;
-      replyHeaders = {};
-      reply = '{"code":"invalid_envelope"}';
-      expect((await client().sendEnvelope(envelope)).status, UploadStatus.rejected);
+        status = 400;
+        replyHeaders = {};
+        reply = '{"code":"invalid_envelope"}';
+        expect(
+          (await client().sendEnvelope(envelope)).status,
+          UploadStatus.rejected,
+        );
 
-      status = 403;
-      reply = '{"code":"capture_disabled"}';
-      final disabled = await client().sendEnvelope(envelope);
-      expect(disabled.status, UploadStatus.rejected);
-      expect(disabled.message, 'capture_disabled');
-    });
+        status = 403;
+        reply = '{"code":"capture_disabled"}';
+        final disabled = await client().sendEnvelope(envelope);
+        expect(disabled.status, UploadStatus.rejected);
+        expect(disabled.message, 'capture_disabled');
+      },
+    );
   });
 
-  test('the envelope outbox is a separate queue with its own file extension', () async {
-    final dir = await Directory.systemTemp.createTemp('bugcapsule-envelopes-');
-    addTearDown(() => dir.delete(recursive: true));
-    File('${dir.path}/1_capsule.bugcapsule').writeAsBytesSync(gzip.encode([1]));
-    var clock = DateTime.now();
-    final outbox = await UploadOutbox.open(dir,
+  test(
+    'the envelope outbox is a separate queue with its own file extension',
+    () async {
+      final dir = await Directory.systemTemp.createTemp(
+        'bugcapsule-envelopes-',
+      );
+      addTearDown(() => dir.delete(recursive: true));
+      File(
+        '${dir.path}/1_capsule.bugcapsule',
+      ).writeAsBytesSync(gzip.encode([1]));
+      var clock = DateTime.now();
+      final outbox = await UploadOutbox.open(
+        dir,
         limits: const OutboxLimits(maxCount: 2, maxBytes: 5 * 1024 * 1024),
         extension: '.envelope',
-        now: () => clock = clock.add(const Duration(milliseconds: 1)));
-    for (var i = 0; i < 3; i++) {
-      expect(await outbox.enqueue('env-$i', gzip.encode([i])), isTrue);
-    }
-    final entries = await outbox.entries();
-    expect([for (final e in entries) e.capsuleId], ['env-1', 'env-2'], reason: 'oldest evicted beyond maxCount');
-    final sent = <List<int>>[];
-    await outbox.flush(
+        now: () => clock = clock.add(const Duration(milliseconds: 1)),
+      );
+      for (var i = 0; i < 3; i++) {
+        expect(await outbox.enqueue('env-$i', gzip.encode([i])), isTrue);
+      }
+      final entries = await outbox.entries();
+      expect(
+        [for (final e in entries) e.capsuleId],
+        ['env-1', 'env-2'],
+        reason: 'oldest evicted beyond maxCount',
+      );
+      final sent = <List<int>>[];
+      await outbox.flush(
         upload: (b) async {
           sent.add(gzip.decode(b));
           return const UploadResult(UploadStatus.uploaded);
         },
-        allowed: () => true);
-    expect(sent, [
-      [1],
-      [2],
-    ]);
-    expect(File('${dir.path}/1_capsule.bugcapsule').existsSync(), isTrue, reason: 'capsule files are not touched');
-  });
+        allowed: () => true,
+      );
+      expect(sent, [
+        [1],
+        [2],
+      ]);
+      expect(
+        File('${dir.path}/1_capsule.bugcapsule').existsSync(),
+        isTrue,
+        reason: 'capsule files are not touched',
+      );
+    },
+  );
 
   test('remote config: monitoring fields, defaults and cache round trip', () {
     final defaults = RemoteCaptureConfig.fromJson(const {});
     expect(defaults.monitoringEnabled, isTrue);
     expect(defaults.errorSampleRate, 1.0);
-    expect(defaults.tracesSampleRate, isNull, reason: 'absent: the app rate applies');
+    expect(
+      defaults.tracesSampleRate,
+      isNull,
+      reason: 'absent: the app rate applies',
+    );
     expect(defaults.sessionTracking, isTrue);
     expect(defaults.maxBreadcrumbs, 100);
     expect(defaults.tracePropagationTargets, isNull);
@@ -133,6 +176,9 @@ void main() {
     expect(c.tracePropagationTargets, ['api.shop.com']);
     final again = RemoteCaptureConfig.fromJson(c.toJson());
     expect(again.toJson(), c.toJson());
-    expect(() => RemoteCaptureConfig.fromJson(const {'monitoringEnabled': 'yes'}), throwsFormatException);
+    expect(
+      () => RemoteCaptureConfig.fromJson(const {'monitoringEnabled': 'yes'}),
+      throwsFormatException,
+    );
   });
 }

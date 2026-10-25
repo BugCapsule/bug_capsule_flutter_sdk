@@ -13,7 +13,8 @@ class FakeSession implements BugCapsuleSession {
   @override
   final ReplayContext? replay;
   @override
-  BugCapsuleConfig get config => const BugCapsuleConfig(appVersion: '1', appBuild: '1');
+  BugCapsuleConfig get config =>
+      const BugCapsuleConfig(appVersion: '1', appBuild: '1');
   @override
   CaptureMode get mode => CaptureMode.qa;
   @override
@@ -30,7 +31,14 @@ class FakeSession implements BugCapsuleSession {
   int now() => events.length;
   @override
   void record(String type, [Map<String, Object?> data = const {}]) =>
-      events.add(BugCapsuleEvent(seq: events.length + 1, t: now(), type: type, data: data));
+      events.add(
+        BugCapsuleEvent(
+          seq: events.length + 1,
+          t: now(),
+          type: type,
+          data: data,
+        ),
+      );
   @override
   void reportError(Object error, StackTrace? stack) {}
 }
@@ -58,19 +66,27 @@ void main() {
     final cubit = TokenCubit()..bump();
     final snapshot = bloc.snapshot(CheckpointKind.periodic).toString();
     expect(snapshot, isNot(contains('synthBlocToken1')));
-    expect([for (final e in session.events) e.data].toString(), isNot(contains('synthBlocToken1')));
+    expect(
+      [for (final e in session.events) e.data].toString(),
+      isNot(contains('synthBlocToken1')),
+    );
     await cubit.close();
   });
 
-  test('a checkpoint entry without restorable state is reported, not skipped', () async {
-    final replay = FakeReplay();
-    final session = FakeSession(replay: replay);
-    final bloc = BugCapsuleBloc(states: [registration]);
-    await bloc.setUp(session);
-    await bloc.restore({'TokenCubit#0': '[REDACTED]'}, session);
-    final cubit = TokenCubit();
-    await Future<void>.delayed(Duration.zero);
-    expect(replay.divergences, ['bloc.unrestored TokenCubit#0: state was not captured']);
-    await cubit.close();
-  });
+  test(
+    'a checkpoint entry without restorable state is reported, not skipped',
+    () async {
+      final replay = FakeReplay();
+      final session = FakeSession(replay: replay);
+      final bloc = BugCapsuleBloc(states: [registration]);
+      await bloc.setUp(session);
+      await bloc.restore({'TokenCubit#0': '[REDACTED]'}, session);
+      final cubit = TokenCubit();
+      await Future<void>.delayed(Duration.zero);
+      expect(replay.divergences, [
+        'bloc.unrestored TokenCubit#0: state was not captured',
+      ]);
+      await cubit.close();
+    },
+  );
 }

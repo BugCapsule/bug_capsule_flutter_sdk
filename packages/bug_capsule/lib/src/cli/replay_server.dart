@@ -8,7 +8,13 @@ import '../core/core.dart';
 /// One armed attempt: the app gets [url] as `BUGCAPSULE_REPLAY_URL` and the
 /// server answers only requests under it until [close].
 class ArmedAttempt {
-  ArmedAttempt._(this.token, this.attemptId, this.url, this.capsule, this.settings);
+  ArmedAttempt._(
+    this.token,
+    this.attemptId,
+    this.url,
+    this.capsule,
+    this.settings,
+  );
 
   final String token;
   final String attemptId;
@@ -33,7 +39,9 @@ class ArmedAttempt {
   /// HTTP status the app gets.
   int _offer(ReplayReport r) {
     if (_closed || _report.isCompleted) return HttpStatus.gone;
-    if (r.attemptId != null && r.attemptId != attemptId) return HttpStatus.conflict;
+    if (r.attemptId != null && r.attemptId != attemptId) {
+      return HttpStatus.conflict;
+    }
     _report.complete(r);
     _closed = true;
     return HttpStatus.noContent;
@@ -54,7 +62,10 @@ class ReplayServer {
   ReplayServer._(this._server, this.host);
 
   static Future<ReplayServer> start({bool lan = false}) async {
-    final server = await HttpServer.bind(lan ? InternetAddress.anyIPv4 : InternetAddress.loopbackIPv4, 0);
+    final server = await HttpServer.bind(
+      lan ? InternetAddress.anyIPv4 : InternetAddress.loopbackIPv4,
+      0,
+    );
     final s = ReplayServer._(server, lan ? await _lanAddress() : '127.0.0.1');
     server.listen(s._handle, onError: (Object _) {});
     return s;
@@ -62,7 +73,9 @@ class ReplayServer {
 
   /// First non-loopback IPv4 address (physical devices on the same network).
   static Future<String> _lanAddress() async {
-    for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4)) {
+    for (final i in await NetworkInterface.list(
+      type: InternetAddressType.IPv4,
+    )) {
       for (final a in i.addresses) {
         if (!a.isLoopback) return a.address;
       }
@@ -106,8 +119,9 @@ class ReplayServer {
     return _current = armed;
   }
 
-  String _randomToken() =>
-      base64Url.encode(List<int>.generate(32, (_) => _random.nextInt(256))).replaceAll('=', '');
+  String _randomToken() => base64Url
+      .encode(List<int>.generate(32, (_) => _random.nextInt(256)))
+      .replaceAll('=', '');
 
   /// Fallback channel: a `BUGCAPSULE_RESULT::{json}` line from the output of
   /// the process launched for [attempt] (stdout, instrumentation status, test
@@ -116,8 +130,12 @@ class ReplayServer {
     final i = line.indexOf(ReplayProtocol.stdoutPrefix);
     if (i < 0) return false;
     try {
-      final json = jsonDecode(line.substring(i + ReplayProtocol.stdoutPrefix.length).trim());
-      return attempt._offer(ReplayReport.fromJson((json as Map).cast<String, Object?>())) ==
+      final json = jsonDecode(
+        line.substring(i + ReplayProtocol.stdoutPrefix.length).trim(),
+      );
+      return attempt._offer(
+            ReplayReport.fromJson((json as Map).cast<String, Object?>()),
+          ) ==
           HttpStatus.noContent;
     } catch (_) {
       return false;
@@ -139,7 +157,10 @@ class ReplayServer {
       }
       final segments = req.uri.pathSegments;
       final attempt = _current;
-      if (segments.length != 3 || segments[0] != 'a' || attempt == null || !_sameToken(segments[1], attempt.token)) {
+      if (segments.length != 3 ||
+          segments[0] != 'a' ||
+          attempt == null ||
+          !_sameToken(segments[1], attempt.token)) {
         res.statusCode = HttpStatus.notFound;
         return;
       }
@@ -159,12 +180,18 @@ class ReplayServer {
             ..headers.set('cache-control', 'no-store')
             ..write(jsonEncode(attempt.settings.toJson()));
         case ('POST', ReplayProtocol.resultPath):
-          final body = await utf8.decodeStream(req).timeout(const Duration(seconds: 30));
+          final body = await utf8
+              .decodeStream(req)
+              .timeout(const Duration(seconds: 30));
           if (body.length > 16 * 1024 * 1024) {
             res.statusCode = HttpStatus.requestEntityTooLarge;
             return;
           }
-          res.statusCode = attempt._offer(ReplayReport.fromJson((jsonDecode(body) as Map).cast<String, Object?>()));
+          res.statusCode = attempt._offer(
+            ReplayReport.fromJson(
+              (jsonDecode(body) as Map).cast<String, Object?>(),
+            ),
+          );
         default:
           res.statusCode = HttpStatus.notFound;
       }

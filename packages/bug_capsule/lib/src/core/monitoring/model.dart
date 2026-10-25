@@ -14,13 +14,20 @@ class Mechanism {
   final Map<String, Object?>? data;
 
   static const flutterError = Mechanism('flutter_error', handled: false);
-  static const platformDispatcher = Mechanism('platform_dispatcher', handled: false);
+  static const platformDispatcher = Mechanism(
+    'platform_dispatcher',
+    handled: false,
+  );
   static const uncaught = Mechanism('uncaught', handled: false);
   static const manual = Mechanism('manual', handled: true);
   static const assertion = Mechanism('assertion', handled: true);
   static const logging = Mechanism('logging', handled: true);
 
-  Map<String, Object?> toJson() => {'type': type, 'handled': handled, 'data': ?data};
+  Map<String, Object?> toJson() => {
+    'type': type,
+    'handled': handled,
+    'data': ?data,
+  };
 }
 
 /// One stack frame. Frames are ordered oldest call first, crashing frame last.
@@ -50,17 +57,17 @@ class EventFrame {
   String? package;
 
   Map<String, Object?> toJson() => {
-        'function': ?function,
-        'module': ?module,
-        'filename': ?filename,
-        'absPath': ?absPath,
-        'lineno': ?lineno,
-        'colno': ?colno,
-        'inApp': ?inApp,
-        'instructionAddr': ?instructionAddr,
-        'imageAddr': ?imageAddr,
-        'package': ?package,
-      };
+    'function': ?function,
+    'module': ?module,
+    'filename': ?filename,
+    'absPath': ?absPath,
+    'lineno': ?lineno,
+    'colno': ?colno,
+    'inApp': ?inApp,
+    'instructionAddr': ?instructionAddr,
+    'imageAddr': ?imageAddr,
+    'package': ?package,
+  };
 }
 
 class ExceptionValue {
@@ -79,18 +86,22 @@ class ExceptionValue {
   List<EventFrame> frames;
 
   Map<String, Object?> toJson() => {
-        'type': cut(type, 200),
-        if (value != null) 'value': cut(value!, 8192),
-        if (module != null) 'module': cut(module!, 200),
-        if (mechanism != null) 'mechanism': mechanism!.toJson(),
-        if (frames.isNotEmpty)
-          'stacktrace': {
-            // Keep the frames closest to the crash.
-            'frames': [
-              for (final f in frames.length > 250 ? frames.sublist(frames.length - 250) : frames) f.toJson(),
-            ],
-          },
-      };
+    'type': cut(type, 200),
+    if (value != null) 'value': cut(value!, 8192),
+    if (module != null) 'module': cut(module!, 200),
+    if (mechanism != null) 'mechanism': mechanism!.toJson(),
+    if (frames.isNotEmpty)
+      'stacktrace': {
+        // Keep the frames closest to the crash.
+        'frames': [
+          for (final f
+              in frames.length > 250
+                  ? frames.sublist(frames.length - 250)
+                  : frames)
+            f.toJson(),
+        ],
+      },
+  };
 }
 
 /// Breadcrumb `type`s of monitoring-v1 §2.
@@ -125,17 +136,24 @@ class Breadcrumb {
   Map<String, Object?>? data;
 
   Map<String, Object?> toJson() => {
-        'timestamp': isoTimestamp(timestamp),
-        'type': type,
-        'category': category,
-        'message': message == null ? null : cut(message!, 8192),
-        'level': level.name,
-        'data': ?data,
-      };
+    'timestamp': isoTimestamp(timestamp),
+    'type': type,
+    'category': category,
+    'message': message == null ? null : cut(message!, 8192),
+    'level': level.name,
+    'data': ?data,
+  };
 }
 
 class MonitoringUser {
-  const MonitoringUser({this.id, this.email, this.username, this.ipAddress, this.segment, this.data});
+  const MonitoringUser({
+    this.id,
+    this.email,
+    this.username,
+    this.ipAddress,
+    this.segment,
+    this.data,
+  });
 
   final String? id;
   final String? email;
@@ -148,13 +166,13 @@ class MonitoringUser {
   final Map<String, Object?>? data;
 
   Map<String, Object?> toJson() => {
-        'id': ?id,
-        'email': ?email,
-        'username': ?username,
-        'ipAddress': ?ipAddress,
-        'segment': ?segment,
-        'data': ?data,
-      };
+    'id': ?id,
+    'email': ?email,
+    'username': ?username,
+    'ipAddress': ?ipAddress,
+    'segment': ?segment,
+    'data': ?data,
+  };
 }
 
 /// An `event` item: an error or a message.
@@ -177,12 +195,12 @@ class ErrorEvent {
     this.release,
     this.environment,
     this.threads,
-  })  : exceptions = exceptions ?? [],
-        tags = tags ?? {},
-        contexts = contexts ?? {},
-        breadcrumbs = breadcrumbs ?? [],
-        debugImages = debugImages ?? [],
-        extra = extra ?? {};
+  }) : exceptions = exceptions ?? [],
+       tags = tags ?? {},
+       contexts = contexts ?? {},
+       breadcrumbs = breadcrumbs ?? [],
+       debugImages = debugImages ?? [],
+       extra = extra ?? {};
 
   final String eventId;
   DateTime timestamp;
@@ -211,34 +229,42 @@ class ErrorEvent {
   bool get unhandled => exceptions.any((e) => e.mechanism?.handled == false);
 
   Map<String, Object?> toJson() => {
-        'eventId': eventId,
-        'timestamp': isoTimestamp(timestamp),
-        'level': level.name,
-        'runtime': 'flutter',
-        'release': ?release,
-        'environment': ?environment,
-        if (exceptions.isNotEmpty)
-          'exception': {
-            'values': [
-              for (final e in exceptions.length > 10 ? exceptions.sublist(exceptions.length - 10) : exceptions)
-                e.toJson(),
-            ],
-          },
-        'message': message == null ? null : {'formatted': cut(message!, 8192)},
-        'fingerprint': fingerprint == null ? null : [for (final f in fingerprint!.take(10)) cut(f, 200)],
-        'tags': sanitizeTags(tags),
-        if (user != null) 'user': user!.toJson(),
-        'contexts': contexts,
-        'breadcrumbs': [
-          for (final b in breadcrumbs.length > 100 ? breadcrumbs.sublist(breadcrumbs.length - 100) : breadcrumbs)
-            b.toJson(),
+    'eventId': eventId,
+    'timestamp': isoTimestamp(timestamp),
+    'level': level.name,
+    'runtime': 'flutter',
+    'release': ?release,
+    'environment': ?environment,
+    if (exceptions.isNotEmpty)
+      'exception': {
+        'values': [
+          for (final e
+              in exceptions.length > 10
+                  ? exceptions.sublist(exceptions.length - 10)
+                  : exceptions)
+            e.toJson(),
         ],
-        'debugImages': debugImages.take(500).toList(),
-        'request': request,
-        'extra': extra,
-        'capsuleId': ?capsuleId,
-        'threads': ?threads,
-      };
+      },
+    'message': message == null ? null : {'formatted': cut(message!, 8192)},
+    'fingerprint': fingerprint == null
+        ? null
+        : [for (final f in fingerprint!.take(10)) cut(f, 200)],
+    'tags': sanitizeTags(tags),
+    if (user != null) 'user': user!.toJson(),
+    'contexts': contexts,
+    'breadcrumbs': [
+      for (final b
+          in breadcrumbs.length > 100
+              ? breadcrumbs.sublist(breadcrumbs.length - 100)
+              : breadcrumbs)
+        b.toJson(),
+    ],
+    'debugImages': debugImages.take(500).toList(),
+    'request': request,
+    'extra': extra,
+    'capsuleId': ?capsuleId,
+    'threads': ?threads,
+  };
 }
 
 String cut(String s, int max) => s.length <= max ? s : s.substring(0, max);
@@ -256,5 +282,6 @@ final _tagKey = RegExp(r'^[A-Za-z0-9_.:-]{1,32}$');
 
 /// At most 50 tags with valid keys; values cut to 200 characters.
 Map<String, String> sanitizeTags(Map<String, String> tags) => {
-      for (final e in tags.entries.where((e) => _tagKey.hasMatch(e.key)).take(50)) e.key: cut(e.value, 200),
-    };
+  for (final e in tags.entries.where((e) => _tagKey.hasMatch(e.key)).take(50))
+    e.key: cut(e.value, 200),
+};

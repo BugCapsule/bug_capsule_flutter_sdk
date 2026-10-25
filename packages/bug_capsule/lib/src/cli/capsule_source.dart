@@ -4,7 +4,9 @@ import '../core/core.dart';
 
 import 'backend_client.dart';
 
-final _uuid = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+final _uuid = RegExp(
+  r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+);
 
 /// A capsule loaded from a file, a backend id, or a share link.
 class LoadedCapsule {
@@ -23,20 +25,37 @@ Future<LoadedCapsule> loadCapsule(String ref, {String? serverId}) async {
   final file = File(ref);
   if (file.existsSync()) {
     final bytes = await file.readAsBytes();
-    return LoadedCapsule(bytes, CapsuleCodec.decode(bytes), serverId: serverId, origin: file.path);
+    return LoadedCapsule(
+      bytes,
+      CapsuleCodec.decode(bytes),
+      serverId: serverId,
+      origin: file.path,
+    );
   }
   if (ref.startsWith('http://') || ref.startsWith('https://')) {
     final creds = Credentials.load() ?? Credentials(url: ref);
     final bytes = await BackendClient(creds).downloadShared(Uri.parse(ref));
-    return LoadedCapsule(bytes, CapsuleCodec.decode(bytes), serverId: serverId, origin: ref);
+    return LoadedCapsule(
+      bytes,
+      CapsuleCodec.decode(bytes),
+      serverId: serverId,
+      origin: ref,
+    );
   }
   if (_uuid.hasMatch(ref)) {
     final creds = Credentials.load();
     if (creds == null) {
-      throw StateError('"$ref" looks like a capsule id but no backend is configured; run `bugcapsule login`');
+      throw StateError(
+        '"$ref" looks like a capsule id but no backend is configured; run `bugcapsule login`',
+      );
     }
     final bytes = await BackendClient(creds).downloadCapsule(ref);
-    return LoadedCapsule(bytes, CapsuleCodec.decode(bytes), serverId: ref, origin: 'backend');
+    return LoadedCapsule(
+      bytes,
+      CapsuleCodec.decode(bytes),
+      serverId: ref,
+      origin: 'backend',
+    );
   }
   throw StateError('no such file, capsule id or share link: $ref');
 }
