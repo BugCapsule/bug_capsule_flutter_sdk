@@ -798,7 +798,7 @@ class MonitoringHub implements TransactionSink {
           .flush(
             upload: (bytes) async {
               final result = await transport.sendEnvelope(EnvelopeCodec.restamp(bytes, DateTime.now()));
-              if (result.message == 'capture_disabled') unawaited(host.refreshConfig());
+              if (result.message == 'capture_disabled' || result.unauthorized) unawaited(host.refreshConfig());
               return result;
             },
             allowed: () => _canUpload,

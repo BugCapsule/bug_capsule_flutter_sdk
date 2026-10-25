@@ -6,9 +6,11 @@ export '../core/core.dart';
 
 export 'backend.dart' show OutboxLimits, BugCapsuleTransport, EnvelopeTransport, UploadResult, UploadStatus;
 export 'config.dart';
+export 'connection_token.dart';
 export 'integration.dart';
 export 'overlay.dart';
 export 'state_tracker.dart';
+export 'status.dart';
 export 'remote_config.dart'
     show ConfigFetchFailed, ConfigFetchResult, ConfigFetched, RemoteCaptureConfig;
 export 'bug_capsule.dart';
