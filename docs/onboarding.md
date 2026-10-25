@@ -1,30 +1,23 @@
 # Onboarding: from a new project to a verified fix
 
-A reproducible path using the demo app (`example/bug_capsule_demo`) and a local
-backend. About 30 minutes on a Mac with Xcode, Flutter 3.35+, Node 22+ and
-PostgreSQL 13+. The same steps apply to a pilot app; the differences are
-listed at the end.
+A step-by-step path with the demo app (`example/bug_capsule_demo`). About 30
+minutes on a Mac with Xcode and Flutter 3.35+. The same steps apply to your
+own app; the differences are listed at the end.
 
-## 1. Backend and project
+## 1. Project and tokens
 
-```bash
-git clone <bug_capsule_backend> && cd bug_capsule_backend
-npm install
-createdb bugcapsule
-cp .env.example .env               # set ADMIN_TOKEN (openssl rand -hex 32)
-npm run migrate
-npm run config:check               # configuration, database, storage
-npm run project:create -- --name "Shop demo"   # prints ingest + secret keys (once)
-npm run dev                        # http://127.0.0.1:8787; /ready answers 200
-```
+1. Sign in at [app.bugcapsule.com](https://app.bugcapsule.com) and create a
+   project.
+2. Generate an **SDK token** (`bcsdk.v1.…`) in **Project settings → Keys → SDK
+   tokens**. It is shown once.
+3. Create a **personal CLI token** (`bcp_…`) in **Project settings → Keys & CLI
+   access**.
 
 ## 2. CLI
 
 ```bash
-cd ../bug_capsule_flutter_sdk
-flutter pub get
-dart pub global activate --source path packages/bug_capsule
-bugcapsule login --url http://127.0.0.1:8787 --secret-key bcs_... --ingest-key bci_...
+dart pub global activate bug_capsule 0.4.1-beta.1
+bugcapsule login --url https://api.bugcapsule.com --token bcp_…
 ```
 
 ## 3. First capture
@@ -35,13 +28,12 @@ Boot an iOS simulator, then:
 cd example/bug_capsule_demo
 flutter run -d <simulator> \
   --dart-define=BUGCAPSULE_GIT_SHA=$(git rev-parse HEAD) \
-  --dart-define=BUGCAPSULE_TOKEN=bcsdk.v1....    # the SDK token from the dashboard
+  --dart-define=BUGCAPSULE_TOKEN=bcsdk.v1.…
 ```
 
-The SDK token carries the API URL and an upload-only credential. Without a
-token (an older backend, or an ingest key you already have), pass
-`--dart-define=BUGCAPSULE_BACKEND_URL=http://127.0.0.1:8787` and
-`--dart-define=BUGCAPSULE_INGEST_KEY=bci_...` instead.
+On SDK versions without token support, pass
+`--dart-define=BUGCAPSULE_BACKEND_URL=https://api.bugcapsule.com` and
+`--dart-define=BUGCAPSULE_INGEST_KEY=bci_…` instead.
 
 Trigger the negative-total bug: open the cart until the subtotal is below
 $100, type `SAVE100`, apply. The app raises `cart_total_non_negative`, writes
@@ -84,17 +76,13 @@ bugcapsule regress add <id> --name "coupon over subtotal"
 bugcapsule regress run -d <simulator>   # for CI
 ```
 
-## For a pilot app
+## For your own app
 
-* Production host: the backend from `bug_capsule_backend/DEPLOY.md`; the API host is
-  compiled into the app, so fix it before the first pilot build.
-* Integrate per the README (about 20 lines), and register `BugCapsule.action` ids
-  for the flows QA tests most.
-* Build QA builds with `BUGCAPSULE_MODE=qa` and `BUGCAPSULE_GIT_SHA`; keep production
-  capture off until the release checklist in
-  [release-and-device-test-plan.md](release-and-device-test-plan.md) passes.
-* Before the first upload from a real user: review redaction with a real login
-  and payment flow, set `redactKeys` / `redactPatterns` / `exclude` rules, and
-  read `bug_capsule_backend/docs/data-lifecycle.md` with the customer.
-* Measure: time from project creation to first `REPRODUCED` (target under one
-  hour with our help), and keep the numbers.
+- Integrate per the [README](../README.md) (about 20 lines), and register
+  `BugCapsule.action` ids for the flows QA tests most.
+- Build QA builds with `BUGCAPSULE_MODE=qa` and `BUGCAPSULE_GIT_SHA`; keep
+  production capture off until the
+  [production checklist](https://docs.bugcapsule.com/production.html) passes.
+- Before the first upload from a real user, review redaction with a real login
+  and payment flow, and set `redactKeys` / `redactPatterns` / `exclude` rules.
+  See [Privacy and redaction](https://docs.bugcapsule.com/privacy.html).
