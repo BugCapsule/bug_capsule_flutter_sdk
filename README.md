@@ -49,7 +49,7 @@ timing, so races and data-dependent bugs come back.
 ## Install
 
 ```bash
-flutter pub add bug_capsule:^0.4.1-beta.3
+flutter pub add bug_capsule:^0.4.1-beta.4
 ```
 
 Everything ships in this one package, with one import:
@@ -259,7 +259,7 @@ The `bugcapsule` CLI ships in the same package and replays capsules from every
 BugCapsule SDK (Flutter, Android, iOS and web).
 
 ```bash
-dart pub global activate bug_capsule 0.4.1-beta.3
+dart pub global activate bug_capsule 0.4.1-beta.4
 bugcapsule --version
 ```
 
