@@ -5,9 +5,9 @@ Since CLI 0.3 the same commands replay capsules from every BugCapsule SDK:
 | Runtime | SDK | How an attempt runs |
 |---|---|---|
 | `flutter` | [bug_capsule](../README.md) | `flutter build ios --simulator` + `simctl launch`, or `flutter run` per attempt (unchanged) |
-| `android` | [bugcapsule-android](../../bug_capsule_android_sdk/README.md) | Gradle builds the app and its androidTest APK once; per attempt `pm clear` + `am instrument` with `BugCapsuleReplayRunner` on an emulator |
-| `ios` | [bugcapsule-ios](../../bug_capsule_ios_sdk/README.md) | `xcodebuild build-for-testing` once; per attempt uninstall + `xcodebuild test-without-building` of the app's XCUITest replay test on a simulator |
-| `web` | [@bugcapsule/web](../../bug_capsule_web_sdk/README.md) | the project's build/serve commands once; per attempt the Playwright runner opens a fresh Chromium context |
+| `android` | [bugcapsule-android](https://github.com/BugCapsule/bug_capsule_android_sdk#readme) | Gradle builds the app and its androidTest APK once; per attempt `pm clear` + `am instrument` with `BugCapsuleReplayRunner` on an emulator |
+| `ios` | [bugcapsule-ios](https://github.com/BugCapsule/bug_capsule_ios_sdk#readme) | `xcodebuild build-for-testing` once; per attempt uninstall + `xcodebuild test-without-building` of the app's XCUITest replay test on a simulator |
+| `web` | [@bugcapsule/web](https://github.com/BugCapsule/bug_capsule_web_sdk#readme) | the project's build/serve commands once; per attempt the Playwright runner opens a fresh Chromium context |
 
 The workflow is unchanged: `bugcapsule inspect`, `run`, `verify`,
 `regress add`, `regress run`, plus `login`, `list`, `pull`, `push`, `share`
