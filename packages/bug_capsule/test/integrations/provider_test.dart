@@ -22,7 +22,8 @@ class FakeSession implements BugCapsuleSession {
   @override
   final ReplayContext? replay;
   @override
-  BugCapsuleConfig get config => const BugCapsuleConfig(appVersion: '1', appBuild: '1');
+  BugCapsuleConfig get config =>
+      const BugCapsuleConfig(appVersion: '1', appBuild: '1');
   @override
   CaptureMode get mode => CaptureMode.qa;
   @override
@@ -39,11 +40,21 @@ class FakeSession implements BugCapsuleSession {
   int now() => events.length;
   @override
   void record(String type, [Map<String, Object?> data = const {}]) =>
-      events.add(BugCapsuleEvent(seq: events.length + 1, t: now(), type: type, data: data));
+      events.add(
+        BugCapsuleEvent(
+          seq: events.length + 1,
+          t: now(),
+          type: type,
+          data: data,
+        ),
+      );
   @override
   void reportError(Object error, StackTrace? stack) {}
 
-  List<Map<String, Object?>> of(String type) => [for (final e in events) if (e.type == type) e.data];
+  List<Map<String, Object?>> of(String type) => [
+    for (final e in events)
+      if (e.type == type) e.data,
+  ];
 }
 
 class FakeReplay implements ReplayContext {
@@ -56,14 +67,18 @@ class FakeReplay implements ReplayContext {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-AuthModel trackAuth(BugCapsuleNotifiers notifiers, AuthModel model) => notifiers.track(
+AuthModel trackAuth(BugCapsuleNotifiers notifiers, AuthModel model) =>
+    notifiers.track(
       model,
       id: 'auth',
       toJson: (m) => m.toJson(),
       restore: (m, json) => m.restoreFrom(json),
     );
 
-Future<BugCapsuleNotifiers> setUpWith(FakeSession session, {Object? restore}) async {
+Future<BugCapsuleNotifiers> setUpWith(
+  FakeSession session, {
+  Object? restore,
+}) async {
   final notifiers = BugCapsuleNotifiers();
   await notifiers.setUp(session);
   await notifiers.restore(restore, session);
@@ -71,24 +86,36 @@ Future<BugCapsuleNotifiers> setUpWith(FakeSession session, {Object? restore}) as
 }
 
 void main() {
-  testWidgets('records changes of a ChangeNotifierProvider model, redacted', (tester) async {
+  testWidgets('records changes of a ChangeNotifierProvider model, redacted', (
+    tester,
+  ) async {
     final session = FakeSession();
     final notifiers = await setUpWith(session);
-    await tester.pumpWidget(ChangeNotifierProvider(
-      create: (_) => trackAuth(notifiers, AuthModel()),
-      child: Builder(builder: (context) {
-        final auth = context.watch<AuthModel>();
-        return Text('${auth.count}', textDirection: TextDirection.ltr);
-      }),
-    ));
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => trackAuth(notifiers, AuthModel()),
+        child: Builder(
+          builder: (context) {
+            final auth = context.watch<AuthModel>();
+            return Text('${auth.count}', textDirection: TextDirection.ltr);
+          },
+        ),
+      ),
+    );
     tester.element(find.text('0')).read<AuthModel>().bump();
     await tester.pump();
     expect(find.text('1'), findsOneWidget);
 
-    expect(session.of(EventTypes.notifierCreate).single, {'type': 'AuthModel', 'key': 'auth#0'});
+    expect(session.of(EventTypes.notifierCreate).single, {
+      'type': 'AuthModel',
+      'key': 'auth#0',
+    });
     final change = session.of(EventTypes.notifierChange).single;
     expect(change['data'], containsPair('count', 1));
-    expect([for (final e in session.events) e.data].toString(), isNot(contains('synthNotifierToken1')));
+    expect(
+      [for (final e in session.events) e.data].toString(),
+      isNot(contains('synthNotifierToken1')),
+    );
 
     final snapshot = notifiers.snapshot(CheckpointKind.periodic)! as Map;
     expect((snapshot['auth#0'] as Map)['state'], containsPair('count', 1));
@@ -98,14 +125,25 @@ void main() {
 
   test('replay restores tracked notifiers in tracking order', () async {
     final replay = FakeReplay();
-    final notifiers = await setUpWith(FakeSession(replay: replay), restore: {
-      'auth#1': {'state': {'count': 4}},
-      'counter#0': {'state': {'value': 9}},
-    });
+    final notifiers = await setUpWith(
+      FakeSession(replay: replay),
+      restore: {
+        'auth#1': {
+          'state': {'count': 4},
+        },
+        'counter#0': {
+          'state': {'value': 9},
+        },
+      },
+    );
     final first = trackAuth(notifiers, AuthModel());
     final second = trackAuth(notifiers, AuthModel());
-    final counter = notifiers.track(ValueNotifier(0),
-        id: 'counter', toJson: (n) => {'value': n.value}, restore: (n, json) => n.value = json['value'] as int);
+    final counter = notifiers.track(
+      ValueNotifier(0),
+      id: 'counter',
+      toJson: (n) => {'value': n.value},
+      restore: (n, json) => n.value = json['value'] as int,
+    );
     expect(first.count, 0);
     expect(second.count, 4);
     expect(counter.value, 9);
@@ -114,10 +152,15 @@ void main() {
 
   test('a checkpoint entry that cannot be restored is reported', () async {
     final replay = FakeReplay();
-    final notifiers = await setUpWith(FakeSession(replay: replay), restore: {
-      'auth#0': '[REDACTED]',
-      'plain#0': {'state': {'count': 1}},
-    });
+    final notifiers = await setUpWith(
+      FakeSession(replay: replay),
+      restore: {
+        'auth#0': '[REDACTED]',
+        'plain#0': {
+          'state': {'count': 1},
+        },
+      },
+    );
     trackAuth(notifiers, AuthModel());
     notifiers.track(AuthModel(), id: 'plain');
     expect(replay.divergences, [
@@ -134,13 +177,21 @@ void main() {
     notifiers.describeEligibility(
       eligibility,
       const RecordedWindow(
-        checkpoint: Checkpoint(kind: CheckpointKind.periodic, t: 0, wallClockMs: 0, afterSeq: 0),
+        checkpoint: Checkpoint(
+          kind: CheckpointKind.periodic,
+          t: 0,
+          wallClockMs: 0,
+          afterSeq: 0,
+        ),
         events: [],
         droppedEvents: 0,
         hasGap: false,
       ),
     );
-    expect(eligibility.build().missing.single.reason, 'plain#0 is tracked without a JSON serializer');
+    expect(
+      eligibility.build().missing.single.reason,
+      'plain#0 is tracked without a JSON serializer',
+    );
     model.dispose();
   });
 

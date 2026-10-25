@@ -19,8 +19,8 @@ class EndpointRule {
     this.ignoreQuery = const {},
     this.ignoreBodyFields = const {},
     this.matchBodyFields,
-  })  : method = method.toUpperCase(),
-        _pattern = _compile(path);
+  }) : method = method.toUpperCase(),
+       _pattern = _compile(path);
 
   final String method;
   final String path;
@@ -36,7 +36,8 @@ class EndpointRule {
   final RegExp _pattern;
 
   bool matches(String requestMethod, String requestPath) =>
-      (method == '*' || method == requestMethod.toUpperCase()) && _pattern.hasMatch(requestPath);
+      (method == '*' || method == requestMethod.toUpperCase()) &&
+      _pattern.hasMatch(requestPath);
 
   static RegExp _compile(String path) {
     final wildcard = path.endsWith('*');
@@ -53,7 +54,13 @@ class EndpointRule {
 class RequestKeyBuilder {
   RequestKeyBuilder({
     this.rules = const [],
-    this.globalIgnoreQuery = const {'_', 'ts', 'timestamp', 'nonce', 'cachebust'},
+    this.globalIgnoreQuery = const {
+      '_',
+      'ts',
+      'timestamp',
+      'nonce',
+      'cachebust',
+    },
     this.globalIgnoreBodyFields = const {},
   });
 
@@ -82,10 +89,14 @@ class RequestKeyBuilder {
         query.add('$name=$v');
       }
     }
-    final buffer = StringBuffer('$m ${uri.host}${uri.path.isEmpty ? '/' : uri.path}');
+    final buffer = StringBuffer(
+      '$m ${uri.host}${uri.path.isEmpty ? '/' : uri.path}',
+    );
     if (query.isNotEmpty) buffer.write('?${query.join('&')}');
     final normalizedBody = _normalizeBody(body, rule);
-    if (normalizedBody != null) buffer.write('#${_hash(_canonicalJson(normalizedBody))}');
+    if (normalizedBody != null) {
+      buffer.write('#${_hash(_canonicalJson(normalizedBody))}');
+    }
     final key = buffer.toString();
     // Capsule readers accept keys up to 10,000 characters; shorten very long
     // URLs deterministically so capture and replay still agree.
@@ -110,7 +121,10 @@ class RequestKeyBuilder {
     final ignore = {...globalIgnoreBodyFields, ...?rule?.ignoreBodyFields};
     final match = rule?.matchBodyFields;
     if (match != null && value is Map) {
-      value = {for (final k in match) if (value.containsKey(k)) k: value[k]};
+      value = {
+        for (final k in match)
+          if (value.containsKey(k)) k: value[k],
+      };
     }
     return ignore.isEmpty ? value : _strip(value, ignore, '');
   }
@@ -120,9 +134,14 @@ class RequestKeyBuilder {
       return {
         for (final entry in value.entries)
           if (!ignore.contains('${entry.key}') &&
-              !ignore.contains(path.isEmpty ? '${entry.key}' : '$path.${entry.key}'))
+              !ignore.contains(
+                path.isEmpty ? '${entry.key}' : '$path.${entry.key}',
+              ))
             '${entry.key}': _strip(
-                entry.value, ignore, path.isEmpty ? '${entry.key}' : '$path.${entry.key}'),
+              entry.value,
+              ignore,
+              path.isEmpty ? '${entry.key}' : '$path.${entry.key}',
+            ),
       };
     }
     if (value is List) return [for (final v in value) _strip(v, ignore, path)];
@@ -170,7 +189,8 @@ class HttpFixture {
   String get bodyEncoding => data['bodyEncoding'] as String? ?? 'omitted';
   Map<String, String> get responseHeaders =>
       (data['responseHeaders'] as Map?)?.cast<String, String>() ?? const {};
-  Map<String, Object?>? get error => (data['error'] as Map?)?.cast<String, Object?>();
+  Map<String, Object?>? get error =>
+      (data['error'] as Map?)?.cast<String, Object?>();
   bool get hasBody => bodyEncoding != 'omitted' && bodyEncoding != 'truncated';
 }
 
@@ -212,6 +232,8 @@ class FixtureStore {
   }
 
   /// Keys that were recorded but never requested during replay.
-  List<String> unusedKeys() =>
-      [for (final key in _byKey.keys) if (!_served.containsKey(key)) key];
+  List<String> unusedKeys() => [
+    for (final key in _byKey.keys)
+      if (!_served.containsKey(key)) key,
+  ];
 }

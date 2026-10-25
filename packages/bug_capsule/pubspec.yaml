@@ -1,6 +1,6 @@
 name: bug_capsule
-description: BugCapsule for Flutter — records the context around a failure into a portable .bugcapsule capsule, replays it locally, and ships every integration (BLoC, Riverpod, Provider, GetX, MobX, Dio, http, GoRouter, SharedPreferences) and the bugcapsule CLI in one package.
-version: 0.4.1-beta.2
+description: Record and replay Flutter bugs with portable capsules, error monitoring, state and network integrations, and a CLI for verifying fixes.
+version: 0.4.1-beta.3
 homepage: https://bugcapsule.com
 documentation: https://docs.bugcapsule.com
 repository: https://github.com/BugCapsule/bug_capsule_flutter_sdk

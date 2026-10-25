@@ -38,8 +38,11 @@ class ProjectConfig {
     if (json is! Map) throw StateError('${file.path} must hold a JSON object');
     final config = ProjectConfig._(dir, file, json.cast<String, Object?>());
     final runtime = config.json['runtime'];
-    if (runtime != null && (runtime is! String || !runtimes.contains(runtime))) {
-      throw StateError('${file.path}: "runtime" must be one of ${runtimes.join(', ')}');
+    if (runtime != null &&
+        (runtime is! String || !runtimes.contains(runtime))) {
+      throw StateError(
+        '${file.path}: "runtime" must be one of ${runtimes.join(', ')}',
+      );
     }
     return config;
   }
@@ -58,10 +61,12 @@ class ProjectConfig {
     return s.cast<String, Object?>();
   }
 
-  Map<String, Object?> get _timeouts => (json['timeouts'] as Map?)?.cast<String, Object?>() ?? const {};
+  Map<String, Object?> get _timeouts =>
+      (json['timeouts'] as Map?)?.cast<String, Object?>() ?? const {};
 
   /// Build/install budget.
-  Duration get buildTimeout => Duration(seconds: _int(_timeouts['buildSeconds']) ?? 1200);
+  Duration get buildTimeout =>
+      Duration(seconds: _int(_timeouts['buildSeconds']) ?? 1200);
 
   /// Per-attempt budget when set (otherwise derived from the capsule).
   Duration? get attemptTimeout {
@@ -69,13 +74,19 @@ class ProjectConfig {
     return s == null ? null : Duration(seconds: s);
   }
 
-  static int? _int(Object? v) => v is int ? v : v is String ? int.tryParse(v) : null;
+  static int? _int(Object? v) => v is int
+      ? v
+      : v is String
+      ? int.tryParse(v)
+      : null;
 
   /// Typed accessors for a runtime section.
   String? string(String runtime, String key) {
     final v = section(runtime)[key];
     if (v == null) return null;
-    if (v is! String) throw StateError('$fileName: "$runtime.$key" must be a string');
+    if (v is! String) {
+      throw StateError('$fileName: "$runtime.$key" must be a string');
+    }
     return v;
   }
 
@@ -90,10 +101,15 @@ class ProjectConfig {
   static String? detectRuntime(String dir) {
     bool exists(String name) => File('$dir/$name').existsSync();
     if (exists('pubspec.yaml')) return 'flutter';
-    if (exists('settings.gradle.kts') || exists('settings.gradle')) return 'android';
+    if (exists('settings.gradle.kts') || exists('settings.gradle')) {
+      return 'android';
+    }
     final d = Directory(dir);
     if (d.existsSync() &&
-        d.listSync().any((e) => e.path.endsWith('.xcodeproj') || e.path.endsWith('.xcworkspace'))) {
+        d.listSync().any(
+          (e) =>
+              e.path.endsWith('.xcodeproj') || e.path.endsWith('.xcworkspace'),
+        )) {
       return 'ios';
     }
     if (exists('package.json')) return 'web';

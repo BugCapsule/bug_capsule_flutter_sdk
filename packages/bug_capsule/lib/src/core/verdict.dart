@@ -93,16 +93,22 @@ AttemptAssessment assessAttempt(ReplayReport r) {
       }
       return AttemptAssessment(r, AttemptStatus.reproduced, const []);
     case ReplayOutcome.incompatible:
-      reasons.add('incompatible: ${r.message ?? 'capsule cannot run against this build'}');
+      reasons.add(
+        'incompatible: ${r.message ?? 'capsule cannot run against this build'}',
+      );
     case ReplayOutcome.noAssertion:
       reasons.add('capsule has no failure assertion');
     case ReplayOutcome.error:
       reasons.add('replay error: ${r.message ?? 'unknown'}');
     case ReplayOutcome.notReproduced:
-      if (r.expectedSignature == null) reasons.add('no expected failure to check');
+      if (r.expectedSignature == null) {
+        reasons.add('no expected failure to check');
+      }
       final expected = r.eventsExpected;
       if (expected != null && r.eventsDispatched < expected) {
-        reasons.add('only ${r.eventsDispatched} of $expected recorded inputs were replayed');
+        reasons.add(
+          'only ${r.eventsDispatched} of $expected recorded inputs were replayed',
+        );
       }
       for (final f in r.otherFailures) {
         reasons.add('unexpected failure: ${f.signature}');
@@ -117,7 +123,10 @@ AttemptAssessment assessAttempt(ReplayReport r) {
       }
   }
   return AttemptAssessment(
-      r, reasons.isEmpty ? AttemptStatus.clean : AttemptStatus.invalid, reasons);
+    r,
+    reasons.isEmpty ? AttemptStatus.clean : AttemptStatus.invalid,
+    reasons,
+  );
 }
 
 class RunEvaluation {
@@ -138,9 +147,12 @@ class RunEvaluation {
   final List<String> reasons;
 
   int get completedAttempts => attempts.length;
-  int get reproductions => attempts.where((a) => a.status == AttemptStatus.reproduced).length;
-  int get cleanAttempts => attempts.where((a) => a.status == AttemptStatus.clean).length;
-  int get invalidAttempts => attempts.where((a) => a.status == AttemptStatus.invalid).length;
+  int get reproductions =>
+      attempts.where((a) => a.status == AttemptStatus.reproduced).length;
+  int get cleanAttempts =>
+      attempts.where((a) => a.status == AttemptStatus.clean).length;
+  int get invalidAttempts =>
+      attempts.where((a) => a.status == AttemptStatus.invalid).length;
 
   /// Attempts that count as evidence (reproduced or clean).
   int get validAttempts => reproductions + cleanAttempts;
@@ -151,11 +163,11 @@ class RunEvaluation {
 
   /// 0 success, 1 the opposite, 2 flaky, 3 inconclusive / incompatible.
   int get exitCode => switch (verdict) {
-        Verdict.reproduced || Verdict.fixed => 0,
-        Verdict.notReproduced || Verdict.stillFailing => 1,
-        Verdict.flaky => 2,
-        Verdict.incompatible || Verdict.inconclusive => 3,
-      };
+    Verdict.reproduced || Verdict.fixed => 0,
+    Verdict.notReproduced || Verdict.stillFailing => 1,
+    Verdict.flaky => 2,
+    Verdict.incompatible || Verdict.inconclusive => 3,
+  };
 }
 
 /// The verdict rules, shared by `bugcapsule run`, `bugcapsule verify` and
@@ -171,17 +183,27 @@ class RunEvaluation {
 ///
 /// Attempts that never ran count against N, so "fixed" needs every
 /// requested attempt to complete validly without the failure.
-RunEvaluation evaluateRun(RunKind kind, int requestedAttempts, List<ReplayReport> reports) {
+RunEvaluation evaluateRun(
+  RunKind kind,
+  int requestedAttempts,
+  List<ReplayReport> reports,
+) {
   final attempts = [for (final r in reports) assessAttempt(r)];
   final reasons = <String>{};
   for (final a in attempts) {
     reasons.addAll(a.reasons);
   }
   if (reports.length > requestedAttempts) {
-    reasons.add('${reports.length} reports for $requestedAttempts requested attempts');
+    reasons.add(
+      '${reports.length} reports for $requestedAttempts requested attempts',
+    );
   }
   final missing = requestedAttempts - attempts.length;
-  if (missing > 0) reasons.add('$missing of $requestedAttempts requested attempts did not run');
+  if (missing > 0) {
+    reasons.add(
+      '$missing of $requestedAttempts requested attempts did not run',
+    );
+  }
   if (requestedAttempts <= 0) reasons.add('no attempts were requested');
 
   final n = requestedAttempts;
@@ -196,18 +218,18 @@ RunEvaluation evaluateRun(RunKind kind, int requestedAttempts, List<ReplayReport
     verdict = r == n
         ? Verdict.reproduced
         : c == n
-            ? Verdict.notReproduced
-            : r > 0 && c > 0
-                ? Verdict.flaky
-                : Verdict.inconclusive;
+        ? Verdict.notReproduced
+        : r > 0 && c > 0
+        ? Verdict.flaky
+        : Verdict.inconclusive;
   } else {
     verdict = c == n
         ? Verdict.fixed
         : r > 0 && c > 0
-            ? Verdict.flaky
-            : r > 0
-                ? Verdict.stillFailing
-                : Verdict.inconclusive;
+        ? Verdict.flaky
+        : r > 0
+        ? Verdict.stillFailing
+        : Verdict.inconclusive;
   }
   return RunEvaluation(
     kind: kind,

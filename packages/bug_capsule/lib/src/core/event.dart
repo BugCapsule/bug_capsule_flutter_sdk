@@ -42,7 +42,8 @@ class BugCapsuleEvent {
     this.data = const {},
   });
 
-  factory BugCapsuleEvent.fromJson(Map<String, Object?> json) => BugCapsuleEvent(
+  factory BugCapsuleEvent.fromJson(Map<String, Object?> json) =>
+      BugCapsuleEvent(
         seq: json['seq'] as int,
         t: json['t'] as int,
         type: json['type'] as String,
@@ -57,7 +58,12 @@ class BugCapsuleEvent {
   BugCapsuleEvent shift(int offsetMs) =>
       BugCapsuleEvent(seq: seq, t: t - offsetMs, type: type, data: data);
 
-  Map<String, Object?> toJson() => {'seq': seq, 't': t, 'type': type, 'data': data};
+  Map<String, Object?> toJson() => {
+    'seq': seq,
+    't': t,
+    'type': type,
+    'data': data,
+  };
 
   @override
   String toString() => 'BugCapsuleEvent($seq, ${t}ms, $type)';

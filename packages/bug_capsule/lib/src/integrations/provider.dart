@@ -50,17 +50,16 @@ class BugCapsuleNotifiers extends TrackedStateIntegration {
     required String id,
     Object? Function(T notifier)? toJson,
     void Function(T notifier, Map<String, Object?> json)? restore,
-  }) =>
-      trackObject(
-        notifier,
-        id: id,
-        toJson: toJson,
-        restore: restore,
-        subscribe: (n, onChange) {
-          n.addListener(onChange);
-          return onChange;
-        },
-      );
+  }) => trackObject(
+    notifier,
+    id: id,
+    toJson: toJson,
+    restore: restore,
+    subscribe: (n, onChange) {
+      n.addListener(onChange);
+      return onChange;
+    },
+  );
 
   @override
   void unsubscribe(Object object, Object subscription) =>

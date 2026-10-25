@@ -15,7 +15,10 @@ import 'integration.dart';
 /// restored in replay as soon as it is tracked again. Objects are held
 /// weakly: tracking never keeps one alive.
 abstract class TrackedStateIntegration extends BugCapsuleIntegration {
-  TrackedStateIntegration({this.recordStateData, this.maxStateBytes = 64 * 1024});
+  TrackedStateIntegration({
+    this.recordStateData,
+    this.maxStateBytes = 64 * 1024,
+  });
 
   /// Include serialized state in change events. Defaults to true except in
   /// production.
@@ -29,7 +32,9 @@ abstract class TrackedStateIntegration extends BugCapsuleIntegration {
 
   /// What [trackObject]'s `subscribe` returned, for [untrack]. An Expando
   /// so a subscription that references its object does not keep it alive.
-  final Expando<Object> _subscriptions = Expando('bugcapsule.trackedSubscription');
+  final Expando<Object> _subscriptions = Expando(
+    'bugcapsule.trackedSubscription',
+  );
   Map<String, Object?> _restoreData = const {};
   final Set<String> _unserializable = {};
   final Set<String> _oversized = {};
@@ -38,7 +43,8 @@ abstract class TrackedStateIntegration extends BugCapsuleIntegration {
   @protected
   BugCapsuleSession? get session => _session;
 
-  bool get _withData => recordStateData ?? _session?.mode != CaptureMode.production;
+  bool get _withData =>
+      recordStateData ?? _session?.mode != CaptureMode.production;
 
   @override
   @mustCallSuper
@@ -84,7 +90,12 @@ abstract class TrackedStateIntegration extends BugCapsuleIntegration {
         replay.diverge('$name.unrestored', '$key has no restore callback');
       } else {
         try {
-          runRestore(() => restore(object, (saved['state'] as Map).cast<String, Object?>()));
+          runRestore(
+            () => restore(
+              object,
+              (saved['state'] as Map).cast<String, Object?>(),
+            ),
+          );
         } catch (e) {
           replay.diverge('$name.unrestored', '$key: $e');
         }
@@ -134,7 +145,11 @@ abstract class TrackedStateIntegration extends BugCapsuleIntegration {
       data = _encode(session, tracked);
       if ((_jsonLength(data) ?? maxStateBytes + 1) > maxStateBytes) data = null;
     }
-    session.record('$name.change', {'type': tracked.type, 'key': key, 'data': ?data});
+    session.record('$name.change', {
+      'type': tracked.type,
+      'key': key,
+      'data': ?data,
+    });
   }
 
   /// Redacted JSON of the tracked object's state, or null when it has no
@@ -197,13 +212,22 @@ abstract class TrackedStateIntegration extends BugCapsuleIntegration {
 
   @override
   @mustCallSuper
-  void describeEligibility(EligibilityBuilder eligibility, RecordedWindow window) {
+  void describeEligibility(
+    EligibilityBuilder eligibility,
+    RecordedWindow window,
+  ) {
     if (window.checkpoint.kind != CheckpointKind.periodic) return;
     for (final key in _unserializable) {
-      eligibility.missing('$name.state', '$key is tracked without a JSON serializer');
+      eligibility.missing(
+        '$name.state',
+        '$key is tracked without a JSON serializer',
+      );
     }
     for (final key in _oversized) {
-      eligibility.missing('$name.state', '$key state exceeds $maxStateBytes bytes; add a projection');
+      eligibility.missing(
+        '$name.state',
+        '$key state exceeds $maxStateBytes bytes; add a projection',
+      );
     }
   }
 }

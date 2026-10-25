@@ -26,16 +26,31 @@ Future<bool> commitExists(String dir, String sha) async =>
 
 /// Creates (or reuses) a detached worktree of [sha] and returns the path of
 /// [projectDir] inside it.
-Future<String> pinnedProjectDir(GitInfo git, String projectDir, String sha) async {
+Future<String> pinnedProjectDir(
+  GitInfo git,
+  String projectDir,
+  String sha,
+) async {
   final short = sha.substring(0, sha.length < 12 ? sha.length : 12);
   final worktree = '${Directory.systemTemp.path}/bugcapsule-pin-$short';
   if (!Directory(worktree).existsSync()) {
-    final res = await Process.run(
-        'git', ['-C', git.root, 'worktree', 'add', '--detach', worktree, sha]);
-    if (res.exitCode != 0) throw StateError('git worktree add failed: ${res.stderr}');
+    final res = await Process.run('git', [
+      '-C',
+      git.root,
+      'worktree',
+      'add',
+      '--detach',
+      worktree,
+      sha,
+    ]);
+    if (res.exitCode != 0) {
+      throw StateError('git worktree add failed: ${res.stderr}');
+    }
   }
   final absProject = Directory(projectDir).absolute.resolveSymbolicLinksSync();
   final absRoot = Directory(git.root).resolveSymbolicLinksSync();
-  final relative = absProject.length > absRoot.length ? absProject.substring(absRoot.length + 1) : '';
+  final relative = absProject.length > absRoot.length
+      ? absProject.substring(absRoot.length + 1)
+      : '';
   return relative.isEmpty ? worktree : '$worktree/$relative';
 }

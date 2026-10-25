@@ -8,7 +8,12 @@ const scopeZoneKey = #bugcapsule.scope;
 
 /// An incoming trace to continue (`BugCapsule.continueTrace`).
 class ContinuedTrace {
-  const ContinuedTrace(this.traceId, this.parentSpanId, this.sampled, {this.sampleRate});
+  const ContinuedTrace(
+    this.traceId,
+    this.parentSpanId,
+    this.sampled, {
+    this.sampleRate,
+  });
 
   final String traceId;
   final String parentSpanId;
@@ -48,7 +53,8 @@ class Scope {
   void setExtras(Map<String, Object?> extras) => this.extras.addAll(extras);
   void setContext(String name, Object? value) => contexts[name] = value;
   void setLevel(EventLevel? level) => this.level = level;
-  void setFingerprint(List<String>? fingerprint) => this.fingerprint = fingerprint;
+  void setFingerprint(List<String>? fingerprint) =>
+      this.fingerprint = fingerprint;
 
   /// The open span: the zone's (`startSpan`), else the bound transaction.
   BugCapsuleSpan? get activeSpan {

@@ -13,7 +13,13 @@ import 'remote_config.dart';
 enum UploadStatus { uploaded, rejected, retryLater }
 
 class UploadResult {
-  const UploadResult(this.status, {this.serverId, this.message, this.retryAfter, this.httpStatus});
+  const UploadResult(
+    this.status, {
+    this.serverId,
+    this.message,
+    this.retryAfter,
+    this.httpStatus,
+  });
   final UploadStatus status;
   final String? serverId;
   final String? message;
@@ -44,13 +50,15 @@ abstract interface class EnvelopeTransport {
   Future<UploadResult> sendEnvelope(List<int> gzippedBody);
 }
 
-class BugCapsuleBackendClient implements BugCapsuleTransport, EnvelopeTransport {
+class BugCapsuleBackendClient
+    implements BugCapsuleTransport, EnvelopeTransport {
   BugCapsuleBackendClient(this.config);
 
   final BugCapsuleBackendConfig config;
   static const _timeout = Duration(seconds: 20);
 
-  Uri _uri(String path) => Uri.parse('${config.url.replaceAll(RegExp(r'/+$'), '')}$path');
+  Uri _uri(String path) =>
+      Uri.parse('${config.url.replaceAll(RegExp(r'/+$'), '')}$path');
 
   static Duration? _retryAfter(HttpClientResponse res) {
     final raw = res.headers.value(HttpHeaders.retryAfterHeader);
@@ -63,7 +71,10 @@ class BugCapsuleBackendClient implements BugCapsuleTransport, EnvelopeTransport 
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     try {
       final req = await client.getUrl(_uri('/v1/sdk/config')).timeout(_timeout);
-      req.headers.set(HttpHeaders.authorizationHeader, 'Bearer ${config.ingestKey}');
+      req.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer ${config.ingestKey}',
+      );
       final res = await req.close().timeout(_timeout);
       final body = await utf8.decodeStream(res).timeout(_timeout);
       if (res.statusCode != 200) {
@@ -72,16 +83,28 @@ class BugCapsuleBackendClient implements BugCapsuleTransport, EnvelopeTransport 
         final problem = _tryJson(body);
         final reason = problem?['reason'];
         final detail = problem?['detail'];
-        return ConfigFetchFailed('HTTP ${res.statusCode}',
-            status: res.statusCode,
-            retryAfter: _retryAfter(res),
-            reason: reason is String && reason.isNotEmpty ? _cut(reason, 100) : null,
-            detail: detail is String && detail.isNotEmpty ? _cut(detail, 500) : null);
+        return ConfigFetchFailed(
+          'HTTP ${res.statusCode}',
+          status: res.statusCode,
+          retryAfter: _retryAfter(res),
+          reason: reason is String && reason.isNotEmpty
+              ? _cut(reason, 100)
+              : null,
+          detail: detail is String && detail.isNotEmpty
+              ? _cut(detail, 500)
+              : null,
+        );
       }
       final json = jsonDecode(body);
-      if (json is! Map) return const ConfigFetchFailed('config is not a JSON object');
-      return ConfigFetched(RemoteCaptureConfig.fromJson(json.cast<String, Object?>(),
-          fetchedAtMs: DateTime.now().millisecondsSinceEpoch));
+      if (json is! Map) {
+        return const ConfigFetchFailed('config is not a JSON object');
+      }
+      return ConfigFetched(
+        RemoteCaptureConfig.fromJson(
+          json.cast<String, Object?>(),
+          fetchedAtMs: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
     } catch (e) {
       return ConfigFetchFailed('$e');
     } finally {
@@ -105,18 +128,26 @@ class BugCapsuleBackendClient implements BugCapsuleTransport, EnvelopeTransport 
       final body = await utf8.decodeStream(res).timeout(_timeout);
       final json = _tryJson(body);
       if (res.statusCode == 200 || res.statusCode == 201) {
-        return UploadResult(UploadStatus.uploaded, serverId: json?['id'] as String?);
+        return UploadResult(
+          UploadStatus.uploaded,
+          serverId: json?['id'] as String?,
+        );
       }
       final code = json?['code'] as String? ?? 'HTTP ${res.statusCode}';
       // 4xx other than 401/408/429 will never succeed: drop instead of
       // retrying. 401 (rotated key) keeps the queue: the config fetch stops
       // capture, and a kill switch purges it.
-      final retry = res.statusCode >= 500 ||
+      final retry =
+          res.statusCode >= 500 ||
           res.statusCode == 401 ||
           res.statusCode == 408 ||
           res.statusCode == 429;
-      return UploadResult(retry ? UploadStatus.retryLater : UploadStatus.rejected,
-          message: code, retryAfter: _retryAfter(res), httpStatus: res.statusCode);
+      return UploadResult(
+        retry ? UploadStatus.retryLater : UploadStatus.rejected,
+        message: code,
+        retryAfter: _retryAfter(res),
+        httpStatus: res.statusCode,
+      );
     } catch (e) {
       return UploadResult(UploadStatus.retryLater, message: '$e');
     } finally {
@@ -140,17 +171,28 @@ class BugCapsuleBackendClient implements BugCapsuleTransport, EnvelopeTransport 
       final json = _tryJson(body);
       if (res.statusCode == 200) {
         // Rejected items are invalid and must not be retried.
-        final rejected = json == null ? const <String>[] : EnvelopeResponse.fromJson(json).rejected;
-        if (rejected.isNotEmpty) debugPrint('[bugcapsule] envelope items rejected: ${rejected.join('; ')}');
+        final rejected = json == null
+            ? const <String>[]
+            : EnvelopeResponse.fromJson(json).rejected;
+        if (rejected.isNotEmpty) {
+          debugPrint(
+            '[bugcapsule] envelope items rejected: ${rejected.join('; ')}',
+          );
+        }
         return const UploadResult(UploadStatus.uploaded);
       }
       final code = json?['code'] as String? ?? 'HTTP ${res.statusCode}';
-      final retry = res.statusCode >= 500 ||
+      final retry =
+          res.statusCode >= 500 ||
           res.statusCode == 401 ||
           res.statusCode == 408 ||
           res.statusCode == 429;
-      return UploadResult(retry ? UploadStatus.retryLater : UploadStatus.rejected,
-          message: code, retryAfter: _retryAfter(res), httpStatus: res.statusCode);
+      return UploadResult(
+        retry ? UploadStatus.retryLater : UploadStatus.rejected,
+        message: code,
+        retryAfter: _retryAfter(res),
+        httpStatus: res.statusCode,
+      );
     } catch (e) {
       return UploadResult(UploadStatus.retryLater, message: '$e');
     } finally {
@@ -161,7 +203,8 @@ class BugCapsuleBackendClient implements BugCapsuleTransport, EnvelopeTransport 
   @override
   void close() {}
 
-  static String _cut(String s, int max) => s.length <= max ? s : s.substring(0, max);
+  static String _cut(String s, int max) =>
+      s.length <= max ? s : s.substring(0, max);
 
   static Map<String, Object?>? _tryJson(String body) {
     try {
@@ -192,7 +235,11 @@ class CapsuleStore {
   /// Opens `<application support>/bugcapsule`, or [root] when given (tests).
   /// Leftover temporary files from an interrupted write are removed.
   static Future<CapsuleStore> open({Directory? root}) async {
-    final dir = root ?? Directory('${(await getApplicationSupportDirectory()).path}/bugcapsule');
+    final dir =
+        root ??
+        Directory(
+          '${(await getApplicationSupportDirectory()).path}/bugcapsule',
+        );
     final store = CapsuleStore._(dir);
     await store._captures.create(recursive: true);
     await _removeTemporaryFiles(store._captures);
@@ -204,7 +251,11 @@ class CapsuleStore {
 
   /// Written by `bugcapsule run` to start the next launch in replay mode.
   static Future<File> replayRequestFile({Directory? root}) async {
-    final dir = root ?? Directory('${(await getApplicationSupportDirectory()).path}/bugcapsule');
+    final dir =
+        root ??
+        Directory(
+          '${(await getApplicationSupportDirectory()).path}/bugcapsule',
+        );
     return File('${dir.path}/replay_request.json');
   }
 
@@ -269,7 +320,10 @@ class _FileConfigCache implements RemoteConfigCache {
 
   @override
   Future<void> write(String scope, RemoteCaptureConfig config) =>
-      _writeAtomically(file, utf8.encode(jsonEncode({'scope': scope, 'config': config.toJson()})));
+      _writeAtomically(
+        file,
+        utf8.encode(jsonEncode({'scope': scope, 'config': config.toJson()})),
+      );
 }
 
 /// Bounds on the upload outbox. Defaults: 10 capsules, 10 MiB in total, and
@@ -314,15 +368,19 @@ class OutboxEntry {
 ///   are retried next launch (the backend deduplicates by capsule id).
 class UploadOutbox {
   UploadOutbox._(this.dir, this.limits, this._now, this.extension)
-      : _name = RegExp('^(?:(\\d+)_)?([A-Za-z0-9-]{1,100})${RegExp.escape(extension)}\$');
+    : _name = RegExp(
+        '^(?:(\\d+)_)?([A-Za-z0-9-]{1,100})${RegExp.escape(extension)}\$',
+      );
 
   /// [extension] names the queued files: `.bugcapsule` for capsules,
   /// `.envelope` for monitoring envelopes (the same rules, a separate queue).
   /// Entries must be gzip data.
-  static Future<UploadOutbox> open(Directory dir,
-      {OutboxLimits limits = const OutboxLimits(),
-      DateTime Function()? now,
-      String extension = '.bugcapsule'}) async {
+  static Future<UploadOutbox> open(
+    Directory dir, {
+    OutboxLimits limits = const OutboxLimits(),
+    DateTime Function()? now,
+    String extension = '.bugcapsule',
+  }) async {
     final outbox = UploadOutbox._(dir, limits, now ?? DateTime.now, extension);
     await dir.create(recursive: true);
     await _removeTemporaryFiles(dir);
@@ -363,7 +421,9 @@ class UploadOutbox {
         final stat = await e.stat();
         final ms = int.tryParse(m[1] ?? '');
         // Files from SDK 0.1.0 have no timestamp: use their mtime.
-        final at = ms == null ? stat.modified : DateTime.fromMillisecondsSinceEpoch(ms);
+        final at = ms == null
+            ? stat.modified
+            : DateTime.fromMillisecondsSinceEpoch(ms);
         out.add(OutboxEntry(e, m[2]!, at, stat.size));
       } on FileSystemException {
         continue;
@@ -378,11 +438,15 @@ class UploadOutbox {
   Future<bool> enqueue(String capsuleId, List<int> bytes) {
     if (_closed || bytes.length > limits.maxBytes) return Future.value(false);
     return _lock.run(() async {
-      final file = File('${dir.path}/${_now().millisecondsSinceEpoch}_$capsuleId$extension');
+      final file = File(
+        '${dir.path}/${_now().millisecondsSinceEpoch}_$capsuleId$extension',
+      );
       try {
         await _writeAtomically(file, bytes);
       } on FileSystemException catch (e) {
-        debugPrint('[bugcapsule] could not queue capsule $capsuleId: ${e.osError?.message ?? e.message}');
+        debugPrint(
+          '[bugcapsule] could not queue capsule $capsuleId: ${e.osError?.message ?? e.message}',
+        );
         return false;
       }
       await _enforceLimits();
@@ -397,7 +461,9 @@ class UploadOutbox {
     var bytes = all.fold<int>(0, (s, e) => s + e.size);
     for (final e in all) {
       final expired = e.enqueuedAt.isBefore(cutoff);
-      if (!expired && count <= limits.maxCount && bytes <= limits.maxBytes) continue;
+      if (!expired && count <= limits.maxCount && bytes <= limits.maxBytes) {
+        continue;
+      }
       await _deleteQuietly(e.file);
       count--;
       bytes -= e.size;
@@ -406,12 +472,12 @@ class UploadOutbox {
 
   /// Deletes every queued capsule (kill switch). Returns how many.
   Future<int> purge() => _lock.run(() async {
-        final all = await _entries();
-        for (final e in all) {
-          await _deleteQuietly(e.file);
-        }
-        return all.length;
-      });
+    final all = await _entries();
+    for (final e in all) {
+      await _deleteQuietly(e.file);
+    }
+    return all.length;
+  });
 
   /// Uploads queued capsules, oldest first, while [allowed] holds (checked
   /// before every upload). Returns the result for [onlyId] when given and
@@ -434,16 +500,24 @@ class UploadOutbox {
     }
   }
 
-  Future<UploadResult?> _flushOnce(Future<UploadResult> Function(List<int>) upload,
-      bool Function() allowed, String? onlyId) async {
+  Future<UploadResult?> _flushOnce(
+    Future<UploadResult> Function(List<int>) upload,
+    bool Function() allowed,
+    String? onlyId,
+  ) async {
     UploadResult? mine;
     final retryAt = _retryAt;
     if (retryAt != null && _now().isBefore(retryAt)) {
-      return onlyId == null ? null : const UploadResult(UploadStatus.retryLater, message: 'queued');
+      return onlyId == null
+          ? null
+          : const UploadResult(UploadStatus.retryLater, message: 'queued');
     }
     final queue = await entries();
     // Stable: oldest first among entries with the same number of failures.
-    queue.sort((a, b) => (_attempts[a.capsuleId] ?? 0).compareTo(_attempts[b.capsuleId] ?? 0));
+    queue.sort(
+      (a, b) =>
+          (_attempts[a.capsuleId] ?? 0).compareTo(_attempts[b.capsuleId] ?? 0),
+    );
     for (final entry in queue) {
       if (_closed || !allowed()) break;
       List<int> bytes;
@@ -453,7 +527,9 @@ class UploadOutbox {
         continue; // evicted meanwhile, or unreadable: next pass decides
       }
       if (bytes.length < 2 || bytes[0] != 0x1f || bytes[1] != 0x8b) {
-        debugPrint('[bugcapsule] dropping corrupt queued capsule ${entry.capsuleId}');
+        debugPrint(
+          '[bugcapsule] dropping corrupt queued capsule ${entry.capsuleId}',
+        );
         await _lock.run(() => _deleteQuietly(entry.file));
         continue;
       }
@@ -462,11 +538,15 @@ class UploadOutbox {
       if (result.status == UploadStatus.retryLater) {
         _attempts.update(entry.capsuleId, (n) => n + 1, ifAbsent: () => 1);
         _failures++;
-        final base = const Duration(seconds: 30) * pow(2, min(_failures - 1, 7)).toInt();
-        var delay = base > const Duration(hours: 1) ? const Duration(hours: 1) : base;
+        final base =
+            const Duration(seconds: 30) * pow(2, min(_failures - 1, 7)).toInt();
+        var delay = base > const Duration(hours: 1)
+            ? const Duration(hours: 1)
+            : base;
         final after = result.retryAfter;
         if (after != null && after > delay) delay = after;
-        final jittered = delay.inMilliseconds * (0.8 + _random.nextDouble() * 0.4);
+        final jittered =
+            delay.inMilliseconds * (0.8 + _random.nextDouble() * 0.4);
         _retryAt = _now().add(Duration(milliseconds: jittered.round()));
         break;
       }
@@ -474,7 +554,9 @@ class UploadOutbox {
       _retryAt = null;
       _attempts.remove(entry.capsuleId);
       if (result.status == UploadStatus.rejected) {
-        debugPrint('[bugcapsule] upload of ${entry.capsuleId} rejected: ${result.message}');
+        debugPrint(
+          '[bugcapsule] upload of ${entry.capsuleId} rejected: ${result.message}',
+        );
       }
       await _lock.run(() => _deleteQuietly(entry.file));
     }

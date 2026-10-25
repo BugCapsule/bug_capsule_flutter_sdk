@@ -26,7 +26,11 @@ import '../runtime/runtime.dart';
 
 /// Serializer for the state of one BLoC/Cubit type [B].
 class BugCapsuleState<B extends BlocBase<S>, S> {
-  const BugCapsuleState({required this.toJson, required this.fromJson, this.eventToJson});
+  const BugCapsuleState({
+    required this.toJson,
+    required this.fromJson,
+    this.eventToJson,
+  });
 
   final Object? Function(S state) toJson;
   final S Function(Map<String, Object?> json) fromJson;
@@ -76,9 +80,12 @@ class BugCapsuleBloc extends BugCapsuleIntegration {
   @override
   String get name => 'bloc';
 
-  bool get _withData => recordStateData ?? _session.mode != CaptureMode.production;
+  bool get _withData =>
+      recordStateData ?? _session.mode != CaptureMode.production;
 
-  BugCapsuleState<BlocBase<Object?>, Object?>? _registration(BlocBase<Object?> bloc) {
+  BugCapsuleState<BlocBase<Object?>, Object?>? _registration(
+    BlocBase<Object?> bloc,
+  ) {
     for (final s in states) {
       if (s.blocType == bloc.runtimeType) return s;
     }
@@ -88,7 +95,9 @@ class BugCapsuleBloc extends BugCapsuleIntegration {
   @override
   Future<void> setUp(BugCapsuleSession session) async {
     _session = session;
-    _observer.parent = Bloc.observer is _BugCapsuleBlocObserver ? null : Bloc.observer;
+    _observer.parent = Bloc.observer is _BugCapsuleBlocObserver
+        ? null
+        : Bloc.observer;
     Bloc.observer = _observer;
   }
 
@@ -105,7 +114,9 @@ class BugCapsuleBloc extends BugCapsuleIntegration {
         _unserializable.add(bloc.runtimeType.toString());
         continue;
       }
-      final json = _session.redactor.redactJson(registration.encode(bloc.state));
+      final json = _session.redactor.redactJson(
+        registration.encode(bloc.state),
+      );
       if (jsonEncode(json).length > maxStateBytes) {
         _oversized.add(entry.key);
         continue;
@@ -125,20 +136,33 @@ class BugCapsuleBloc extends BugCapsuleIntegration {
   }
 
   @override
-  void describeEligibility(EligibilityBuilder eligibility, RecordedWindow window) {
+  void describeEligibility(
+    EligibilityBuilder eligibility,
+    RecordedWindow window,
+  ) {
     if (window.checkpoint.kind != CheckpointKind.periodic) return;
     for (final type in _unserializable) {
-      eligibility.missing('bloc.state', '$type has no BugCapsuleState serializer');
+      eligibility.missing(
+        'bloc.state',
+        '$type has no BugCapsuleState serializer',
+      );
     }
     for (final key in _oversized) {
-      eligibility.missing('bloc.state', '$key state exceeds $maxStateBytes bytes; add a projection');
+      eligibility.missing(
+        'bloc.state',
+        '$key state exceeds $maxStateBytes bytes; add a projection',
+      );
     }
   }
 
   /// `<Type>#<n>` — the n-th instance of this type created in the session.
   /// Deterministic as long as replay follows the same path.
   String _assignKey(BlocBase<Object?> bloc) {
-    final n = _ordinals.update(bloc.runtimeType, (v) => v + 1, ifAbsent: () => 0);
+    final n = _ordinals.update(
+      bloc.runtimeType,
+      (v) => v + 1,
+      ifAbsent: () => 0,
+    );
     final key = '${bloc.runtimeType}#$n';
     _keys[bloc] = key;
     return key;
@@ -149,7 +173,10 @@ class BugCapsuleBloc extends BugCapsuleIntegration {
   void _onCreate(BlocBase<Object?> bloc) {
     final key = _assignKey(bloc);
     _live[key] = bloc;
-    _session.record(EventTypes.blocCreate, {'bloc': bloc.runtimeType.toString(), 'key': key});
+    _session.record(EventTypes.blocCreate, {
+      'bloc': bloc.runtimeType.toString(),
+      'key': key,
+    });
 
     final replay = _session.replay;
     final saved = _restoreData[key];
@@ -161,7 +188,10 @@ class BugCapsuleBloc extends BugCapsuleIntegration {
     }
     final registration = _registration(bloc);
     if (registration == null) {
-      replay.diverge('bloc.unrestored', '$key has no BugCapsuleState serializer');
+      replay.diverge(
+        'bloc.unrestored',
+        '$key has no BugCapsuleState serializer',
+      );
       return;
     }
     // onCreate runs inside the BlocBase constructor, before the subclass
@@ -169,7 +199,10 @@ class BugCapsuleBloc extends BugCapsuleIntegration {
     scheduleMicrotask(() {
       if (bloc.isClosed) return;
       try {
-        registration.restore(bloc, (saved['state'] as Map).cast<String, Object?>());
+        registration.restore(
+          bloc,
+          (saved['state'] as Map).cast<String, Object?>(),
+        );
       } catch (e) {
         replay.diverge('bloc.unrestored', '$key: $e');
       }
@@ -197,7 +230,9 @@ class BugCapsuleBloc extends BugCapsuleIntegration {
     Object? data;
     if (_withData && registration != null) {
       try {
-        data = _session.redactor.redactJson(registration.encode(change.nextState));
+        data = _session.redactor.redactJson(
+          registration.encode(change.nextState),
+        );
         if (jsonEncode(data).length > maxStateBytes) data = null;
       } catch (_) {
         data = null;
@@ -224,7 +259,10 @@ class BugCapsuleBloc extends BugCapsuleIntegration {
   void _onClose(BlocBase<Object?> bloc) {
     final key = _keyOf(bloc);
     _live.remove(key);
-    _session.record(EventTypes.blocClose, {'bloc': bloc.runtimeType.toString(), 'key': key});
+    _session.record(EventTypes.blocClose, {
+      'bloc': bloc.runtimeType.toString(),
+      'key': key,
+    });
   }
 }
 
@@ -256,7 +294,10 @@ class _BugCapsuleBlocObserver extends BlocObserver {
   }
 
   @override
-  void onTransition(Bloc<dynamic, dynamic> bloc, Transition<dynamic, dynamic> transition) {
+  void onTransition(
+    Bloc<dynamic, dynamic> bloc,
+    Transition<dynamic, dynamic> transition,
+  ) {
     super.onTransition(bloc, transition);
     parent?.onTransition(bloc, transition);
   }

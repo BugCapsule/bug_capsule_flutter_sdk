@@ -1,3 +1,12 @@
+## 0.4.1-beta.3 — 2026-10-25
+
+- License the Flutter SDK and bundled CLI under the MIT License.
+- Apply the Dart formatter to the package sources, tests, and tools.
+
+- Shorten the package description to meet pub.dev's metadata requirements.
+- Include a Flutter example in the published package with initialization,
+  navigation monitoring, and manual capsule capture.
+
 ## 0.4.1-beta.2 — 2026-10-25
 
 - Publish the full developer README on pub.dev and check it matches the repository README.

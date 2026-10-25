@@ -26,17 +26,26 @@ abstract final class EnvelopeCodec {
   static const sdkName = 'bugcapsule-flutter';
   static const maxItems = 100;
 
-  static List<int> encode(List<EnvelopeItem> items, {required String sdkVersion, DateTime? sentAt}) {
+  static List<int> encode(
+    List<EnvelopeItem> items, {
+    required String sdkVersion,
+    DateTime? sentAt,
+  }) {
     assert(items.length <= maxItems);
-    return gzip.encode(utf8.encode(jsonEncode({
-      'sentAt': isoTimestamp(sentAt ?? DateTime.now()),
-      'sdk': {'name': sdkName, 'version': sdkVersion},
-      'items': [for (final i in items) i.toJson()],
-    })));
+    return gzip.encode(
+      utf8.encode(
+        jsonEncode({
+          'sentAt': isoTimestamp(sentAt ?? DateTime.now()),
+          'sdk': {'name': sdkName, 'version': sdkVersion},
+          'items': [for (final i in items) i.toJson()],
+        }),
+      ),
+    );
   }
 
   static Map<String, Object?> decode(List<int> bytes) =>
-      (jsonDecode(utf8.decode(gzip.decode(bytes))) as Map).cast<String, Object?>();
+      (jsonDecode(utf8.decode(gzip.decode(bytes))) as Map)
+          .cast<String, Object?>();
 
   /// The stored envelope with `sentAt` set to [now] (it was stamped when
   /// queued, possibly days earlier).
@@ -52,13 +61,11 @@ abstract final class EnvelopeCodec {
 class EnvelopeResponse {
   const EnvelopeResponse(this.accepted, this.rejected);
 
-  factory EnvelopeResponse.fromJson(Map<String, Object?> j) => EnvelopeResponse(
-        j['accepted'] as int? ?? 0,
-        [
-          for (final r in (j['rejected'] as List?) ?? const [])
-            if (r is Map) '${r['index']}: ${r['reason']}',
-        ],
-      );
+  factory EnvelopeResponse.fromJson(Map<String, Object?> j) =>
+      EnvelopeResponse(j['accepted'] as int? ?? 0, [
+        for (final r in (j['rejected'] as List?) ?? const [])
+          if (r is Map) '${r['index']}: ${r['reason']}',
+      ]);
 
   final int accepted;
   final List<String> rejected;

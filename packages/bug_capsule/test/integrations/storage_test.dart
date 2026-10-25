@@ -9,7 +9,8 @@ class FakeSession implements BugCapsuleSession {
   @override
   final ReplayContext? replay;
   @override
-  BugCapsuleConfig get config => const BugCapsuleConfig(appVersion: '1', appBuild: '1');
+  BugCapsuleConfig get config =>
+      const BugCapsuleConfig(appVersion: '1', appBuild: '1');
   @override
   CaptureMode get mode => CaptureMode.qa;
   @override
@@ -41,32 +42,62 @@ class FakeReplay implements ReplayContext {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('snapshots redact sensitive keys and secrets inside JSON string values', () async {
-    SharedPreferences.setMockInitialValues({
-      'session_token': 'synthStoredToken1',
-      'auth_state': jsonEncode({'accessToken': 'synthStoredToken2', 'user': 'ann'}),
-      'recent': ['ok', 'Bearer synthStoredBearer3'],
-      'theme': 'dark',
-      'launches': 3,
-    });
-    final storage = BugCapsuleSharedPreferences();
-    await storage.setUp(FakeSession());
-    final snapshot = await storage.snapshot(CheckpointKind.launch) as Map;
-    final raw = jsonEncode(snapshot);
-    for (final s in ['synthStoredToken1', 'synthStoredToken2', 'synthStoredBearer3']) {
-      expect(raw, isNot(contains(s)));
-    }
-    expect((snapshot['theme'] as Map)['value'], 'dark');
-    expect((snapshot['launches'] as Map)['value'], 3);
-    expect(jsonDecode((snapshot['auth_state'] as Map)['value'] as String), {'accessToken': '[REDACTED]', 'user': 'ann'});
+  test(
+    'snapshots redact sensitive keys and secrets inside JSON string values',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'session_token': 'synthStoredToken1',
+        'auth_state': jsonEncode({
+          'accessToken': 'synthStoredToken2',
+          'user': 'ann',
+        }),
+        'recent': ['ok', 'Bearer synthStoredBearer3'],
+        'theme': 'dark',
+        'launches': 3,
+      });
+      final storage = BugCapsuleSharedPreferences();
+      await storage.setUp(FakeSession());
+      final snapshot = await storage.snapshot(CheckpointKind.launch) as Map;
+      final raw = jsonEncode(snapshot);
+      for (final s in [
+        'synthStoredToken1',
+        'synthStoredToken2',
+        'synthStoredBearer3',
+      ]) {
+        expect(raw, isNot(contains(s)));
+      }
+      expect((snapshot['theme'] as Map)['value'], 'dark');
+      expect((snapshot['launches'] as Map)['value'], 3);
+      expect(jsonDecode((snapshot['auth_state'] as Map)['value'] as String), {
+        'accessToken': '[REDACTED]',
+        'user': 'ann',
+      });
 
-    final eligibility = EligibilityBuilder();
-    storage.describeEligibility(eligibility, const RecordedWindow(
-        checkpoint: Checkpoint(kind: CheckpointKind.launch, t: 0, wallClockMs: 0, afterSeq: 0),
-        events: [], droppedEvents: 0, hasGap: false));
-    expect(eligibility.build().missing.map((m) => m.dependency),
-        containsAll(['storage.session_token', 'storage.auth_state', 'storage.recent']));
-  });
+      final eligibility = EligibilityBuilder();
+      storage.describeEligibility(
+        eligibility,
+        const RecordedWindow(
+          checkpoint: Checkpoint(
+            kind: CheckpointKind.launch,
+            t: 0,
+            wallClockMs: 0,
+            afterSeq: 0,
+          ),
+          events: [],
+          droppedEvents: 0,
+          hasGap: false,
+        ),
+      );
+      expect(
+        eligibility.build().missing.map((m) => m.dependency),
+        containsAll([
+          'storage.session_token',
+          'storage.auth_state',
+          'storage.recent',
+        ]),
+      );
+    },
+  );
 
   test('restore reports redacted entries instead of failing', () async {
     SharedPreferences.setMockInitialValues({});
@@ -79,6 +110,9 @@ void main() {
     }, FakeSession(replay: replay));
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('theme'), 'dark');
-    expect(replay.divergences, containsAll(['storage.redacted auth_token', 'storage.redacted pin']));
+    expect(
+      replay.divergences,
+      containsAll(['storage.redacted auth_token', 'storage.redacted pin']),
+    );
   });
 }

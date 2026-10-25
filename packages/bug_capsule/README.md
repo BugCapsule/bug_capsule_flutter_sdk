@@ -49,7 +49,7 @@ timing, so races and data-dependent bugs come back.
 ## Install
 
 ```bash
-flutter pub add bug_capsule:^0.4.1-beta.2
+flutter pub add bug_capsule:^0.4.1-beta.3
 ```
 
 Everything ships in this one package, with one import:
@@ -259,7 +259,7 @@ The `bugcapsule` CLI ships in the same package and replays capsules from every
 BugCapsule SDK (Flutter, Android, iOS and web).
 
 ```bash
-dart pub global activate bug_capsule 0.4.1-beta.2
+dart pub global activate bug_capsule 0.4.1-beta.3
 bugcapsule --version
 ```
 
@@ -411,6 +411,9 @@ Full list: [docs/how-it-works.md#limitations](https://github.com/BugCapsule/bug_
 
 ## Demo app
 
+A minimal [published example](https://pub.dev/packages/bug_capsule/example)
+shows initialization, navigation monitoring, and manual capsule capture.
+
 [`example/bug_capsule_demo`](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/example/bug_capsule_demo) is a shop app with
 five planted "can't reproduce" bugs. With an SDK token and the CLI logged in:
 
@@ -463,5 +466,4 @@ Older upgrades: [docs/upgrading.md](https://github.com/BugCapsule/bug_capsule_fl
 
 Questions or access requests: [contact@bugcapsule.com](mailto:contact@bugcapsule.com).
 
-This SDK is proprietary software of Bug Capsule. Use, copying, modification
-and distribution require prior written permission. See [LICENSE](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/LICENSE).
+This SDK and its bundled CLI are available under the MIT License. See [LICENSE](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/LICENSE).

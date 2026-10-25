@@ -62,10 +62,14 @@ class BugCapsuleGoRouter extends BugCapsuleIntegration {
     if (hub != null && session?.replay == null) {
       try {
         // Named after the route pattern (`/product/:id`), never the location.
-        hub.onNavigation(config.fullPath.isNotEmpty ? config.fullPath : config.uri.path);
+        hub.onNavigation(
+          config.fullPath.isNotEmpty ? config.fullPath : config.uri.path,
+        );
         // A recording session derives the breadcrumb from the route event.
         if (session == null || !session.isRecording) {
-          hub.navigationBreadcrumb(session == null ? location : _redact(session, config.uri));
+          hub.navigationBreadcrumb(
+            session == null ? location : _redact(session, config.uri),
+          );
         }
       } catch (_) {
         // Monitoring never breaks navigation.
@@ -100,19 +104,33 @@ class BugCapsuleGoRouter extends BugCapsuleIntegration {
     if (data is Map && data['location'] is String) {
       _restoredLocation = data['location'] as String;
       if (_restoredLocation!.contains(Redactor.placeholder) ||
-          _restoredLocation!.contains(Uri.encodeQueryComponent(Redactor.placeholder))) {
-        session.replay?.diverge('route.redacted', 'restored location has redacted parameters');
+          _restoredLocation!.contains(
+            Uri.encodeQueryComponent(Redactor.placeholder),
+          )) {
+        session.replay?.diverge(
+          'route.redacted',
+          'restored location has redacted parameters',
+        );
       }
       if (data['hasExtra'] == true) {
-        session.replay?.diverge('route.extra', 'route extra object at $_restoredLocation is not restored');
+        session.replay?.diverge(
+          'route.extra',
+          'route extra object at $_restoredLocation is not restored',
+        );
       }
     }
   }
 
   @override
-  void describeEligibility(EligibilityBuilder eligibility, RecordedWindow window) {
+  void describeEligibility(
+    EligibilityBuilder eligibility,
+    RecordedWindow window,
+  ) {
     if (window.checkpoint.kind == CheckpointKind.periodic && _sawExtra) {
-      eligibility.missing('route.extra', 'navigation used GoRouter `extra` objects, which are not restored');
+      eligibility.missing(
+        'route.extra',
+        'navigation used GoRouter `extra` objects, which are not restored',
+      );
     }
   }
 }

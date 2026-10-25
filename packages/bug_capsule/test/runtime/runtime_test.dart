@@ -39,22 +39,27 @@ class FakeTransport implements BugCapsuleTransport {
   Future<ConfigFetchResult> fetchConfig() async {
     fetches++;
     if (offline) return const ConfigFetchFailed('offline');
-    return ConfigFetched(RemoteCaptureConfig(
-      enabled: enabled,
-      sampleRate: sampleRate,
-      maxCapsuleBytes: 5 * 1024 * 1024,
-      captureNetworkBodies: bodies,
-      redactKeys: redactKeys,
-      configTtlSeconds: 300,
-      fetchedAtMs: DateTime.now().millisecondsSinceEpoch,
-    ));
+    return ConfigFetched(
+      RemoteCaptureConfig(
+        enabled: enabled,
+        sampleRate: sampleRate,
+        maxCapsuleBytes: 5 * 1024 * 1024,
+        captureNetworkBodies: bodies,
+        redactKeys: redactKeys,
+        configTtlSeconds: 300,
+        fetchedAtMs: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
   }
 
   @override
   Future<UploadResult> upload(List<int> bytes) async {
     await gate?.future;
     uploads.add(bytes);
-    return UploadResult(UploadStatus.uploaded, serverId: 'srv-${uploads.length}');
+    return UploadResult(
+      UploadStatus.uploaded,
+      serverId: 'srv-${uploads.length}',
+    );
   }
 
   @override
@@ -73,11 +78,11 @@ class SecretIntegration extends BugCapsuleIntegration {
 
   @override
   Object? snapshot(CheckpointKind kind) => {
-        'session': {'accessToken': 'synthAccessToken001'},
-        'header': 'Bearer synthBearer0123456789',
-        'next': 'https://api.test/page?token=synthQueryToken002',
-        'blob': jsonEncode({'refresh_token': 'synthRefresh003', 'theme': 'dark'}),
-      };
+    'session': {'accessToken': 'synthAccessToken001'},
+    'header': 'Bearer synthBearer0123456789',
+    'next': 'https://api.test/page?token=synthQueryToken002',
+    'blob': jsonEncode({'refresh_token': 'synthRefresh003', 'theme': 'dark'}),
+  };
 }
 
 class HangingIntegration extends BugCapsuleIntegration {
@@ -93,7 +98,8 @@ class ThrowingIntegration extends BugCapsuleIntegration {
   String get name => 'broken';
 
   @override
-  Future<void> setUp(BugCapsuleSession session) async => throw StateError('setup exploded');
+  Future<void> setUp(BugCapsuleSession session) async =>
+      throw StateError('setup exploded');
 }
 
 /// Returns scripted values for sampling decisions.
@@ -156,7 +162,12 @@ void main() {
         autoCaptureOnFailure: false,
         labels: labels,
         productionSampleRate: productionSampleRate,
-        backend: backend ? const BugCapsuleBackendConfig(url: 'https://bugcapsule.test', ingestKey: 'bci_test') : null,
+        backend: backend
+            ? const BugCapsuleBackendConfig(
+                url: 'https://bugcapsule.test',
+                ingestKey: 'bci_test',
+              )
+            : null,
       ),
       integrations: integrations,
       appRunner: () => ran = true,
@@ -166,7 +177,8 @@ void main() {
   }
 
   Future<Map<String, Object?>> capsuleJson(CaptureResult r) async =>
-      (jsonDecode(utf8.decode(gzip.decode(await r.file.readAsBytes()))) as Map).cast<String, Object?>();
+      (jsonDecode(utf8.decode(gzip.decode(await r.file.readAsBytes()))) as Map)
+          .cast<String, Object?>();
 
   group('isolation', () {
     test('the app starts when storage cannot be opened', () async {
@@ -176,18 +188,28 @@ void main() {
       expect(logs.join('\n'), contains('capture setup failed'));
     });
 
-    test('the app starts and records when an integration fails to set up', () async {
-      expect(await start(integrations: [ThrowingIntegration()]), isTrue);
-      expect(BugCapsule.isRecording, isTrue);
-      expect(logs.join('\n'), contains('broken setup failed'));
-    });
+    test(
+      'the app starts and records when an integration fails to set up',
+      () async {
+        expect(await start(integrations: [ThrowingIntegration()]), isTrue);
+        expect(BugCapsule.isRecording, isTrue);
+        expect(logs.join('\n'), contains('broken setup failed'));
+      },
+    );
 
     test('the app starts when capture setup never finishes', () async {
       BugCapsule.debugOverrides = BugCapsuleTestOverrides(
-          storageDirectory: dir, transport: transport, setupTimeout: const Duration(milliseconds: 200));
+        storageDirectory: dir,
+        transport: transport,
+        setupTimeout: const Duration(milliseconds: 200),
+      );
       var ran = false;
       await BugCapsule.init(
-        config: const BugCapsuleConfig(appVersion: '1', appBuild: '1', mode: CaptureMode.qa),
+        config: const BugCapsuleConfig(
+          appVersion: '1',
+          appBuild: '1',
+          mode: CaptureMode.qa,
+        ),
         integrations: [HangingIntegration()],
         appRunner: () => ran = true,
       ).timeout(const Duration(seconds: 2));
@@ -196,10 +218,17 @@ void main() {
     });
 
     test('the app starts with capture disabled locally', () async {
-      BugCapsule.debugOverrides = BugCapsuleTestOverrides(storageDirectory: dir, transport: transport);
+      BugCapsule.debugOverrides = BugCapsuleTestOverrides(
+        storageDirectory: dir,
+        transport: transport,
+      );
       var ran = false;
       await BugCapsule.init(
-        config: const BugCapsuleConfig(appVersion: '1', appBuild: '1', enabled: false),
+        config: const BugCapsuleConfig(
+          appVersion: '1',
+          appBuild: '1',
+          enabled: false,
+        ),
         appRunner: () => ran = true,
       );
       expect(ran, isTrue);
@@ -212,7 +241,10 @@ void main() {
     final custom = SecretIntegration();
     await start(
       integrations: [custom],
-      labels: {'apiKey': 'synthLabelKey008', 'ticket': 'Bearer synthLabelBearer0123456'},
+      labels: {
+        'apiKey': 'synthLabelKey008',
+        'ticket': 'Bearer synthLabelBearer0123456',
+      },
     );
     custom.session!.record('custom.event', {
       'auth': {'refresh_token': 'synthRefresh003'},
@@ -225,8 +257,14 @@ void main() {
     BugCapsule.trackText('field7', pin, sensitive: true);
     pin.text = 'synthPinValue005';
     BugCapsule.log('calling https://api.test/x?access_token=synthLogToken006');
-    BugCapsule.actionWithPayload('pay', (_) {})({'cardNumber': '4242424242424242', 'amount': 5});
-    BugCapsule.session!.reportError(StateError('upload failed token=synthFailToken007'), StackTrace.current);
+    BugCapsule.actionWithPayload('pay', (_) {})({
+      'cardNumber': '4242424242424242',
+      'amount': 5,
+    });
+    BugCapsule.session!.reportError(
+      StateError('upload failed token=synthFailToken007'),
+      StackTrace.current,
+    );
 
     final result = (await BugCapsule.capture(note: 'password=synthNote009'))!;
     final raw = jsonEncode(await capsuleJson(result));
@@ -246,83 +284,112 @@ void main() {
     expect(capsule.manifest.labels['apiKey'], '[REDACTED]');
   });
 
-  test('beforeRecord and beforeCheckpoint can drop or rewrite data; a throwing hook drops', () async {
-    BugCapsule.debugOverrides = BugCapsuleTestOverrides(storageDirectory: dir);
-    await BugCapsule.init(
-      config: BugCapsuleConfig(
-        appVersion: '1',
-        appBuild: '1',
-        mode: CaptureMode.qa,
-        beforeRecord: (type, data) => switch (type) {
-          'drop.me' => null,
-          'boom' => throw StateError('hook bug'),
-          _ => {...data, 'tag': 'seen'},
-        },
-        beforeCheckpoint: (name, data) => name == 'custom' ? null : data,
-      ),
-      integrations: [SecretIntegration()],
-      appRunner: () {},
-    );
-    BugCapsule.session!.record('keep', {'a': 1});
-    BugCapsule.session!.record('drop.me', {'a': 2});
-    BugCapsule.session!.record('boom', {'a': 3});
-    BugCapsule.fail('x');
-    final capsule = CapsuleCodec.decode(await (await BugCapsule.capture())!.file.readAsBytes());
-    expect(capsule.events.map((e) => e.type), containsAllInOrder(['keep', 'failure']));
-    expect(capsule.events.where((e) => e.type == 'drop.me' || e.type == 'boom'), isEmpty);
-    expect(capsule.eventsOfType('keep').single.data['tag'], 'seen');
-    expect(capsule.checkpoint.data.containsKey('custom'), isFalse);
-  });
+  test(
+    'beforeRecord and beforeCheckpoint can drop or rewrite data; a throwing hook drops',
+    () async {
+      BugCapsule.debugOverrides = BugCapsuleTestOverrides(
+        storageDirectory: dir,
+      );
+      await BugCapsule.init(
+        config: BugCapsuleConfig(
+          appVersion: '1',
+          appBuild: '1',
+          mode: CaptureMode.qa,
+          beforeRecord: (type, data) => switch (type) {
+            'drop.me' => null,
+            'boom' => throw StateError('hook bug'),
+            _ => {...data, 'tag': 'seen'},
+          },
+          beforeCheckpoint: (name, data) => name == 'custom' ? null : data,
+        ),
+        integrations: [SecretIntegration()],
+        appRunner: () {},
+      );
+      BugCapsule.session!.record('keep', {'a': 1});
+      BugCapsule.session!.record('drop.me', {'a': 2});
+      BugCapsule.session!.record('boom', {'a': 3});
+      BugCapsule.fail('x');
+      final capsule = CapsuleCodec.decode(
+        await (await BugCapsule.capture())!.file.readAsBytes(),
+      );
+      expect(
+        capsule.events.map((e) => e.type),
+        containsAllInOrder(['keep', 'failure']),
+      );
+      expect(
+        capsule.events.where((e) => e.type == 'drop.me' || e.type == 'boom'),
+        isEmpty,
+      );
+      expect(capsule.eventsOfType('keep').single.data['tag'], 'seen');
+      expect(capsule.checkpoint.data.containsKey('custom'), isFalse);
+    },
+  );
 
   group('remote config', () {
-    test('kill switch during an upload: no new upload starts, queue and history are purged', () async {
-      await start();
-      expect(BugCapsule.isRecording, isTrue);
-      transport.gate = Completer<void>();
-      BugCapsule.fail('first');
-      final a = BugCapsule.capture();
-      await settle();
-      BugCapsule.fail('second');
-      final b = BugCapsule.capture();
-      await settle();
-      expect(transport.uploads, isEmpty, reason: 'first upload is on the wire');
+    test(
+      'kill switch during an upload: no new upload starts, queue and history are purged',
+      () async {
+        await start();
+        expect(BugCapsule.isRecording, isTrue);
+        transport.gate = Completer<void>();
+        BugCapsule.fail('first');
+        final a = BugCapsule.capture();
+        await settle();
+        BugCapsule.fail('second');
+        final b = BugCapsule.capture();
+        await settle();
+        expect(
+          transport.uploads,
+          isEmpty,
+          reason: 'first upload is on the wire',
+        );
 
-      transport.enabled = false;
-      await BugCapsule.refreshRemoteConfig();
-      await settle();
-      expect(BugCapsule.isRecording, isFalse);
-      expect(Directory('${dir.path}/outbox').listSync(), isEmpty);
-      expect(await BugCapsule.savedCaptures(), isEmpty);
+        transport.enabled = false;
+        await BugCapsule.refreshRemoteConfig();
+        await settle();
+        expect(BugCapsule.isRecording, isFalse);
+        expect(Directory('${dir.path}/outbox').listSync(), isEmpty);
+        expect(await BugCapsule.savedCaptures(), isEmpty);
 
-      transport.gate!.complete();
-      await a;
-      await b;
-      expect(transport.uploads, hasLength(1), reason: 'only the upload already in flight finishes');
-      expect(await BugCapsule.capture(), isNull);
-      await BugCapsule.flushUploads();
-      expect(transport.uploads, hasLength(1));
-    });
+        transport.gate!.complete();
+        await a;
+        await b;
+        expect(
+          transport.uploads,
+          hasLength(1),
+          reason: 'only the upload already in flight finishes',
+        );
+        expect(await BugCapsule.capture(), isNull);
+        await BugCapsule.flushUploads();
+        expect(transport.uploads, hasLength(1));
+      },
+    );
 
-    test('a capture being encoded when the kill switch fires is discarded', () async {
-      final entered = Completer<void>();
-      final release = Completer<void>();
-      await start(encodeCapsule: (capsule) async {
-        entered.complete();
-        await release.future;
-        return CapsuleCodec.encode(capsule);
-      });
-      BugCapsule.fail('x');
-      final pending = BugCapsule.capture();
-      await entered.future;
-      transport.enabled = false;
-      await BugCapsule.refreshRemoteConfig();
-      release.complete();
-      expect(await pending, isNull);
-      await settle();
-      expect(transport.uploads, isEmpty);
-      expect(Directory('${dir.path}/outbox').listSync(), isEmpty);
-      expect(await BugCapsule.savedCaptures(), isEmpty);
-    });
+    test(
+      'a capture being encoded when the kill switch fires is discarded',
+      () async {
+        final entered = Completer<void>();
+        final release = Completer<void>();
+        await start(
+          encodeCapsule: (capsule) async {
+            entered.complete();
+            await release.future;
+            return CapsuleCodec.encode(capsule);
+          },
+        );
+        BugCapsule.fail('x');
+        final pending = BugCapsule.capture();
+        await entered.future;
+        transport.enabled = false;
+        await BugCapsule.refreshRemoteConfig();
+        release.complete();
+        expect(await pending, isNull);
+        await settle();
+        expect(transport.uploads, isEmpty);
+        expect(Directory('${dir.path}/outbox').listSync(), isEmpty);
+        expect(await BugCapsule.savedCaptures(), isEmpty);
+      },
+    );
 
     test('turning bodies off strips bodies already buffered', () async {
       await start();
@@ -336,45 +403,62 @@ void main() {
       await BugCapsule.refreshRemoteConfig();
       expect(BugCapsule.session!.captureNetworkBodies, isFalse);
       BugCapsule.fail('x');
-      final capsule = CapsuleCodec.decode(await (await BugCapsule.capture())!.file.readAsBytes());
+      final capsule = CapsuleCodec.decode(
+        await (await BugCapsule.capture())!.file.readAsBytes(),
+      );
       final http = capsule.eventsOfType(EventTypes.http).single.data;
       expect(http['responseBody'], isNull);
       expect(http['bodyEncoding'], 'omitted');
     });
 
-    test('an exchange that finishes after bodies were turned off is kept without its body', () async {
-      await start();
-      transport.bodies = false;
-      await BugCapsule.refreshRemoteConfig();
-      // Dio recorded this request with bodies on when it started.
-      BugCapsule.session!.record(EventTypes.http, {
-        'key': 'GET api.test/me',
-        'status': 200,
-        'responseBody': {'name': 'synthetic-late-body'},
-        'bodyEncoding': 'json',
-      });
-      BugCapsule.fail('x');
-      final result = (await BugCapsule.capture())!;
-      expect(jsonEncode(await capsuleJson(result)), isNot(contains('synthetic-late-body')));
-    });
+    test(
+      'an exchange that finishes after bodies were turned off is kept without its body',
+      () async {
+        await start();
+        transport.bodies = false;
+        await BugCapsule.refreshRemoteConfig();
+        // Dio recorded this request with bodies on when it started.
+        BugCapsule.session!.record(EventTypes.http, {
+          'key': 'GET api.test/me',
+          'status': 200,
+          'responseBody': {'name': 'synthetic-late-body'},
+          'bodyEncoding': 'json',
+        });
+        BugCapsule.fail('x');
+        final result = (await BugCapsule.capture())!;
+        expect(
+          jsonEncode(await capsuleJson(result)),
+          isNot(contains('synthetic-late-body')),
+        );
+      },
+    );
 
-    test('new redaction keys drop buffered exchanges (their keys used the old rules)', () async {
-      await start();
-      BugCapsule.session!.record(EventTypes.http, {
-        'key': 'GET api.test/me?member=synthMember11',
-        'url': 'https://api.test/me?member=synthMember11',
-        'status': 200,
-        'bodyEncoding': 'omitted',
-      });
-      transport.redactKeys = ['member'];
-      await BugCapsule.refreshRemoteConfig();
-      BugCapsule.fail('x');
-      final result = (await BugCapsule.capture())!;
-      expect(jsonEncode(await capsuleJson(result)), isNot(contains('synthMember11')));
-      final capsule = CapsuleCodec.decode(await result.file.readAsBytes());
-      expect(capsule.eventsOfType(EventTypes.http), isEmpty);
-      expect(capsule.manifest.eligibility.missing.map((m) => m.dependency), contains('events.redaction'));
-    });
+    test(
+      'new redaction keys drop buffered exchanges (their keys used the old rules)',
+      () async {
+        await start();
+        BugCapsule.session!.record(EventTypes.http, {
+          'key': 'GET api.test/me?member=synthMember11',
+          'url': 'https://api.test/me?member=synthMember11',
+          'status': 200,
+          'bodyEncoding': 'omitted',
+        });
+        transport.redactKeys = ['member'];
+        await BugCapsule.refreshRemoteConfig();
+        BugCapsule.fail('x');
+        final result = (await BugCapsule.capture())!;
+        expect(
+          jsonEncode(await capsuleJson(result)),
+          isNot(contains('synthMember11')),
+        );
+        final capsule = CapsuleCodec.decode(await result.file.readAsBytes());
+        expect(capsule.eventsOfType(EventTypes.http), isEmpty);
+        expect(
+          capsule.manifest.eligibility.missing.map((m) => m.dependency),
+          contains('events.redaction'),
+        );
+      },
+    );
 
     test('an oversized QA note cannot make the capsule unreadable', () async {
       await start();
@@ -385,58 +469,84 @@ void main() {
       expect(result.upload!.status, isNot(UploadStatus.rejected));
     });
 
-    test('new remote redaction keys apply to buffered events and travel in the manifest', () async {
-      await start();
-      BugCapsule.session!.record('custom', {'loyaltyId': 'synthLoyalty010'});
-      transport.redactKeys = ['loyaltyId'];
-      await BugCapsule.refreshRemoteConfig();
-      BugCapsule.fail('x');
-      final result = (await BugCapsule.capture())!;
-      expect(jsonEncode(await capsuleJson(result)), isNot(contains('synthLoyalty010')));
-      final capsule = CapsuleCodec.decode(await result.file.readAsBytes());
-      expect(capsule.manifest.redactionKeys, contains('loyaltyId'));
-    });
+    test(
+      'new remote redaction keys apply to buffered events and travel in the manifest',
+      () async {
+        await start();
+        BugCapsule.session!.record('custom', {'loyaltyId': 'synthLoyalty010'});
+        transport.redactKeys = ['loyaltyId'];
+        await BugCapsule.refreshRemoteConfig();
+        BugCapsule.fail('x');
+        final result = (await BugCapsule.capture())!;
+        expect(
+          jsonEncode(await capsuleJson(result)),
+          isNot(contains('synthLoyalty010')),
+        );
+        final capsule = CapsuleCodec.decode(await result.file.readAsBytes());
+        expect(capsule.manifest.redactionKeys, contains('loyaltyId'));
+      },
+    );
 
-    test('with no config yet, captures wait offline and upload once a fetch succeeds', () async {
-      transport.offline = true;
-      await start();
-      expect(BugCapsule.isRecording, isTrue);
-      BugCapsule.fail('x');
-      final r = (await BugCapsule.capture())!;
-      expect(r.upload!.status, UploadStatus.retryLater);
-      expect(transport.uploads, isEmpty);
-      transport.offline = false;
-      await BugCapsule.flushUploads();
-      expect(transport.uploads, hasLength(1));
-    });
+    test(
+      'with no config yet, captures wait offline and upload once a fetch succeeds',
+      () async {
+        transport.offline = true;
+        await start();
+        expect(BugCapsule.isRecording, isTrue);
+        BugCapsule.fail('x');
+        final r = (await BugCapsule.capture())!;
+        expect(r.upload!.status, UploadStatus.retryLater);
+        expect(transport.uploads, isEmpty);
+        transport.offline = false;
+        await BugCapsule.flushUploads();
+        expect(transport.uploads, hasLength(1));
+      },
+    );
 
-    test('production sampling uses the lower of the app cap and the remote rate', () async {
-      transport.sampleRate = 0.9;
-      // Cap 0.5: 0.6 is above it, so this session does not record.
-      await start(mode: CaptureMode.production, productionSampleRate: 0.5, random: ScriptedRandom([0.6]));
-      expect(BugCapsule.isRecording, isFalse);
-    });
+    test(
+      'production sampling uses the lower of the app cap and the remote rate',
+      () async {
+        transport.sampleRate = 0.9;
+        // Cap 0.5: 0.6 is above it, so this session does not record.
+        await start(
+          mode: CaptureMode.production,
+          productionSampleRate: 0.5,
+          random: ScriptedRandom([0.6]),
+        );
+        expect(BugCapsule.isRecording, isFalse);
+      },
+    );
 
-    test('lowering the sample rate keeps a session with probability new/old', () async {
-      // Cached rate 1.0 → effective 0.5 (cap). 0.3 < 0.5: recording.
-      await start(mode: CaptureMode.production, productionSampleRate: 0.5, random: ScriptedRandom([0.3, 0.7]));
-      expect(BugCapsule.isRecording, isTrue);
-      // 0.5 → 0.1 keeps with probability 0.2; the next draw (0.7) drops it.
-      transport.sampleRate = 0.1;
-      await BugCapsule.refreshRemoteConfig();
-      expect(BugCapsule.isRecording, isFalse);
-    });
+    test(
+      'lowering the sample rate keeps a session with probability new/old',
+      () async {
+        // Cached rate 1.0 → effective 0.5 (cap). 0.3 < 0.5: recording.
+        await start(
+          mode: CaptureMode.production,
+          productionSampleRate: 0.5,
+          random: ScriptedRandom([0.3, 0.7]),
+        );
+        expect(BugCapsule.isRecording, isTrue);
+        // 0.5 → 0.1 keeps with probability 0.2; the next draw (0.7) drops it.
+        transport.sampleRate = 0.1;
+        await BugCapsule.refreshRemoteConfig();
+        expect(BugCapsule.isRecording, isFalse);
+      },
+    );
 
-    test('a cached kill switch applies at the next launch even offline', () async {
-      transport.enabled = false;
-      await start();
-      await BugCapsule.resetForTest();
-      transport
-        ..enabled = true
-        ..offline = true;
-      await start();
-      expect(BugCapsule.isRecording, isFalse);
-    });
+    test(
+      'a cached kill switch applies at the next launch even offline',
+      () async {
+        transport.enabled = false;
+        await start();
+        await BugCapsule.resetForTest();
+        transport
+          ..enabled = true
+          ..offline = true;
+        await start();
+        expect(BugCapsule.isRecording, isFalse);
+      },
+    );
   });
 }
 

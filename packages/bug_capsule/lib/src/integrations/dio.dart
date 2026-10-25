@@ -36,17 +36,23 @@ import '../runtime/runtime.dart';
 class BugCapsuleDio extends BugCapsuleIntegration {
   BugCapsuleDio({
     List<EndpointRule> rules = const [],
-    Set<String> ignoreQuery = const {'_', 'ts', 'timestamp', 'nonce', 'cachebust'},
+    Set<String> ignoreQuery = const {
+      '_',
+      'ts',
+      'timestamp',
+      'nonce',
+      'cachebust',
+    },
     Set<String> ignoreBodyFields = const {},
     this.maxBinaryBytes = 64 * 1024,
     this.maxKeyBodyBytes = 64 * 1024,
     this.maxBodyWait = const Duration(seconds: 30),
     this.exclude,
   }) : keys = RequestKeyBuilder(
-          rules: rules,
-          globalIgnoreQuery: ignoreQuery,
-          globalIgnoreBodyFields: ignoreBodyFields,
-        );
+         rules: rules,
+         globalIgnoreQuery: ignoreQuery,
+         globalIgnoreBodyFields: ignoreBodyFields,
+       );
 
   final RequestKeyBuilder keys;
   final int maxBinaryBytes;
@@ -97,13 +103,20 @@ class BugCapsuleDio extends BugCapsuleIntegration {
   }
 
   @override
-  void describeEligibility(EligibilityBuilder eligibility, RecordedWindow window) =>
-      HttpBodies.describeEligibility(eligibility, window);
+  void describeEligibility(
+    EligibilityBuilder eligibility,
+    RecordedWindow window,
+  ) => HttpBodies.describeEligibility(eligibility, window);
 
   // ------------------------------------------------------------------ bodies
 
   (Object?, String) _decode(List<int> bytes, String? contentType) =>
-      HttpBodies.decode(bytes, contentType, _session!.redactor, maxBinaryBytes: maxBinaryBytes);
+      HttpBodies.decode(
+        bytes,
+        contentType,
+        _session!.redactor,
+        maxBinaryBytes: maxBinaryBytes,
+      );
 
   /// The request key. Capture and replay both call this before the request
   /// is sent, with the same prefetched body prefix (a body is hashed when it
@@ -112,7 +125,10 @@ class BugCapsuleDio extends BugCapsuleIntegration {
     final uri = _session!.redactor.redactUri(options.uri);
     Object? keyBody;
     final contentType = _contentType(options);
-    if (body != null && body.complete && body.length <= maxKeyBodyBytes && !HttpBodies.isMultipart(contentType)) {
+    if (body != null &&
+        body.complete &&
+        body.length <= maxKeyBodyBytes &&
+        !HttpBodies.isMultipart(contentType)) {
       keyBody = _decode(body.bytes, contentType).$1;
     }
     return keys.keyFor(options.method, uri, keyBody);
@@ -135,27 +151,52 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     final session = _bugCapsule._session;
-    if (session == null) return _inner.fetch(options, requestStream, cancelFuture);
+    if (session == null) {
+      return _inner.fetch(options, requestStream, cancelFuture);
+    }
     final replay = session.replay;
-    if (replay != null) return _replay(session, replay, options, requestStream, cancelFuture);
+    if (replay != null) {
+      return _replay(session, replay, options, requestStream, cancelFuture);
+    }
     // Monitoring: an http.client span, and trace headers for propagation
     // targets. They are added for the transport only: the capsule records
     // the app's headers, and request keys never include headers.
-    final span = MonitoringHub.current?.startHttpSpan(options.method, options.uri, options.headers);
-    final appHeaders = span == null || span.headers.isEmpty ? null : Map<String, dynamic>.of(options.headers);
+    final span = MonitoringHub.current?.startHttpSpan(
+      options.method,
+      options.uri,
+      options.headers,
+    );
+    final appHeaders = span == null || span.headers.isEmpty
+        ? null
+        : Map<String, dynamic>.of(options.headers);
     if (appHeaders != null) options.headers.addAll(span!.headers);
     try {
       if (!session.isRecording) {
         try {
-          final response = await _inner.fetch(options, requestStream, cancelFuture);
+          final response = await _inner.fetch(
+            options,
+            requestStream,
+            cancelFuture,
+          );
           span?.finish(statusCode: response.statusCode, breadcrumb: true);
           return response;
         } catch (e) {
-          span?.finish(error: e, cancelled: e is DioException && e.type == DioExceptionType.cancel, breadcrumb: true);
+          span?.finish(
+            error: e,
+            cancelled: e is DioException && e.type == DioExceptionType.cancel,
+            breadcrumb: true,
+          );
           rethrow;
         }
       }
-      return await _capture(session, options, requestStream, cancelFuture, span, appHeaders);
+      return await _capture(
+        session,
+        options,
+        requestStream,
+        cancelFuture,
+        span,
+        appHeaders,
+      );
     } finally {
       if (appHeaders != null) {
         options.headers
@@ -178,10 +219,13 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
     final captureBodies = session.captureNetworkBodies && !excluded;
     final requestType = BugCapsuleDio._contentType(options);
     final requestLimit = captureBodies && !HttpBodies.isMultipart(requestType)
-        ? (session.maxBodyBytes > _bugCapsule.maxKeyBodyBytes ? session.maxBodyBytes : _bugCapsule.maxKeyBodyBytes)
+        ? (session.maxBodyBytes > _bugCapsule.maxKeyBodyBytes
+              ? session.maxBodyBytes
+              : _bugCapsule.maxKeyBodyBytes)
         : _bugCapsule.maxKeyBodyBytes;
-    final prefetched =
-        requestStream == null ? null : await PrefetchedBody.read(requestStream, _bugCapsule.maxKeyBodyBytes);
+    final prefetched = requestStream == null
+        ? null
+        : await PrefetchedBody.read(requestStream, _bugCapsule.maxKeyBodyBytes);
     // Key and occurrence are fixed when the request starts, in request order,
     // exactly as replay looks them up.
     String? key;
@@ -192,7 +236,9 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
     } catch (_) {
       // Keying failed: the exchange is not recorded, the request still runs.
     }
-    final request = prefetched == null ? null : BodyTap(prefetched.stream(), requestLimit);
+    final request = prefetched == null
+        ? null
+        : BodyTap(prefetched.stream(), requestLimit);
 
     Map<String, Object?> base() {
       Object? requestBody;
@@ -200,11 +246,19 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
       if (request != null && prefetched!.length > 0) {
         if (!captureBodies || HttpBodies.isMultipart(requestType)) {
           requestEncoding = 'omitted';
-        } else if (request.complete && !request.overflowed(session.maxBodyBytes)) {
-          (requestBody, requestEncoding) = _bugCapsule._decode(request.bytes, requestType);
-        } else if (prefetched.complete && prefetched.length <= session.maxBodyBytes) {
+        } else if (request.complete &&
+            !request.overflowed(session.maxBodyBytes)) {
+          (requestBody, requestEncoding) = _bugCapsule._decode(
+            request.bytes,
+            requestType,
+          );
+        } else if (prefetched.complete &&
+            prefetched.length <= session.maxBodyBytes) {
           // The transport never read the body (e.g. connection refused).
-          (requestBody, requestEncoding) = _bugCapsule._decode(prefetched.bytes, requestType);
+          (requestBody, requestEncoding) = _bugCapsule._decode(
+            prefetched.bytes,
+            requestType,
+          );
         } else {
           requestEncoding = 'truncated';
         }
@@ -216,7 +270,10 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
         'occurrence': occurrence!,
         'method': options.method.toUpperCase(),
         'url': session.redactor.redactUri(options.uri).toString(),
-        if (!excluded) 'requestHeaders': session.redactor.redactHeaders(appHeaders ?? options.headers),
+        if (!excluded)
+          'requestHeaders': session.redactor.redactHeaders(
+            appHeaders ?? options.headers,
+          ),
         'requestBody': requestBody,
         'requestEncoding': requestEncoding,
         if (excluded) 'excluded': true,
@@ -228,37 +285,53 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
       response = await _inner.fetch(options, request?.stream, cancelFuture);
       span?.finish(statusCode: response.statusCode);
     } catch (e) {
-      span?.finish(error: e, cancelled: e is DioException && e.type == DioExceptionType.cancel);
+      span?.finish(
+        error: e,
+        cancelled: e is DioException && e.type == DioExceptionType.cancel,
+      );
       if (key != null) {
-        _record(session, () => {
-              ...base(),
-              'status': 0,
-              'durationMs': started.elapsedMilliseconds,
-              'bodyEncoding': 'omitted',
-              'error': _errorJson(session, e),
-            });
+        _record(
+          session,
+          () => {
+            ...base(),
+            'status': 0,
+            'durationMs': started.elapsedMilliseconds,
+            'bodyEncoding': 'omitted',
+            'error': _errorJson(session, e),
+          },
+        );
       }
       rethrow;
     }
     if (key == null) return response;
 
     Map<String, Object?> head() => {
-          ...base(),
-          'status': response.statusCode,
-          'statusMessage': response.statusMessage,
-          if (!excluded) 'responseHeaders': session.redactor.redactHeaders(response.headers),
-        };
+      ...base(),
+      'status': response.statusCode,
+      'statusMessage': response.statusMessage,
+      if (!excluded)
+        'responseHeaders': session.redactor.redactHeaders(response.headers),
+    };
 
     final contentType = response.headers['content-type']?.join(';');
     final sse = contentType?.toLowerCase().contains('event-stream') ?? false;
     if (sse || !captureBodies) {
       // Nothing to keep: record now and hand the stream over untouched.
-      _record(session, () => {...head(), 'durationMs': started.elapsedMilliseconds, 'bodyEncoding': 'omitted'});
+      _record(
+        session,
+        () => {
+          ...head(),
+          'durationMs': started.elapsedMilliseconds,
+          'bodyEncoding': 'omitted',
+        },
+      );
       return response;
     }
 
     final type = (contentType ?? '').toLowerCase();
-    final limit = HttpBodies.isText(type) ? session.maxBodyBytes : _bugCapsule.maxBinaryBytes;
+    final limit = HttpBodies.isText(type)
+        ? session.maxBodyBytes
+        : _bugCapsule.maxBinaryBytes;
     var recorded = false;
     Timer? wait;
     late final BodyTap<Uint8List> tap;
@@ -266,7 +339,10 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
       if (recorded) return;
       recorded = true;
       wait?.cancel();
-      _record(session, () => {...head(), 'durationMs': started.elapsedMilliseconds, ...extra});
+      _record(
+        session,
+        () => {...head(), 'durationMs': started.elapsedMilliseconds, ...extra},
+      );
       tap.release();
     }
 
@@ -282,14 +358,23 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
           finish({'bodyEncoding': 'truncated'});
         }
       },
-      onError: (e) => finish({'bodyEncoding': 'truncated', 'error': _errorJson(session, e)}),
+      onError: (e) => finish({
+        'bodyEncoding': 'truncated',
+        'error': _errorJson(session, e),
+      }),
       onCancel: () => finish({
         'bodyEncoding': 'truncated',
-        'error': {'type': DioExceptionType.cancel.name, 'message': 'response stream cancelled'},
+        'error': {
+          'type': DioExceptionType.cancel.name,
+          'message': 'response stream cancelled',
+        },
       }),
       onOverflow: () => finish({'bodyEncoding': 'truncated'}),
     );
-    wait = Timer(_bugCapsule.maxBodyWait, () => finish({'bodyEncoding': 'truncated'}));
+    wait = Timer(
+      _bugCapsule.maxBodyWait,
+      () => finish({'bodyEncoding': 'truncated'}),
+    );
     response.stream = tap.stream;
     return response;
   }
@@ -297,7 +382,10 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
   /// Recorded when the exchange completes (or when the recording stops
   /// following it), so the event's `t` is that time; the request was sent at
   /// `t - durationMs`.
-  void _record(BugCapsuleSession session, Map<String, Object?> Function() data) {
+  void _record(
+    BugCapsuleSession session,
+    Map<String, Object?> Function() data,
+  ) {
     try {
       session.record(EventTypes.http, data());
     } catch (_) {
@@ -306,9 +394,11 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
   }
 
   Map<String, Object?> _errorJson(BugCapsuleSession session, Object e) => {
-        'type': e is DioException ? e.type.name : 'connectionError',
-        'message': session.redactor.scrubText(e is DioException ? (e.message ?? '${e.error}') : '$e'),
-      };
+    'type': e is DioException ? e.type.name : 'connectionError',
+    'message': session.redactor.scrubText(
+      e is DioException ? (e.message ?? '${e.error}') : '$e',
+    ),
+  };
 
   Future<ResponseBody> _replay(
     BugCapsuleSession session,
@@ -317,8 +407,9 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
-    final request =
-        requestStream == null ? null : await PrefetchedBody.read(requestStream, _bugCapsule.maxKeyBodyBytes);
+    final request = requestStream == null
+        ? null
+        : await PrefetchedBody.read(requestStream, _bugCapsule.maxKeyBodyBytes);
     final key = _bugCapsule._keyFor(options, request);
     final lookup = replay.fixtures.take(key);
     if (lookup == null) {
@@ -347,7 +438,9 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
     // While it runs, idle compression leaves the replay clock alone.
     final done = replay.beginWork();
     try {
-      final delay = Future<void>.delayed(Duration(milliseconds: fixture.durationMs));
+      final delay = Future<void>.delayed(
+        Duration(milliseconds: fixture.durationMs),
+      );
       if (cancelFuture != null) {
         await Future.any([delay, cancelFuture]);
       } else {
@@ -359,7 +452,8 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
 
     final error = fixture.error;
     if (error != null && fixture.status == 0) {
-      final type = DioExceptionType.values.asNameMap()[error['type']] ??
+      final type =
+          DioExceptionType.values.asNameMap()[error['type']] ??
           DioExceptionType.connectionError;
       throw DioException(
         requestOptions: options,
@@ -371,7 +465,8 @@ class _BugCapsuleAdapter implements HttpClientAdapter {
       replay.diverge('network.noBody', key);
     }
     final headers = <String, List<String>>{
-      for (final e in HttpBodies.replayHeaders(fixture.responseHeaders).entries) e.key: [e.value],
+      for (final e in HttpBodies.replayHeaders(fixture.responseHeaders).entries)
+        e.key: [e.value],
     };
     return ResponseBody.fromBytes(
       HttpBodies.encode(fixture.responseBody, fixture.bodyEncoding),

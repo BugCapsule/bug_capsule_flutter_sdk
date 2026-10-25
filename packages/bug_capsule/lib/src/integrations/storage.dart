@@ -67,13 +67,13 @@ class BugCapsuleSharedPreferences extends BugCapsuleIntegration {
   }
 
   static String _typeOf(Object? value) => switch (value) {
-        bool() => 'bool',
-        int() => 'int',
-        double() => 'double',
-        String() => 'string',
-        List() => 'stringList',
-        _ => 'unknown',
-      };
+    bool() => 'bool',
+    int() => 'int',
+    double() => 'double',
+    String() => 'string',
+    List() => 'stringList',
+    _ => 'unknown',
+  };
 
   @override
   Future<void> restore(Object? data, BugCapsuleSession session) async {
@@ -113,9 +113,15 @@ class BugCapsuleSharedPreferences extends BugCapsuleIntegration {
   }
 
   @override
-  void describeEligibility(EligibilityBuilder eligibility, RecordedWindow window) {
+  void describeEligibility(
+    EligibilityBuilder eligibility,
+    RecordedWindow window,
+  ) {
     for (final key in _redacted) {
-      eligibility.missing('storage.$key', 'value redacted on device; replay restores a placeholder');
+      eligibility.missing(
+        'storage.$key',
+        'value redacted on device; replay restores a placeholder',
+      );
     }
   }
 }

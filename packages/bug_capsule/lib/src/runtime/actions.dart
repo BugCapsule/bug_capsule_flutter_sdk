@@ -8,8 +8,10 @@ class ActionRegistry {
 
   /// The latest registration wins: widgets re-register on every build, so
   /// the handler bound to the currently mounted widget is the one invoked.
-  void register(String id, void Function(Map<String, Object?>? payload) handler) =>
-      _actions[id] = handler;
+  void register(
+    String id,
+    void Function(Map<String, Object?>? payload) handler,
+  ) => _actions[id] = handler;
 
   bool invoke(String id, Map<String, Object?>? payload) {
     final handler = _actions[id];
@@ -18,7 +20,8 @@ class ActionRegistry {
     return true;
   }
 
-  void trackText(String id, TextEditingController controller) => _text[id] = controller;
+  void trackText(String id, TextEditingController controller) =>
+      _text[id] = controller;
 
   void untrackText(String id, TextEditingController controller) {
     if (identical(_text[id], controller)) _text.remove(id);

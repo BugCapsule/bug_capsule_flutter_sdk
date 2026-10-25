@@ -13,7 +13,11 @@ class EventHint {
 
 /// What a `tracesSampler` decides on: the root transaction about to start.
 class SamplingContext {
-  const SamplingContext({required this.name, required this.op, this.parentSampled});
+  const SamplingContext({
+    required this.name,
+    required this.op,
+    this.parentSampled,
+  });
 
   final String name;
   final String op;
@@ -22,11 +26,13 @@ class SamplingContext {
   final bool? parentSampled;
 }
 
-typedef BeforeSendCallback = ErrorEvent? Function(ErrorEvent event, EventHint hint);
+typedef BeforeSendCallback =
+    ErrorEvent? Function(ErrorEvent event, EventHint hint);
 
 /// Receives the transaction payload (monitoring-v1 §8) and returns it,
 /// possibly modified, or null to drop it.
-typedef BeforeSendTransactionCallback = Map<String, Object?>? Function(Map<String, Object?> transaction);
+typedef BeforeSendTransactionCallback =
+    Map<String, Object?>? Function(Map<String, Object?> transaction);
 typedef BeforeBreadcrumbCallback = Breadcrumb? Function(Breadcrumb breadcrumb);
 
 /// Returns the sample rate (0-1) for a new trace, or null to use
@@ -66,7 +72,10 @@ class MonitoringOptions {
     this.enableUserInteractionTracing = false,
     this.idleTimeout = const Duration(seconds: 3),
     this.captureCapsuleWithFeedback,
-    this.outboxLimits = const OutboxLimits(maxCount: 30, maxBytes: 5 * 1024 * 1024),
+    this.outboxLimits = const OutboxLimits(
+      maxCount: 30,
+      maxBytes: 5 * 1024 * 1024,
+    ),
   });
 
   static const disabled = MonitoringOptions(enabled: false);

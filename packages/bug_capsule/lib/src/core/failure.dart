@@ -16,8 +16,12 @@ class FailureRecord {
   /// [scrub] removes credentials from the message and stack before anything
   /// is derived from them; capture and replay must pass the same function so
   /// that their signatures agree.
-  factory FailureRecord.exception(Object error, StackTrace? stack, int t,
-      {String Function(String text)? scrub}) {
+  factory FailureRecord.exception(
+    Object error,
+    StackTrace? stack,
+    int t, {
+    String Function(String text)? scrub,
+  }) {
     final type = error.runtimeType.toString();
     String clean(String s) => scrub == null ? s : scrub(s);
     final message = clean(_safeToString(error));
@@ -34,16 +38,19 @@ class FailureRecord {
   /// A failure raised by the app through a registered assertion
   /// (`BugCapsule.fail('checkout_stuck', ...)`). The id, not the message, is the
   /// identity of the failure.
-  factory FailureRecord.assertion(String assertionId, String message, int t,
-          {String Function(String text)? scrub}) =>
-      FailureRecord(
-        kind: FailureKind.assertion,
-        signature: FailureSignature.compute(FailureKind.assertion, assertionId, ''),
-        type: assertionId,
-        message: _truncate(scrub == null ? message : scrub(message), 2000),
-        assertionId: assertionId,
-        t: t,
-      );
+  factory FailureRecord.assertion(
+    String assertionId,
+    String message,
+    int t, {
+    String Function(String text)? scrub,
+  }) => FailureRecord(
+    kind: FailureKind.assertion,
+    signature: FailureSignature.compute(FailureKind.assertion, assertionId, ''),
+    type: assertionId,
+    message: _truncate(scrub == null ? message : scrub(message), 2000),
+    assertionId: assertionId,
+    t: t,
+  );
 
   /// `toString` of app objects can throw; a failure must still be recorded.
   static String _safeToString(Object error) {
@@ -55,14 +62,14 @@ class FailureRecord {
   }
 
   factory FailureRecord.fromJson(Map<String, Object?> json) => FailureRecord(
-        kind: FailureKind.values.byName(json['kind'] as String),
-        signature: json['signature'] as String,
-        type: json['type'] as String,
-        message: json['message'] as String? ?? '',
-        stack: json['stack'] as String?,
-        assertionId: json['assertionId'] as String?,
-        t: json['t'] as int? ?? 0,
-      );
+    kind: FailureKind.values.byName(json['kind'] as String),
+    signature: json['signature'] as String,
+    type: json['type'] as String,
+    message: json['message'] as String? ?? '',
+    stack: json['stack'] as String?,
+    assertionId: json['assertionId'] as String?,
+    t: json['t'] as int? ?? 0,
+  );
 
   final FailureKind kind;
   final String signature;
@@ -73,24 +80,24 @@ class FailureRecord {
   final int t;
 
   FailureRecord shift(int offsetMs) => FailureRecord(
-        kind: kind,
-        signature: signature,
-        type: type,
-        message: message,
-        stack: stack,
-        assertionId: assertionId,
-        t: t - offsetMs,
-      );
+    kind: kind,
+    signature: signature,
+    type: type,
+    message: message,
+    stack: stack,
+    assertionId: assertionId,
+    t: t - offsetMs,
+  );
 
   Map<String, Object?> toJson() => {
-        'kind': kind.name,
-        'signature': signature,
-        'type': type,
-        'message': message,
-        'stack': stack,
-        'assertionId': assertionId,
-        't': t,
-      };
+    'kind': kind.name,
+    'signature': signature,
+    'type': type,
+    'message': message,
+    'stack': stack,
+    'assertionId': assertionId,
+    't': t,
+  };
 
   static String _truncate(String s, int max) =>
       s.length <= max ? s : '${s.substring(0, max)}…';

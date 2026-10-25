@@ -12,18 +12,28 @@ class InAppRules {
   final List<String> excludes;
 
   bool? isInApp(String? package, String? absPath) {
-    if (absPath != null && (absPath.startsWith('dart:') || absPath.startsWith('org-dartlang-sdk:'))) {
+    if (absPath != null &&
+        (absPath.startsWith('dart:') ||
+            absPath.startsWith('org-dartlang-sdk:'))) {
       return false;
     }
     if (package == null) return absPath == null ? null : false;
-    if (package == 'flutter' || package == 'bug_capsule' || excludes.contains(package)) return false;
+    if (package == 'flutter' ||
+        package == 'bug_capsule' ||
+        excludes.contains(package)) {
+      return false;
+    }
     return includes.contains(package);
   }
 }
 
 /// A parsed Dart stack trace.
 class ParsedStack {
-  const ParsedStack(this.frames, {this.debugImages = const [], this.native = false});
+  const ParsedStack(
+    this.frames, {
+    this.debugImages = const [],
+    this.native = false,
+  });
 
   /// Oldest call first, crashing frame last.
   final List<EventFrame> frames;
@@ -37,7 +47,9 @@ class ParsedStack {
 
 final _vmFrame = RegExp(r'^#\d+\s+(.+?) \((.+)\)$');
 final _location = RegExp(r'^(.*?)(?::(\d+))?(?::(\d+))?$');
-final _aotFrame = RegExp(r'^\s*#\d+\s+abs\s+([0-9a-fA-F]+)(?:\s+virt\s+([0-9a-fA-F]+))?\s*(.*)$');
+final _aotFrame = RegExp(
+  r'^\s*#\d+\s+abs\s+([0-9a-fA-F]+)(?:\s+virt\s+([0-9a-fA-F]+))?\s*(.*)$',
+);
 final _v8Frame = RegExp(r'^\s*at (?:(.+?) \((.+)\)|(.+))$');
 final _terseFrame = RegExp(r'^(\S+) (\d+):(\d+)\s+(.*)$');
 final _buildId = RegExp(r"build_id: '([0-9a-fA-F]+)'");
@@ -48,16 +60,23 @@ final _osArch = RegExp(r'os: (\S+) arch: (\S+)');
 /// (`--split-debug-info`, `--obfuscate`), Chrome/V8 and `package:stack_trace`
 /// terse formats. Unrecognised lines are skipped; asynchronous suspension
 /// markers are dropped.
-ParsedStack parseDartStack(String trace, {InAppRules rules = const InAppRules()}) {
+ParsedStack parseDartStack(
+  String trace, {
+  InAppRules rules = const InAppRules(),
+}) {
   final lines = trace.split('\n');
-  if (trace.contains('*** *** ***') || lines.any((l) => _aotFrame.hasMatch(l))) {
+  if (trace.contains('*** *** ***') ||
+      lines.any((l) => _aotFrame.hasMatch(l))) {
     return _parseNative(lines);
   }
   final frames = <EventFrame>[];
   for (final raw in lines) {
     final line = raw.trimRight();
     if (line.isEmpty || line.contains('<asynchronous suspension>')) continue;
-    final frame = _parseVm(line, rules) ?? _parseV8(line, rules) ?? _parseTerse(line, rules);
+    final frame =
+        _parseVm(line, rules) ??
+        _parseV8(line, rules) ??
+        _parseTerse(line, rules);
     if (frame != null) frames.add(frame);
   }
   return ParsedStack(frames.reversed.toList());
@@ -67,14 +86,26 @@ EventFrame? _parseVm(String line, InAppRules rules) {
   final m = _vmFrame.firstMatch(line.trimLeft());
   if (m == null) return null;
   final loc = _location.firstMatch(m[2]!)!;
-  return _frame(m[1]!, loc[1]!, int.tryParse(loc[2] ?? ''), int.tryParse(loc[3] ?? ''), rules);
+  return _frame(
+    m[1]!,
+    loc[1]!,
+    int.tryParse(loc[2] ?? ''),
+    int.tryParse(loc[3] ?? ''),
+    rules,
+  );
 }
 
 EventFrame? _parseV8(String line, InAppRules rules) {
   final m = _v8Frame.firstMatch(line);
   if (m == null) return null;
   final loc = _location.firstMatch(m[2] ?? m[3]!)!;
-  return _frame(m[1] ?? '<anonymous>', loc[1]!, int.tryParse(loc[2] ?? ''), int.tryParse(loc[3] ?? ''), rules);
+  return _frame(
+    m[1] ?? '<anonymous>',
+    loc[1]!,
+    int.tryParse(loc[2] ?? ''),
+    int.tryParse(loc[3] ?? ''),
+    rules,
+  );
 }
 
 EventFrame? _parseTerse(String line, InAppRules rules) {
@@ -83,7 +114,13 @@ EventFrame? _parseTerse(String line, InAppRules rules) {
   return _frame(m[4]!, m[1]!, int.parse(m[2]!), int.parse(m[3]!), rules);
 }
 
-EventFrame _frame(String member, String uri, int? line, int? column, InAppRules rules) {
+EventFrame _frame(
+  String member,
+  String uri,
+  int? line,
+  int? column,
+  InAppRules rules,
+) {
   String? package;
   String? filename;
   if (uri.startsWith('package:')) {
@@ -140,12 +177,14 @@ ParsedStack _parseNative(List<String> lines) {
     // every caller frame carries a return address, so step back into the
     // call instruction (monitoring-v1 §3: the backend resolves as sent).
     final pc = frames.isEmpty ? abs : abs - BigInt.one;
-    frames.add(EventFrame(
-      instructionAddr: '0x${pc.toRadixString(16)}',
-      // `_kDartIsolateSnapshotInstructions+0x1c3f3b` is not a function name.
-      function: symbol.isEmpty || symbol.startsWith('_kDart') ? null : symbol,
-      inApp: true,
-    ));
+    frames.add(
+      EventFrame(
+        instructionAddr: '0x${pc.toRadixString(16)}',
+        // `_kDartIsolateSnapshotInstructions+0x1c3f3b` is not a function name.
+        function: symbol.isEmpty || symbol.startsWith('_kDart') ? null : symbol,
+        inApp: true,
+      ),
+    );
   }
   final images = <Map<String, Object?>>[];
   if (buildId != null) {
@@ -168,15 +207,19 @@ ParsedStack _parseNative(List<String> lines) {
       }
     }
   }
-  return ParsedStack(frames.reversed.toList(), debugImages: images, native: true);
+  return ParsedStack(
+    frames.reversed.toList(),
+    debugImages: images,
+    native: true,
+  );
 }
 
 String? _arch(String? dartArch) => switch (dartArch) {
-      null => null,
-      'x64' => 'x86_64',
-      'ia32' => 'x86',
-      _ => dartArch,
-    };
+  null => null,
+  'x64' => 'x86_64',
+  'ia32' => 'x86',
+  _ => dartArch,
+};
 
 /// GNU build id → debug id (monitoring-v1 §3): the first 16 bytes (zero
 /// padded), with the first three UUID fields byte-swapped (little-endian),
@@ -185,13 +228,24 @@ String? _arch(String? dartArch) => switch (dartArch) {
 String debugIdFromBuildId(String hex) {
   final clean = hex.toLowerCase().replaceAll(RegExp('[^0-9a-f]'), '');
   return debugIdFromBuildIdBytes([
-    for (var i = 0; i + 1 < clean.length && i < 32; i += 2) int.parse(clean.substring(i, i + 2), radix: 16),
+    for (var i = 0; i + 1 < clean.length && i < 32; i += 2)
+      int.parse(clean.substring(i, i + 2), radix: 16),
   ]);
 }
 
 String debugIdFromBuildIdBytes(List<int> buildId) {
   final b = [...buildId.take(16), for (var i = buildId.length; i < 16; i++) 0];
-  final swapped = [b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], ...b.sublist(8)];
+  final swapped = [
+    b[3],
+    b[2],
+    b[1],
+    b[0],
+    b[5],
+    b[4],
+    b[7],
+    b[6],
+    ...b.sublist(8),
+  ];
   final h = swapped.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
   return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-'
       '${h.substring(16, 20)}-${h.substring(20)}';

@@ -55,8 +55,14 @@ class CaptureResult {
 /// randomness in tests.
 @visibleForTesting
 class BugCapsuleTestOverrides {
-  const BugCapsuleTestOverrides(
-      {this.storageDirectory, this.transport, this.envelopeTransport, this.random, this.setupTimeout, this.encodeCapsule});
+  const BugCapsuleTestOverrides({
+    this.storageDirectory,
+    this.transport,
+    this.envelopeTransport,
+    this.random,
+    this.setupTimeout,
+    this.encodeCapsule,
+  });
 
   final Directory? storageDirectory;
   final BugCapsuleTransport? transport;
@@ -103,7 +109,12 @@ abstract final class BugCapsule {
     required FutureOr<void> Function() appRunner,
   }) {
     if (_rt != null) throw StateError('BugCapsule.init called twice');
-    final rt = _rt = _Runtime(config, integrations, debugOverrides, _callerPackage(StackTrace.current));
+    final rt = _rt = _Runtime(
+      config,
+      integrations,
+      debugOverrides,
+      _callerPackage(StackTrace.current),
+    );
     return withClock(Clock(rt.wallClock), () => rt.start(appRunner));
   }
 
@@ -113,7 +124,8 @@ abstract final class BugCapsule {
   /// the token works, whether the backend accepted the config fetch and the
   /// first data, and which replay integrations are still missing. Before
   /// [init] the state is `notConfigured`.
-  static BugCapsuleStatus get status => _rt?.status ?? _Runtime.statusBeforeInit;
+  static BugCapsuleStatus get status =>
+      _rt?.status ?? _Runtime.statusBeforeInit;
   static bool get isReplaying => _rt?.engine != null;
   static bool get isRecording => _rt?.isRecording ?? false;
   static CaptureMode? get mode => _rt?.config.mode;
@@ -139,7 +151,9 @@ abstract final class BugCapsule {
 
   /// Like [action] with a JSON payload passed to the handler.
   static void Function(Map<String, Object?> payload) actionWithPayload(
-      String id, void Function(Map<String, Object?> payload) callback) {
+    String id,
+    void Function(Map<String, Object?> payload) callback,
+  ) {
     _actions.register(id, (p) => callback(p ?? const {}));
     return (payload) {
       _rt?.record(EventTypes.action, {'id': id, 'payload': payload});
@@ -151,7 +165,11 @@ abstract final class BugCapsule {
   /// Values are redacted when [sensitive] is true (use it for any obscured
   /// field) or the id looks sensitive (`password`, `otp`, ...); credentials
   /// found inside other values are scrubbed.
-  static void trackText(String id, TextEditingController controller, {bool sensitive = false}) {
+  static void trackText(
+    String id,
+    TextEditingController controller, {
+    bool sensitive = false,
+  }) {
     _actions.trackText(id, controller);
     var last = controller.text;
     controller.addListener(() {
@@ -174,11 +192,22 @@ abstract final class BugCapsule {
   static void fail(String assertionId, [String message = '']) {
     final rt = _rt;
     if (rt == null) return;
-    final prepared = rt.hub?.prepareException(StateError(message), StackTrace.current,
-        mechanism: Mechanism.assertion, typeOverride: assertionId, valueOverride: message);
+    final prepared = rt.hub?.prepareException(
+      StateError(message),
+      StackTrace.current,
+      mechanism: Mechanism.assertion,
+      typeOverride: assertionId,
+      valueOverride: message,
+    );
     final capsule = rt.handleFailure(
-        FailureRecord.assertion(assertionId, message, rt.now(), scrub: rt.redactor.scrubText),
-        monitoring: prepared?.monitoringInfo());
+      FailureRecord.assertion(
+        assertionId,
+        message,
+        rt.now(),
+        scrub: rt.redactor.scrubText,
+      ),
+      monitoring: prepared?.monitoringInfo(),
+    );
     if (prepared != null) rt.hub!.submit(prepared, capsule: capsule);
   }
 
@@ -206,9 +235,12 @@ abstract final class BugCapsule {
   static Future<void> flushUploads() async => _rt?.flushOutbox();
 
   // Used by BugCapsuleOverlay so its own touches are not recorded.
-  static void suppressPointer(int pointer) => _rt?.suppressedPointers.add(pointer);
+  static void suppressPointer(int pointer) =>
+      _rt?.suppressedPointers.add(pointer);
   static bool get overlayEnabled =>
-      (_rt?.config.showOverlay ?? false) && !isReplaying && (_rt?.isRecording ?? false);
+      (_rt?.config.showOverlay ?? false) &&
+      !isReplaying &&
+      (_rt?.isRecording ?? false);
 
   static final ActionRegistry _actions = ActionRegistry();
 
@@ -227,17 +259,26 @@ abstract final class BugCapsule {
     Map<String, Object?>? contexts,
   }) {
     final hub = _rt?.hub;
-    return hub?.capture(hub.prepareException(error, stackTrace ?? StackTrace.current,
+    return hub?.capture(
+      hub.prepareException(
+        error,
+        stackTrace ?? StackTrace.current,
         mechanism: Mechanism.manual,
         level: level,
         tags: tags,
         extra: extra,
         fingerprint: fingerprint,
-        contexts: contexts));
+        contexts: contexts,
+      ),
+    );
   }
 
   /// Sends a message event (with the current stack when `attachStacktrace`).
-  static String? captureMessage(String message, {EventLevel level = EventLevel.info, Map<String, String>? tags}) {
+  static String? captureMessage(
+    String message, {
+    EventLevel level = EventLevel.info,
+    Map<String, String>? tags,
+  }) {
     final hub = _rt?.hub;
     return hub?.capture(hub.prepareMessage(message, level: level, tags: tags));
   }
@@ -255,30 +296,35 @@ abstract final class BugCapsule {
     String? url,
     Map<String, String>? tags,
     bool? captureCapsule,
-  }) async =>
-      _rt?.hub?.captureFeedback(
-        message: message,
-        name: name,
-        email: email,
-        eventId: eventId,
-        url: url,
-        tags: tags,
-        captureCapsule: captureCapsule,
-      );
+  }) async => _rt?.hub?.captureFeedback(
+    message: message,
+    name: name,
+    email: email,
+    eventId: eventId,
+    url: url,
+    tags: tags,
+    captureCapsule: captureCapsule,
+  );
 
   /// Id of the last error event that was sent (not sampled out).
   static String? lastEventId() => _rt?.hub?.lastEventId;
 
   static void setUser(MonitoringUser? user) => Scope.current.setUser(user);
-  static void setTag(String key, String value) => Scope.current.setTag(key, value);
+  static void setTag(String key, String value) =>
+      Scope.current.setTag(key, value);
   static void setTags(Map<String, String> tags) => Scope.current.setTags(tags);
-  static void setExtra(String key, Object? value) => Scope.current.setExtra(key, value);
-  static void setExtras(Map<String, Object?> extras) => Scope.current.setExtras(extras);
-  static void setContext(String name, Object? value) => Scope.current.setContext(name, value);
+  static void setExtra(String key, Object? value) =>
+      Scope.current.setExtra(key, value);
+  static void setExtras(Map<String, Object?> extras) =>
+      Scope.current.setExtras(extras);
+  static void setContext(String name, Object? value) =>
+      Scope.current.setContext(name, value);
   static void setLevel(EventLevel? level) => Scope.current.setLevel(level);
-  static void setFingerprint(List<String>? fingerprint) => Scope.current.setFingerprint(fingerprint);
+  static void setFingerprint(List<String>? fingerprint) =>
+      Scope.current.setFingerprint(fingerprint);
 
-  static void addBreadcrumb(Breadcrumb breadcrumb) => _rt?.hub?.addBreadcrumb(breadcrumb);
+  static void addBreadcrumb(Breadcrumb breadcrumb) =>
+      _rt?.hub?.addBreadcrumb(breadcrumb);
   static void clearBreadcrumbs() => _rt?.hub?.clearBreadcrumbs();
 
   /// Runs [fn] with a copy of the current scope; changes to it apply only to
@@ -288,12 +334,17 @@ abstract final class BugCapsule {
     return runZoned(() => fn(scope), zoneValues: {scopeZoneKey: scope});
   }
 
-  static void configureScope(void Function(Scope scope) fn) => fn(Scope.current);
+  static void configureScope(void Function(Scope scope) fn) =>
+      fn(Scope.current);
 
   /// Starts a root transaction (a new trace, or the one passed to
   /// [continueTrace]). With [bindToScope] it becomes the parent of spans
   /// started outside [startSpan] (e.g. HTTP spans). Finish it to send it.
-  static BugCapsuleTransaction startTransaction(String name, String op, {bool bindToScope = false}) =>
+  static BugCapsuleTransaction startTransaction(
+    String name,
+    String op, {
+    bool bindToScope = false,
+  }) =>
       _rt?.hub?.startTransaction(name, op, bindToScope: bindToScope) ??
       TransactionImpl(name: name, op: op, sink: _noopSink, sampled: false);
 
@@ -301,9 +352,14 @@ abstract final class BugCapsule {
   /// spans and error events attach to it) and finishes it when [fn]
   /// completes (status `internal_error` if it throws). A child of the active
   /// span, else a new transaction.
-  static FutureOr<R> startSpan<R>(String name, String op, FutureOr<R> Function(BugCapsuleSpan span) fn) {
+  static FutureOr<R> startSpan<R>(
+    String name,
+    String op,
+    FutureOr<R> Function(BugCapsuleSpan span) fn,
+  ) {
     final parent = activeSpan;
-    final BugCapsuleSpan span = parent?.startChild(op, description: name) ?? startTransaction(name, op);
+    final BugCapsuleSpan span =
+        parent?.startChild(op, description: name) ?? startTransaction(name, op);
     final FutureOr<R> result;
     try {
       result = runZoned(() => fn(span), zoneValues: {spanZoneKey: span});
@@ -316,7 +372,10 @@ abstract final class BugCapsule {
     return result;
   }
 
-  static Future<R> _finishAfter<R>(Future<R> future, BugCapsuleSpan span) async {
+  static Future<R> _finishAfter<R>(
+    Future<R> future,
+    BugCapsuleSpan span,
+  ) async {
     try {
       final value = await future;
       span.finish();
@@ -342,7 +401,12 @@ abstract final class BugCapsule {
     final parent = TraceParent.parse(traceparent);
     if (parent == null) return;
     final rate = double.tryParse(Baggage.parse(baggage)['sample_rate'] ?? '');
-    Scope.current.continuedTrace = ContinuedTrace(parent.traceId, parent.parentSpanId, parent.sampled, sampleRate: rate);
+    Scope.current.continuedTrace = ContinuedTrace(
+      parent.traceId,
+      parent.parentSpanId,
+      parent.sampled,
+      sampleRate: rate,
+    );
   }
 
   /// Sessions are automatic; these are for apps that manage them.
@@ -350,8 +414,9 @@ abstract final class BugCapsule {
   static void endSession() => _rt?.hub?.endSession();
 
   /// Uploads queued monitoring envelopes. True when the queue is empty.
-  static Future<bool> flush([Duration timeout = const Duration(seconds: 10)]) async =>
-      await _rt?.hub?.flush(timeout: timeout) ?? true;
+  static Future<bool> flush([
+    Duration timeout = const Duration(seconds: 10),
+  ]) async => await _rt?.hub?.flush(timeout: timeout) ?? true;
 
   /// Ends the session, uploads queued envelopes and stops monitoring.
   static Future<void> close() async => _rt?.closeMonitoring();
@@ -362,14 +427,17 @@ abstract final class BugCapsule {
   /// ```dart
   /// void main() => BugCapsule.runZonedGuarded(() => BugCapsule.init(...));
   /// ```
-  static R? runZonedGuarded<R>(R Function() body, {void Function(Object error, StackTrace stack)? onError}) =>
-      async.runZonedGuarded(body, (error, stack) {
-        _rt?.onUncaught(error, stack, Mechanism.uncaught);
-        onError?.call(error, stack);
-      });
+  static R? runZonedGuarded<R>(
+    R Function() body, {
+    void Function(Object error, StackTrace stack)? onError,
+  }) => async.runZonedGuarded(body, (error, stack) {
+    _rt?.onUncaught(error, stack, Mechanism.uncaught);
+    onError?.call(error, stack);
+  });
 
   /// Sends uncaught errors of [isolate] (one the app spawned) as events.
-  static void addIsolateErrorListener(Isolate isolate) => _rt?.hub?.addIsolate(isolate);
+  static void addIsolateErrorListener(Isolate isolate) =>
+      _rt?.hub?.addIsolate(isolate);
 
   static final TransactionSink _noopSink = _NoopSink();
 
@@ -378,7 +446,12 @@ abstract final class BugCapsule {
   static String? _callerPackage(StackTrace stack) {
     for (final line in stack.toString().split('\n')) {
       final m = RegExp(r'\(package:([^/]+)/').firstMatch(line);
-      if (m != null && m[1] != 'bug_capsule' && m[1] != 'flutter' && m[1] != 'clock') return m[1];
+      if (m != null &&
+          m[1] != 'bug_capsule' &&
+          m[1] != 'flutter' &&
+          m[1] != 'clock') {
+        return m[1];
+      }
     }
     return null;
   }
@@ -415,25 +488,41 @@ _Connection _resolveConnection(BugCapsuleConfig config) {
   final token = config.token;
   if (backend != null) {
     if (token != null && token.trim().isNotEmpty) {
-      debugPrint('[bugcapsule] both token and backend are set; using backend and ignoring token');
+      debugPrint(
+        '[bugcapsule] both token and backend are set; using backend and ignoring token',
+      );
     }
-    return (backend: backend, source: BugCapsuleConnectionSource.backend, tokenError: null);
+    return (
+      backend: backend,
+      source: BugCapsuleConnectionSource.backend,
+      tokenError: null,
+    );
   }
   if (token == null) return (backend: null, source: null, tokenError: null);
   switch (parseConnectionToken(token)) {
     case ValidConnectionToken(:final backend):
-      return (backend: backend, source: BugCapsuleConnectionSource.token, tokenError: null);
+      return (
+        backend: backend,
+        source: BugCapsuleConnectionSource.token,
+        tokenError: null,
+      );
     case final InvalidConnectionToken error:
-      debugPrint("[bugcapsule] the SDK token can't be used (${error.error.code}): ${error.message}. "
-          'The app runs without BugCapsule.');
-      return (backend: null, source: BugCapsuleConnectionSource.token, tokenError: error);
+      debugPrint(
+        "[bugcapsule] the SDK token can't be used (${error.error.code}): ${error.message}. "
+        'The app runs without BugCapsule.',
+      );
+      return (
+        backend: null,
+        source: BugCapsuleConnectionSource.token,
+        tokenError: error,
+      );
   }
 }
 
 class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   _Runtime(this.config, this.integrations, this._overrides, this._appPackage)
-      : _random = _overrides?.random ?? Random(),
-        _connection = _resolveConnection(config);
+    : _random = _overrides?.random ?? Random(),
+      _connection = _resolveConnection(config);
 
   final _Connection _connection;
 
@@ -544,13 +633,19 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   /// redactor again (idempotent for already-redacted data), then the app's
   /// [BugCapsuleConfig.beforeRecord]. Pointer and lifecycle events carry only
   /// numbers and enum names and skip the walk.
-  Map<String, Object?>? _sanitizeEvent(String type, Map<String, Object?> data, {bool hook = true}) {
+  Map<String, Object?>? _sanitizeEvent(
+    String type,
+    Map<String, Object?> data, {
+    bool hook = true,
+  }) {
     try {
       var out = data;
       // An exchange that started before bodies were turned off finishes
       // after: its bodies must not be kept either.
       if (type == EventTypes.http && !_captureBodies) {
-        out = _withoutBodies(BugCapsuleEvent(seq: 0, t: 0, type: type, data: out)).data;
+        out = _withoutBodies(
+          BugCapsuleEvent(seq: 0, t: 0, type: type, data: out),
+        ).data;
       }
       if (type != EventTypes.pointer && type != EventTypes.lifecycle) {
         out = (_redactor.redactJson(out) as Map).cast<String, Object?>();
@@ -561,8 +656,12 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
           for (final f in const ['key']) {
             if (data.containsKey(f)) out[f] = data[f];
           }
-          if (out['bodyEncoding'] == 'base64') out['responseBody'] = data['responseBody'];
-          if (out['requestEncoding'] == 'base64') out['requestBody'] = data['requestBody'];
+          if (out['bodyEncoding'] == 'base64') {
+            out['responseBody'] = data['responseBody'];
+          }
+          if (out['requestEncoding'] == 'base64') {
+            out['requestBody'] = data['requestBody'];
+          }
         }
         if (type == EventTypes.failure && data['signature'] is String) {
           out['signature'] = data['signature'];
@@ -577,7 +676,8 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   }
 
   @override
-  void reportError(Object error, StackTrace? stack) => _onError(error, stack, Mechanism.manual);
+  void reportError(Object error, StackTrace? stack) =>
+      _onError(error, stack, Mechanism.manual);
 
   // ---------------------------------------------------------------- startup
 
@@ -585,13 +685,17 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     final binding = WidgetsFlutterBinding.ensureInitialized();
     String? replayUrl;
     try {
-      replayUrl = config.replayUrl ?? await _replayUrlFromEnvironment(_overrides?.storageDirectory);
+      replayUrl =
+          config.replayUrl ??
+          await _replayUrlFromEnvironment(_overrides?.storageDirectory);
     } catch (e) {
       debugPrint('[bugcapsule] could not read replay request: $e');
     }
     if (replayUrl != null) {
       if (kReleaseMode) {
-        debugPrint('[bugcapsule] ignoring replay request: replay is disabled in release builds');
+        debugPrint(
+          '[bugcapsule] ignoring replay request: replay is disabled in release builds',
+        );
       } else {
         debugPrint('[bugcapsule] replay mode: $replayUrl');
         await _startReplay(replayUrl, appRunner, binding);
@@ -600,10 +704,14 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     }
     try {
       // A plugin or integration that never answers must not hold the app.
-      await _prepareCapture(binding).timeout(_overrides?.setupTimeout ?? setupTimeout);
+      await _prepareCapture(
+        binding,
+      ).timeout(_overrides?.setupTimeout ?? setupTimeout);
     } catch (e, st) {
       _setupAbandoned = true;
-      debugPrint('[bugcapsule] capture setup failed; the app runs without capture: $e\n$st');
+      debugPrint(
+        '[bugcapsule] capture setup failed; the app runs without capture: $e\n$st',
+      );
       _stopRecording();
       final h = hub;
       hub = null;
@@ -629,7 +737,10 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
       final json = jsonDecode(await file.readAsString()) as Map;
       await file.delete();
       final createdAt = DateTime.tryParse('${json['createdAt']}');
-      if (createdAt == null || DateTime.now().difference(createdAt).inMinutes > 10) return null;
+      if (createdAt == null ||
+          DateTime.now().difference(createdAt).inMinutes > 10) {
+        return null;
+      }
       return json['url'] as String?;
     } catch (e) {
       debugPrint('[bugcapsule] could not read replay request: $e');
@@ -640,7 +751,9 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   /// Cache scope of the remote config: one per backend URL and ingest key,
   /// so a config fetched for staging never applies to production.
   static String _scope(BugCapsuleBackendConfig? backend) {
-    final input = utf8.encode('${backend?.url ?? ''}|${backend?.ingestKey ?? ''}');
+    final input = utf8.encode(
+      '${backend?.url ?? ''}|${backend?.ingestKey ?? ''}',
+    );
     var h = 0xcbf29ce484222325;
     for (final b in input) {
       h ^= b;
@@ -656,13 +769,20 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     // No backend (none configured, or an unusable token): capture still runs
     // locally, nothing is uploaded.
     final backend = _backend;
-    final transport = _overrides?.transport ?? (backend == null ? null : BugCapsuleBackendClient(backend));
-    final storeFuture = store = CapsuleStore.open(root: _overrides?.storageDirectory);
+    final transport =
+        _overrides?.transport ??
+        (backend == null ? null : BugCapsuleBackendClient(backend));
+    final storeFuture = store = CapsuleStore.open(
+      root: _overrides?.storageDirectory,
+    );
     final s = await storeFuture;
 
     if (transport != null) {
       _transport = transport;
-      _outbox = await UploadOutbox.open(s.outboxDirectory, limits: config.outboxLimits);
+      _outbox = await UploadOutbox.open(
+        s.outboxDirectory,
+        limits: config.outboxLimits,
+      );
       final controller = remote = RemoteConfigController(
         fetch: transport.fetchConfig,
         cache: s.configCache,
@@ -670,17 +790,19 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
         onChange: _applyRemote,
         maxStale: config.maxStaleConfig,
         onRejected: (f) => debugPrint(
-            "[bugcapsule] the backend refused this app's "
-            "${_connection.source == BugCapsuleConnectionSource.token ? 'SDK token' : 'ingest key'} "
-            "(${f.reason ?? 'HTTP ${f.status}'})${f.detail == null ? '' : ': ${f.detail}'}. "
-            'Capture and uploads are off for this session.'),
+          "[bugcapsule] the backend refused this app's "
+          "${_connection.source == BugCapsuleConnectionSource.token ? 'SDK token' : 'ingest key'} "
+          "(${f.reason ?? 'HTTP ${f.status}'})${f.detail == null ? '' : ': ${f.detail}'}. "
+          'Capture and uploads are off for this session.',
+        ),
       );
       await controller.loadCached();
     }
 
     final cached = remote?.current;
     _redactor = _baseRedactor(remote: cached?.redactKeys ?? const []);
-    _captureBodies = config.captureNetworkBodies && (cached?.captureNetworkBodies ?? true);
+    _captureBodies =
+        config.captureNetworkBodies && (cached?.captureNetworkBodies ?? true);
     _maxCapsuleBytes = cached?.maxCapsuleBytes ?? _maxCapsuleBytes;
     _recording = _decideRecording(cached);
     if (_setupAbandoned) return _stopRecording();
@@ -696,11 +818,17 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     if (_setupAbandoned) return _stopRecording();
     // Monitoring starts once capture setup has finished (a setup that never
     // finishes leaves the app without capture and without monitoring).
-    final baseEnvelopes = _overrides?.envelopeTransport ??
-        (transport is EnvelopeTransport ? transport as EnvelopeTransport : null);
+    final baseEnvelopes =
+        _overrides?.envelopeTransport ??
+        (transport is EnvelopeTransport
+            ? transport as EnvelopeTransport
+            : null);
     final envelopes = baseEnvelopes == null
         ? null
-        : _ObservedEnvelopes(baseEnvelopes, () => _firstEventAcceptedAt ??= DateTime.now());
+        : _ObservedEnvelopes(
+            baseEnvelopes,
+            () => _firstEventAcceptedAt ??= DateTime.now(),
+          );
     if (config.monitoring.enabled && (cached?.enabled ?? true)) {
       final h = MonitoringHub(
         options: config.monitoring,
@@ -764,16 +892,24 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
 
   void _afterAppStarted() {
     if (_disposed || remote == null) return;
-    unawaited(remote!.refresh().then((_) => flushOutbox()).then((_) {}, onError: (Object e) {
-      debugPrint('[bugcapsule] startup sync failed: $e');
-    }));
+    unawaited(
+      remote!
+          .refresh()
+          .then((_) => flushOutbox())
+          .then(
+            (_) {},
+            onError: (Object e) {
+              debugPrint('[bugcapsule] startup sync failed: $e');
+            },
+          ),
+    );
   }
 
   Redactor _baseRedactor({List<String> remote = const []}) => Redactor(
-        extraKeys: [...config.redactKeys, ...remote],
-        extraHeaders: config.redactHeaders,
-        patterns: config.redactPatterns,
-      );
+    extraKeys: [...config.redactKeys, ...remote],
+    extraHeaders: config.redactHeaders,
+    patterns: config.redactPatterns,
+  );
 
   double _effectiveRate(RemoteCaptureConfig? remote) {
     final cap = config.productionSampleRate.clamp(0.0, 1.0);
@@ -797,7 +933,10 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     _installErrorHandlers();
     GestureBinding.instance.pointerRouter.addGlobalRoute(_onPointer);
     _pointerRouteInstalled = true;
-    _checkpointTimer = Timer.periodic(config.checkpointInterval, (_) => _periodicCheckpoint());
+    _checkpointTimer = Timer.periodic(
+      config.checkpointInterval,
+      (_) => _periodicCheckpoint(),
+    );
   }
 
   void _installErrorHandlers() {
@@ -806,14 +945,26 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     final previousFlutterError = _previousFlutterError = FlutterError.onError;
     FlutterError.onError = (details) {
       if (!details.silent) {
-        _guard(() => _onError(details.exception, details.stack, Mechanism('flutter_error', handled: false, data: {
-              'library': ?details.library,
-              if (details.context != null) 'context': details.context.toString(),
-            })));
+        _guard(
+          () => _onError(
+            details.exception,
+            details.stack,
+            Mechanism(
+              'flutter_error',
+              handled: false,
+              data: {
+                'library': ?details.library,
+                if (details.context != null)
+                  'context': details.context.toString(),
+              },
+            ),
+          ),
+        );
       }
       previousFlutterError?.call(details);
     };
-    final previousPlatformError = _previousPlatformError = PlatformDispatcher.instance.onError;
+    final previousPlatformError = _previousPlatformError =
+        PlatformDispatcher.instance.onError;
     PlatformDispatcher.instance.onError = (error, stack) {
       _guard(() => _onError(error, stack, Mechanism.platformDispatcher));
       return previousPlatformError?.call(error, stack) ?? isReplaying;
@@ -857,13 +1008,15 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
       final afterSeq = recorder.lastSeq;
       final data = await _snapshot(CheckpointKind.periodic);
       if (epoch != _captureEpoch || !identical(recorder, _recorder)) return;
-      recorder.addCheckpoint(Checkpoint(
-        kind: CheckpointKind.periodic,
-        t: t,
-        wallClockMs: DateTime.now().millisecondsSinceEpoch,
-        afterSeq: afterSeq,
-        data: data,
-      ));
+      recorder.addCheckpoint(
+        Checkpoint(
+          kind: CheckpointKind.periodic,
+          t: t,
+          wallClockMs: DateTime.now().millisecondsSinceEpoch,
+          afterSeq: afterSeq,
+          data: data,
+        ),
+      );
     } catch (e) {
       _warnOnce('periodic checkpoint failed: $e');
     } finally {
@@ -922,7 +1075,8 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   final Expando<bool> _reported = Expando();
 
   /// An uncaught zone error (`BugCapsule.runZonedGuarded`).
-  void onUncaught(Object error, StackTrace stack, Mechanism mechanism) => _guard(() => _onError(error, stack, mechanism));
+  void onUncaught(Object error, StackTrace stack, Mechanism mechanism) =>
+      _guard(() => _onError(error, stack, mechanism));
 
   void _onError(Object error, StackTrace? stack, Mechanism mechanism) {
     if (config.ignoreError?.call(error) ?? false) return;
@@ -932,18 +1086,24 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
       _reported[error] = true;
     }
     final prepared = h?.prepareException(error, stack, mechanism: mechanism);
-    final capsule = handleFailure(FailureRecord.exception(error, stack, now(), scrub: _redactor.scrubText),
-        monitoring: prepared?.monitoringInfo());
+    final capsule = handleFailure(
+      FailureRecord.exception(error, stack, now(), scrub: _redactor.scrubText),
+      monitoring: prepared?.monitoringInfo(),
+    );
     if (prepared != null) h!.submit(prepared, capsule: capsule);
   }
 
-  static bool _canExpando(Object o) => o is! num && o is! String && o is! bool && o is! Record;
+  static bool _canExpando(Object o) =>
+      o is! num && o is! String && o is! bool && o is! Record;
 
   /// Records the failure and, when it is new and capture is on, schedules
   /// a capsule. Returns the capsule id once the capsule is queued for upload
   /// (null if it is not written or not queued), or null when none is
   /// scheduled. [monitoring] goes into `manifest.monitoring`.
-  Future<String?>? handleFailure(FailureRecord failure, {CapsuleMonitoring? monitoring}) {
+  Future<String?>? handleFailure(
+    FailureRecord failure, {
+    CapsuleMonitoring? monitoring,
+  }) {
     final replaying = engine;
     if (replaying != null) {
       replaying.onFailure(failure);
@@ -959,20 +1119,29 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     final queued = Completer<String?>();
     // Let the failure settle (error widgets, follow-up events) before writing.
     Timer(const Duration(milliseconds: 300), () {
-      unawaited(writeCapsule(
-        failure: failure,
-        monitoring: monitoring,
-        onQueued: (id) {
-          if (!queued.isCompleted) queued.complete(id);
-        },
-      ).then((r) {
-        if (r != null) {
-          debugPrint('[bugcapsule] captured ${r.capsuleId} '
-              '(${r.eligibility.status.name}) → ${r.file.path}');
-        }
-      }).catchError((Object e) => debugPrint('[bugcapsule] capture failed: $e')).whenComplete(() {
-        if (!queued.isCompleted) queued.complete(null);
-      }));
+      unawaited(
+        writeCapsule(
+              failure: failure,
+              monitoring: monitoring,
+              onQueued: (id) {
+                if (!queued.isCompleted) queued.complete(id);
+              },
+            )
+            .then((r) {
+              if (r != null) {
+                debugPrint(
+                  '[bugcapsule] captured ${r.capsuleId} '
+                  '(${r.eligibility.status.name}) → ${r.file.path}',
+                );
+              }
+            })
+            .catchError(
+              (Object e) => debugPrint('[bugcapsule] capture failed: $e'),
+            )
+            .whenComplete(() {
+              if (!queued.isCompleted) queued.complete(null);
+            }),
+      );
     });
     return queued.future;
   }
@@ -993,31 +1162,48 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     final window = recorder.window();
     final anchor = _anchorMs ?? now();
     final wallAtAnchor =
-        _wallAtAnchorMs ?? (window.checkpoint.wallClockMs + anchor - window.checkpoint.t);
+        _wallAtAnchorMs ??
+        (window.checkpoint.wallClockMs + anchor - window.checkpoint.t);
 
     final eligibility = EligibilityBuilder();
     if (config.gitSha == null) {
-      eligibility.missing('build.gitSha', 'BUGCAPSULE_GIT_SHA was not set at build time');
+      eligibility.missing(
+        'build.gitSha',
+        'BUGCAPSULE_GIT_SHA was not set at build time',
+      );
     } else if (config.gitDirty == true) {
-      eligibility.missing('build.gitSha', 'built from a tree with uncommitted changes');
+      eligibility.missing(
+        'build.gitSha',
+        'built from a tree with uncommitted changes',
+      );
     }
     if (failure == null) {
-      eligibility.missing('failure.assertion', 'manual capture without a failure assertion',
-          blocking: true);
+      eligibility.missing(
+        'failure.assertion',
+        'manual capture without a failure assertion',
+        blocking: true,
+      );
     }
     if (recorder.rewriteDropped > 0) {
-      eligibility.missing('events.redaction',
-          '${recorder.rewriteDropped} buffered events were dropped when redaction rules changed');
+      eligibility.missing(
+        'events.redaction',
+        '${recorder.rewriteDropped} buffered events were dropped when redaction rules changed',
+      );
     }
     if (window.hasGap) {
-      eligibility.missing('events.window',
-          'events between the checkpoint and the window were evicted; raise window or maxEvents');
+      eligibility.missing(
+        'events.window',
+        'events between the checkpoint and the window were evicted; raise window or maxEvents',
+      );
     }
     for (final integration in integrations) {
       try {
         integration.describeEligibility(eligibility, window);
       } catch (e) {
-        eligibility.missing('integration.${integration.name}', 'eligibility check failed: $e');
+        eligibility.missing(
+          'integration.${integration.name}',
+          'eligibility check failed: $e',
+        );
       }
     }
 
@@ -1091,7 +1277,9 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
 
     // Never queue what a reader would reject; keep it locally for inspection.
     final problem = validateCapsuleDocument(CapsuleCodec.toJson(capsule));
-    final bytes = await (_overrides?.encodeCapsule?.call(capsule) ?? compute(_encodeCapsule, capsule));
+    final bytes =
+        await (_overrides?.encodeCapsule?.call(capsule) ??
+            compute(_encodeCapsule, capsule));
     // The kill switch fired while encoding: drop the capsule.
     if (_killed) return null;
     final s = await store!;
@@ -1104,14 +1292,26 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     UploadResult? upload;
     final outbox = _outbox;
     if (problem != null) {
-      debugPrint('[bugcapsule] capsule ${capsule.manifest.capsuleId} failed validation, not uploaded: $problem');
-      if (outbox != null) upload = UploadResult(UploadStatus.rejected, message: 'invalid capsule: $problem');
+      debugPrint(
+        '[bugcapsule] capsule ${capsule.manifest.capsuleId} failed validation, not uploaded: $problem',
+      );
+      if (outbox != null) {
+        upload = UploadResult(
+          UploadStatus.rejected,
+          message: 'invalid capsule: $problem',
+        );
+      }
     } else if (outbox != null) {
       if (bytes.length > _maxCapsuleBytes) {
-        upload = UploadResult(UploadStatus.rejected,
-            message: 'capsule is ${bytes.length} bytes, limit $_maxCapsuleBytes');
+        upload = UploadResult(
+          UploadStatus.rejected,
+          message: 'capsule is ${bytes.length} bytes, limit $_maxCapsuleBytes',
+        );
       } else if (!await outbox.enqueue(capsule.manifest.capsuleId, bytes)) {
-        upload = const UploadResult(UploadStatus.rejected, message: 'not queued (outbox limit or disk error)');
+        upload = const UploadResult(
+          UploadStatus.rejected,
+          message: 'not queued (outbox limit or disk error)',
+        );
       } else if (_killed) {
         await outbox.purge();
         return null;
@@ -1132,14 +1332,16 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   /// Redacted and cut to the capsule format's bounds (100 labels, 100-char
   /// keys, 2,000-char values), so a long QA note never invalidates a capsule.
   Map<String, String> _sanitizeLabels(Map<String, String> labels) => {
-        for (final e in labels.entries.take(100))
-          _cut(e.key, 100): _redactor.isSensitiveKey(e.key)
-              ? Redactor.placeholder
-              : _cut(_redactor.scrubText(e.value), 2000),
-      };
+    for (final e in labels.entries.take(100))
+      _cut(e.key, 100): _redactor.isSensitiveKey(e.key)
+          ? Redactor.placeholder
+          : _cut(_redactor.scrubText(e.value), 2000),
+  };
 
-  static String _cut(String s, int max) => s.length <= max ? s : s.substring(0, max);
-  static String? _cutOrNull(String? s, int max) => s == null ? null : _cut(s, max);
+  static String _cut(String s, int max) =>
+      s.length <= max ? s : s.substring(0, max);
+  static String? _cutOrNull(String? s, int max) =>
+      s == null ? null : _cut(s, max);
 
   bool get _uploadsAllowed => !_disposed && (remote?.uploadsAllowed ?? false);
 
@@ -1150,20 +1352,32 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     final outbox = _outbox;
     final transport = _transport;
     final controller = remote;
-    if (outbox == null || transport == null || controller == null || _disposed) return null;
+    if (outbox == null ||
+        transport == null ||
+        controller == null ||
+        _disposed) {
+      return null;
+    }
     try {
       await controller.ensureFresh();
       if (!_uploadsAllowed) {
         return onlyId == null
             ? null
-            : const UploadResult(UploadStatus.retryLater, message: 'waiting for remote config');
+            : const UploadResult(
+                UploadStatus.retryLater,
+                message: 'waiting for remote config',
+              );
       }
       return await outbox.flush(
         upload: (bytes) async {
           final result = await transport.upload(bytes);
-          if (result.status == UploadStatus.uploaded) _firstCapsuleAcceptedAt ??= DateTime.now();
+          if (result.status == UploadStatus.uploaded) {
+            _firstCapsuleAcceptedAt ??= DateTime.now();
+          }
           // A refused credential: the config fetch learns why and stops.
-          if (result.message == 'capture_disabled' || result.unauthorized) unawaited(controller.refresh());
+          if (result.message == 'capture_disabled' || result.unauthorized) {
+            unawaited(controller.refresh());
+          }
           return result;
         },
         allowed: () => _uploadsAllowed,
@@ -1202,17 +1416,24 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
         final keep = _sessionRate <= 0 ? 0.0 : rate / _sessionRate;
         _sessionRate = rate;
         if (_random.nextDouble() >= keep) {
-          debugPrint('[bugcapsule] sample rate lowered to $rate; this session stops recording');
+          debugPrint(
+            '[bugcapsule] sample rate lowered to $rate; this session stops recording',
+          );
           _stopRecording();
         }
       }
     }
     final bodies = config.captureNetworkBodies && next.captureNetworkBodies;
     if (_captureBodies && !bodies) {
-      _recorder?.rewrite(event: (e) => e.type == EventTypes.http ? _withoutBodies(e) : e);
+      _recorder?.rewrite(
+        event: (e) => e.type == EventTypes.http ? _withoutBodies(e) : e,
+      );
     }
     _captureBodies = bodies;
-    if (!listEquals(_redactor.extraKeys, [...config.redactKeys, ...next.redactKeys])) {
+    if (!listEquals(_redactor.extraKeys, [
+      ...config.redactKeys,
+      ...next.redactKeys,
+    ])) {
       _redactor = _baseRedactor(remote: next.redactKeys);
       final recorder = _recorder;
       try {
@@ -1224,7 +1445,9 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
           event: (e) {
             if (e.type == EventTypes.http) return null;
             final data = _sanitizeEvent(e.type, e.data, hook: false);
-            return data == null ? null : BugCapsuleEvent(seq: e.seq, t: e.t, type: e.type, data: data);
+            return data == null
+                ? null
+                : BugCapsuleEvent(seq: e.seq, t: e.t, type: e.type, data: data);
           },
           checkpoint: (c) => Checkpoint(
             kind: c.kind,
@@ -1236,7 +1459,9 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
         );
       } catch (e) {
         // A buffer that cannot be re-redacted must not be uploaded.
-        debugPrint('[bugcapsule] could not apply new redaction rules to the buffer ($e); dropping it');
+        debugPrint(
+          '[bugcapsule] could not apply new redaction rules to the buffer ($e); dropping it',
+        );
         _stopRecording();
       }
     }
@@ -1247,7 +1472,9 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     d['requestBody'] = null;
     d['responseBody'] = null;
     d['bodyEncoding'] = 'omitted';
-    if (d['requestEncoding'] != null && d['requestEncoding'] != 'json') d['requestEncoding'] = 'omitted';
+    if (d['requestEncoding'] != null && d['requestEncoding'] != 'json') {
+      d['requestEncoding'] = 'omitted';
+    }
     return BugCapsuleEvent(seq: e.seq, t: e.t, type: e.type, data: d);
   }
 
@@ -1267,32 +1494,47 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     _killed = true;
     _stopRecording();
     // A refused credential was already explained in one line.
-    if (wasRecording && !(remote?.rejected ?? false)) debugPrint('[bugcapsule] capture disabled by remote config');
+    if (wasRecording && !(remote?.rejected ?? false)) {
+      debugPrint('[bugcapsule] capture disabled by remote config');
+    }
     final outbox = _outbox;
-    if (outbox != null) unawaited(outbox.purge().then((_) {}, onError: (Object _) {}));
+    if (outbox != null) {
+      unawaited(outbox.purge().then((_) {}, onError: (Object _) {}));
+    }
     final s = store;
     if (s != null) {
-      unawaited(s.then((s) => s.clearSavedCaptures()).then((_) {}, onError: (Object _) {}));
+      unawaited(
+        s
+            .then((s) => s.clearSavedCaptures())
+            .then((_) {}, onError: (Object _) {}),
+      );
     }
   }
 
   // ---------------------------------------------------------------- replay
 
   Future<void> _startReplay(
-      String url, FutureOr<void> Function() appRunner, WidgetsBinding binding) async {
+    String url,
+    FutureOr<void> Function() appRunner,
+    WidgetsBinding binding,
+  ) async {
     final channel = ReplayChannel(url);
     final Capsule capsule;
     final ReplaySettings settings;
     try {
       (capsule, settings) = await channel.fetch();
     } catch (e) {
-      await channel.report(ReplayReport(
-        outcome: e is CapsuleFormatException ? ReplayOutcome.incompatible : ReplayOutcome.error,
-        attempt: 1,
-        durationMs: 0,
-        strategy: ReplayStrategy.auto,
-        message: 'could not load capsule: $e',
-      ));
+      await channel.report(
+        ReplayReport(
+          outcome: e is CapsuleFormatException
+              ? ReplayOutcome.incompatible
+              : ReplayOutcome.error,
+          attempt: 1,
+          durationMs: 0,
+          strategy: ReplayStrategy.auto,
+          message: 'could not load capsule: $e',
+        ),
+      );
       await appRunner();
       return;
     }
@@ -1307,21 +1549,27 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     // The capture's redaction rules, so request keys of redacted bodies match.
     _redactor = Redactor(
       extraKeys: {...config.redactKeys, ...capsule.manifest.redactionKeys},
-      extraHeaders: {...config.redactHeaders, ...capsule.manifest.redactionHeaders},
+      extraHeaders: {
+        ...config.redactHeaders,
+        ...capsule.manifest.redactionHeaders,
+      },
       patterns: config.redactPatterns,
     );
 
     if (capsule.manifest.stateSchemaVersion != config.stateSchemaVersion &&
         capsule.checkpoint.kind == CheckpointKind.periodic) {
-      await channel.report(ReplayReport(
-        outcome: ReplayOutcome.incompatible,
-        attempt: settings.attempt,
-        durationMs: 0,
-        strategy: settings.strategy,
-        expectedSignature: capsule.manifest.failure?.signature,
-        message: 'state schema v${capsule.manifest.stateSchemaVersion} captured, '
-            'app is v${config.stateSchemaVersion}; register a migration or mark the capsule stale',
-      ));
+      await channel.report(
+        ReplayReport(
+          outcome: ReplayOutcome.incompatible,
+          attempt: settings.attempt,
+          durationMs: 0,
+          strategy: settings.strategy,
+          expectedSignature: capsule.manifest.failure?.signature,
+          message:
+              'state schema v${capsule.manifest.stateSchemaVersion} captured, '
+              'app is v${config.stateSchemaVersion}; register a migration or mark the capsule stale',
+        ),
+      );
       engine = null;
       await appRunner();
       return;
@@ -1333,7 +1581,10 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     final names = {for (final i in integrations) i.name};
     for (final name in capsule.manifest.integrations) {
       if (!names.contains(name)) {
-        replay.diverge('integration.missing', '$name was used when capturing but is not set up');
+        replay.diverge(
+          'integration.missing',
+          '$name was used when capturing but is not set up',
+        );
       }
     }
     for (final integration in integrations) {
@@ -1344,7 +1595,9 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
       }
     }
     for (final name in capsule.checkpoint.data.keys) {
-      if (!names.contains(name)) replay.diverge('restore.missingIntegration', name);
+      if (!names.contains(name)) {
+        replay.diverge('restore.missingIntegration', name);
+      }
     }
     for (final integration in integrations) {
       final data = capsule.checkpoint.data[integration.name];
@@ -1356,16 +1609,20 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     }
 
     binding.addPostFrameCallback((_) {
-      unawaited(replay.run().then(channel.report).catchError((Object e, StackTrace st) {
-        return channel.report(ReplayReport(
-          outcome: ReplayOutcome.error,
-          attempt: settings.attempt,
-          durationMs: 0,
-          strategy: settings.strategy,
-          expectedSignature: capsule.manifest.failure?.signature,
-          message: 'replay crashed: $e',
-        ));
-      }));
+      unawaited(
+        replay.run().then(channel.report).catchError((Object e, StackTrace st) {
+          return channel.report(
+            ReplayReport(
+              outcome: ReplayOutcome.error,
+              attempt: settings.attempt,
+              durationMs: 0,
+              strategy: settings.strategy,
+              expectedSignature: capsule.manifest.failure?.signature,
+              message: 'replay crashed: $e',
+            ),
+          );
+        }),
+      );
     });
     await appRunner();
   }
@@ -1383,10 +1640,19 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
 
   static const _networkIntegrations = {'dio', 'http'};
   static const _navigationIntegrations = {'go_router'};
-  static const _stateIntegrations = {'bloc', 'riverpod', 'notifier', 'getx', 'mobx', 'shared_preferences'};
+  static const _stateIntegrations = {
+    'bloc',
+    'riverpod',
+    'notifier',
+    'getx',
+    'mobx',
+    'shared_preferences',
+  };
 
   static const statusBeforeInit = BugCapsuleStatus(
-    connection: BugCapsuleConnectionStatus(state: BugCapsuleConnectionState.notConfigured),
+    connection: BugCapsuleConnectionStatus(
+      state: BugCapsuleConnectionState.notConfigured,
+    ),
     instrumentation: BugCapsuleInstrumentationStatus(
       recording: false,
       network: false,
@@ -1403,36 +1669,50 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     final tokenError = _connection.tokenError;
     final current = controller?.current;
     final state = switch (tokenError?.error) {
-      ConnectionTokenError.invalidToken => BugCapsuleConnectionState.invalidToken,
-      ConnectionTokenError.unsupportedTokenVersion => BugCapsuleConnectionState.unsupportedTokenVersion,
-      null when _backend == null && _overrides?.transport == null => BugCapsuleConnectionState.notConfigured,
+      ConnectionTokenError.invalidToken =>
+        BugCapsuleConnectionState.invalidToken,
+      ConnectionTokenError.unsupportedTokenVersion =>
+        BugCapsuleConnectionState.unsupportedTokenVersion,
+      null when _backend == null && _overrides?.transport == null =>
+        BugCapsuleConnectionState.notConfigured,
       null when !config.enabled => BugCapsuleConnectionState.disabled,
-      null when controller?.rejected ?? false => BugCapsuleConnectionState.rejected,
-      null when current != null && !current.enabled => BugCapsuleConnectionState.disabled,
-      null when controller?.fetchedThisSession != null => BugCapsuleConnectionState.connected,
-      null when failure != null && failure.transient => BugCapsuleConnectionState.offline,
+      null when controller?.rejected ?? false =>
+        BugCapsuleConnectionState.rejected,
+      null when current != null && !current.enabled =>
+        BugCapsuleConnectionState.disabled,
+      null when controller?.fetchedThisSession != null =>
+        BugCapsuleConnectionState.connected,
+      null when failure != null && failure.transient =>
+        BugCapsuleConnectionState.offline,
       null => BugCapsuleConnectionState.connecting,
     };
     final names = [for (final i in integrations) i.name];
     final network = names.any(_networkIntegrations.contains);
     final navigation = names.any(_navigationIntegrations.contains);
     final appState =
-        names.any(_stateIntegrations.contains) || integrations.any((i) => i is TrackedStateIntegration);
+        names.any(_stateIntegrations.contains) ||
+        integrations.any((i) => i is TrackedStateIntegration);
     return BugCapsuleStatus(
       connection: BugCapsuleConnectionStatus(
         state: state,
         source: _connection.source,
         apiUrl: _backend?.url.replaceAll(RegExp(r'/+$'), ''),
-        reason: tokenError?.error.code ??
+        reason:
+            tokenError?.error.code ??
             switch (state) {
-              BugCapsuleConnectionState.rejected => failure?.reason ?? failure?.message,
-              BugCapsuleConnectionState.offline => failure?.reason ?? failure?.message,
+              BugCapsuleConnectionState.rejected =>
+                failure?.reason ?? failure?.message,
+              BugCapsuleConnectionState.offline =>
+                failure?.reason ?? failure?.message,
               _ => null,
             },
-        message: tokenError?.message ??
+        message:
+            tokenError?.message ??
             switch (state) {
-              BugCapsuleConnectionState.rejected => failure?.detail ?? 'the backend refused the credential',
-              BugCapsuleConnectionState.offline => 'the backend could not be reached; data is kept and retried',
+              BugCapsuleConnectionState.rejected =>
+                failure?.detail ?? 'the backend refused the credential',
+              BugCapsuleConnectionState.offline =>
+                'the backend could not be reached; data is kept and retried',
               _ => null,
             },
         configFetchedAt: controller?.fetchedThisSession,
@@ -1467,7 +1747,9 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     _stopRecording();
     remote?.dispose();
     if (_observing) WidgetsBinding.instance.removeObserver(this);
-    if (_pointerRouteInstalled) GestureBinding.instance.pointerRouter.removeGlobalRoute(_onPointer);
+    if (_pointerRouteInstalled) {
+      GestureBinding.instance.pointerRouter.removeGlobalRoute(_onPointer);
+    }
     if (_handlersInstalled) {
       FlutterError.onError = _previousFlutterError;
       PlatformDispatcher.instance.onError = _previousPlatformError;
@@ -1490,7 +1772,9 @@ class _ObservedEnvelopes implements EnvelopeTransport {
   @override
   Future<UploadResult> sendEnvelope(List<int> gzippedBody) async {
     final result = await _base.sendEnvelope(gzippedBody);
-    if (!_seen && result.status == UploadStatus.uploaded && _hasEvent(gzippedBody)) {
+    if (!_seen &&
+        result.status == UploadStatus.uploaded &&
+        _hasEvent(gzippedBody)) {
       _seen = true;
       _onEventAccepted();
     }
@@ -1500,7 +1784,8 @@ class _ObservedEnvelopes implements EnvelopeTransport {
   static bool _hasEvent(List<int> gzippedBody) {
     try {
       final items = EnvelopeCodec.decode(gzippedBody)['items'];
-      return items is List && items.any((i) => i is Map && i['type'] == EnvelopeItemType.event);
+      return items is List &&
+          items.any((i) => i is Map && i['type'] == EnvelopeItemType.event);
     } catch (_) {
       return false;
     }

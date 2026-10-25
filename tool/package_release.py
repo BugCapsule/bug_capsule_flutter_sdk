@@ -10,7 +10,7 @@ version = next(line.split(":", 1)[1].strip() for line in (source / "pubspec.yaml
 stage = root / "dist" / ("bug_capsule-" + version)
 if stage.exists(): shutil.rmtree(stage)
 stage.mkdir(parents=True, exist_ok=True)
-for name in ["lib", "bin", "tool", "README.md", "CHANGELOG.md", "LICENSE", "pubspec.yaml"]:
+for name in ["lib", "bin", "tool", "example", "README.md", "CHANGELOG.md", "LICENSE", "pubspec.yaml"]:
     item = source / name
     if item.is_dir():
         if (stage / name).exists(): shutil.rmtree(stage / name)

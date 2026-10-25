@@ -47,40 +47,67 @@ final _base64Url = RegExp(r'^[A-Za-z0-9_-]+={0,2}$');
 /// and grants exactly what an ingest key grants: fetching the project's SDK
 /// config and uploading Capsules and monitoring envelopes.
 ParsedConnectionToken parseConnectionToken(String raw) {
-  InvalidConnectionToken bad(String message) => InvalidConnectionToken(ConnectionTokenError.invalidToken, message);
+  InvalidConnectionToken bad(String message) =>
+      InvalidConnectionToken(ConnectionTokenError.invalidToken, message);
   final token = raw.trim();
   if (token.isEmpty) {
-    return bad('the token is empty; copy it from the BugCapsule dashboard (Project settings → Keys → SDK tokens)');
+    return bad(
+      'the token is empty; copy it from the BugCapsule dashboard (Project settings → Keys → SDK tokens)',
+    );
   }
   if (token.startsWith('bci_') || token.startsWith('bct_')) {
-    return bad('this is an ingest key, not a connection token: pass it as '
-        'backend: BugCapsuleBackendConfig(url: ..., ingestKey: ...), or generate an SDK token in the dashboard');
+    return bad(
+      'this is an ingest key, not a connection token: pass it as '
+      'backend: BugCapsuleBackendConfig(url: ..., ingestKey: ...), or generate an SDK token in the dashboard',
+    );
   }
   if (token.startsWith('bcs_')) {
-    return bad('this is a secret key: never ship it in an app. Rotate it and generate an SDK token in the dashboard');
+    return bad(
+      'this is a secret key: never ship it in an app. Rotate it and generate an SDK token in the dashboard',
+    );
   }
   final m = _token.firstMatch(token);
-  if (m == null) return bad('a connection token starts with "bcsdk.v1."; copy the whole token from the dashboard');
+  if (m == null) {
+    return bad(
+      'a connection token starts with "bcsdk.v1."; copy the whole token from the dashboard',
+    );
+  }
   if (int.tryParse(m[1]!) != _supportedVersion) {
-    return InvalidConnectionToken(ConnectionTokenError.unsupportedTokenVersion,
-        'token version ${m[1]} needs a newer bug_capsule package (this one understands v$_supportedVersion)');
+    return InvalidConnectionToken(
+      ConnectionTokenError.unsupportedTokenVersion,
+      'token version ${m[1]} needs a newer bug_capsule package (this one understands v$_supportedVersion)',
+    );
   }
   final json = _decodeBase64Url(m[2]!);
-  if (json == null) return bad('the token is damaged or incomplete; copy it again from the dashboard');
+  if (json == null) {
+    return bad(
+      'the token is damaged or incomplete; copy it again from the dashboard',
+    );
+  }
   Object? payload;
   try {
     payload = jsonDecode(json);
   } on FormatException {
-    return bad('the token is damaged or incomplete; copy it again from the dashboard');
+    return bad(
+      'the token is damaged or incomplete; copy it again from the dashboard',
+    );
   }
-  if (payload is! Map) return bad('the token is damaged; copy it again from the dashboard');
+  if (payload is! Map) {
+    return bad('the token is damaged; copy it again from the dashboard');
+  }
   final key = payload['key'];
   if (key is! String || !_key.hasMatch(key)) {
-    return bad('the token has no valid ingest credential; generate a new token');
+    return bad(
+      'the token has no valid ingest credential; generate a new token',
+    );
   }
   final url = _apiUrl(payload['api']);
-  if (url == null) return bad('the token has no valid API URL; generate a new token');
-  return ValidConnectionToken(BugCapsuleBackendConfig(url: url, ingestKey: key));
+  if (url == null) {
+    return bad('the token has no valid API URL; generate a new token');
+  }
+  return ValidConnectionToken(
+    BugCapsuleBackendConfig(url: url, ingestKey: key),
+  );
 }
 
 /// base64url (padding optional) of UTF-8 text, or null.
@@ -89,7 +116,10 @@ String? _decodeBase64Url(String s) {
   final unpadded = s.replaceAll('=', '');
   if (unpadded.length % 4 == 1) return null;
   try {
-    final padded = unpadded.padRight(unpadded.length + (4 - unpadded.length % 4) % 4, '=');
+    final padded = unpadded.padRight(
+      unpadded.length + (4 - unpadded.length % 4) % 4,
+      '=',
+    );
     return utf8.decode(base64Url.decode(padded));
   } on FormatException {
     return null;

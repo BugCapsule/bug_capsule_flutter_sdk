@@ -25,13 +25,17 @@ class TraceParent {
   final String parentSpanId;
   final bool sampled;
 
-  static final _pattern = RegExp(r'^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$');
+  static final _pattern = RegExp(
+    r'^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$',
+  );
 
   /// Null when [header] is malformed or carries all-zero ids.
   static TraceParent? parse(String? header) {
     final m = _pattern.firstMatch(header?.trim().toLowerCase() ?? '');
     if (m == null || m[1] == 'ff') return null;
-    if (RegExp(r'^0+$').hasMatch(m[2]!) || RegExp(r'^0+$').hasMatch(m[3]!)) return null;
+    if (RegExp(r'^0+$').hasMatch(m[2]!) || RegExp(r'^0+$').hasMatch(m[3]!)) {
+      return null;
+    }
     return TraceParent(m[2]!, m[3]!, (int.parse(m[4]!, radix: 16) & 1) == 1);
   }
 
@@ -57,7 +61,10 @@ abstract final class Baggage {
       if (sampleRate != null) 'sample_rate': _rate(sampleRate),
       'sampled': '$sampled',
     };
-    return [for (final e in entries.entries) '$prefix${e.key}=${Uri.encodeComponent(e.value)}'].join(',');
+    return [
+      for (final e in entries.entries)
+        '$prefix${e.key}=${Uri.encodeComponent(e.value)}',
+    ].join(',');
   }
 
   static String _rate(double r) {
@@ -70,33 +77,50 @@ abstract final class Baggage {
   static String merge(String? existing, String ours) {
     final kept = [
       for (final entry in (existing ?? '').split(','))
-        if (entry.trim().isNotEmpty && !entry.trim().startsWith(prefix)) entry.trim(),
+        if (entry.trim().isNotEmpty && !entry.trim().startsWith(prefix))
+          entry.trim(),
     ];
     return [...kept, ours].join(',');
   }
 
   /// The `bugcapsule-*` entries of a header, keys without the prefix.
   static Map<String, String> parse(String? header) => {
-        for (final entry in (header ?? '').split(','))
-          if (entry.trim().startsWith(prefix) && entry.contains('='))
-            entry.trim().substring(prefix.length, entry.trim().indexOf('=')):
-                Uri.decodeComponent(entry.trim().substring(entry.trim().indexOf('=') + 1).split(';').first),
-      };
+    for (final entry in (header ?? '').split(','))
+      if (entry.trim().startsWith(prefix) && entry.contains('='))
+        entry.trim().substring(
+          prefix.length,
+          entry.trim().indexOf('='),
+        ): Uri.decodeComponent(
+          entry
+              .trim()
+              .substring(entry.trim().indexOf('=') + 1)
+              .split(';')
+              .first,
+        ),
+  };
 }
 
 /// `tracePropagationTargets`: plain strings match as substrings of the URL,
 /// `/pattern/` strings as regular expressions.
 class PropagationTargets {
   PropagationTargets(List<String> targets)
-      : _substrings = [for (final t in targets) if (!_isRegex(t)) t],
-        _patterns = [for (final t in targets) if (_isRegex(t)) RegExp(t.substring(1, t.length - 1))];
+    : _substrings = [
+        for (final t in targets)
+          if (!_isRegex(t)) t,
+      ],
+      _patterns = [
+        for (final t in targets)
+          if (_isRegex(t)) RegExp(t.substring(1, t.length - 1)),
+      ];
 
   final List<String> _substrings;
   final List<RegExp> _patterns;
 
-  static bool _isRegex(String t) => t.length >= 2 && t.startsWith('/') && t.endsWith('/');
+  static bool _isRegex(String t) =>
+      t.length >= 2 && t.startsWith('/') && t.endsWith('/');
 
-  bool matches(String url) => _substrings.any(url.contains) || _patterns.any((p) => p.hasMatch(url));
+  bool matches(String url) =>
+      _substrings.any(url.contains) || _patterns.any((p) => p.hasMatch(url));
 }
 
 /// Span statuses of monitoring-v1 §8.
@@ -121,31 +145,35 @@ abstract final class SpanStatus {
 
   /// HTTP status → span status, as OpenTelemetry maps it.
   static String fromHttp(int status) => switch (status) {
-        >= 200 && < 400 => ok,
-        400 => invalidArgument,
-        401 => unauthenticated,
-        403 => permissionDenied,
-        404 => notFound,
-        409 => alreadyExists,
-        412 => failedPrecondition,
-        413 => outOfRange,
-        429 => resourceExhausted,
-        499 => cancelled,
-        501 => unimplemented,
-        503 => unavailable,
-        504 => deadlineExceeded,
-        >= 400 && < 500 => invalidArgument,
-        >= 500 && < 600 => internalError,
-        _ => unknown,
-      };
+    >= 200 && < 400 => ok,
+    400 => invalidArgument,
+    401 => unauthenticated,
+    403 => permissionDenied,
+    404 => notFound,
+    409 => alreadyExists,
+    412 => failedPrecondition,
+    413 => outOfRange,
+    429 => resourceExhausted,
+    499 => cancelled,
+    501 => unimplemented,
+    503 => unavailable,
+    504 => deadlineExceeded,
+    >= 400 && < 500 => invalidArgument,
+    >= 500 && < 600 => internalError,
+    _ => unknown,
+  };
 }
 
 final _idSegment = RegExp(
-    r'^(?:\d+|[0-9a-fA-F]{8,}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$');
+  r'^(?:\d+|[0-9a-fA-F]{8,}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$',
+);
 
 /// A path with id-like segments (numbers, hex runs of 8+, UUIDs) replaced by
 /// `:id`, and no query or fragment, for transaction and span names.
 String parameterizePath(String path) {
   final noQuery = path.split(RegExp('[?#]')).first;
-  return noQuery.split('/').map((s) => _idSegment.hasMatch(s) ? ':id' : s).join('/');
+  return noQuery
+      .split('/')
+      .map((s) => _idSegment.hasMatch(s) ? ':id' : s)
+      .join('/');
 }
