@@ -1,4 +1,4 @@
-## Unreleased
+## 0.4.1-beta.4 — 2026-10-25
 
 - Let Android instrumentation finish ActivityScenario cleanup before starting another replay attempt, and stop the test APK process during attempt isolation. This prevents subsequent attempts failing to attach on Android 14.
 
