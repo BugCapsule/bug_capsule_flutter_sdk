@@ -499,6 +499,7 @@ class AndroidLauncher implements AppLauncher {
     final log = StringBuffer();
     try {
       await _adbRun(['shell', 'am', 'force-stop', _appId], serial: _serial);
+      await _adbRun(['shell', 'am', 'force-stop', _testAppId], serial: _serial);
       // Attempt isolation: fresh app data (storage is restored from the capsule).
       final clear = await _adbRun([
         'shell',
@@ -572,13 +573,24 @@ class AndroidLauncher implements AppLauncher {
       final p = process;
       if (p != null) {
         final done = await p.exitCode.timeout(
-          const Duration(milliseconds: 100),
+          const Duration(seconds: 5),
           onTimeout: () => -999,
         );
-        if (done == -999) await Processes.kill(p);
+        if (done == -999) {
+          await _adbRun(['shell', 'am', 'force-stop', _appId], serial: _serial);
+          await _adbRun([
+            'shell',
+            'am',
+            'force-stop',
+            _testAppId,
+          ], serial: _serial);
+          await Processes.kill(p);
+        }
       }
-      // Stops the instrumentation (it runs in the app's process) on timeout or interruption.
+      // Allow ActivityScenario cleanup to finish before another attempt.
+      // Its EmptyActivity also runs in the test APK process.
       await _adbRun(['shell', 'am', 'force-stop', _appId], serial: _serial);
+      await _adbRun(['shell', 'am', 'force-stop', _testAppId], serial: _serial);
       for (final s in subs) {
         await s.cancel();
       }
