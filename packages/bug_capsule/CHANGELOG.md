@@ -1,3 +1,9 @@
+## 0.4.1-beta.6 — 2026-10-25
+
+- `bugcapsule login` signs in through the browser, like `firebase login`: it shows a code, opens the dashboard to approve it for one project, and saves a personal token. `--no-browser` prints the address to open on another device (SSH). `--url` defaults to the saved login, then `https://api.bugcapsule.com`. A BugCapsule server without browser sign-in gets a message to use `--token` instead.
+- New `bugcapsule logout` revokes the CLI's personal token and removes it from `~/.bugcapsule/config.json`.
+- `--token`, `--secret-key` and `--ingest-key` keep working; passing an SDK token (`bcsdk.v1…`, `bct_…`) to `--token` now says it belongs in the app.
+
 ## 0.4.1-beta.5 — 2026-10-25
 
 - Keep the CLI version and captured SDK version in sync with the published package version.

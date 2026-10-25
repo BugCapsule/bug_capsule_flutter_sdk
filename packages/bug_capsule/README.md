@@ -49,7 +49,7 @@ timing, so races and data-dependent bugs come back.
 ## Install
 
 ```bash
-flutter pub add bug_capsule:^0.4.1-beta.5
+flutter pub add bug_capsule:^0.4.1-beta.6
 ```
 
 Everything ships in this one package, with one import:
@@ -259,7 +259,7 @@ The `bugcapsule` CLI ships in the same package and replays capsules from every
 BugCapsule SDK (Flutter, Android, iOS and web).
 
 ```bash
-dart pub global activate bug_capsule 0.4.1-beta.5
+dart pub global activate bug_capsule 0.4.1-beta.6
 bugcapsule --version
 ```
 
@@ -267,12 +267,21 @@ If the shell can't find `bugcapsule`, add `~/.pub-cache/bin` to your `PATH`.
 Inside an app that depends on the package you can also run
 `dart run bug_capsule:bugcapsule <command>`.
 
-Log in with a personal token from **Project settings → Keys & CLI access**.
-In CI, use a service token (`bcv_…`) in `BUGCAPSULE_TOKEN` instead.
+Sign in through the browser, like `firebase login`:
 
 ```bash
-bugcapsule login --url https://api.bugcapsule.com --token bcp_…
+bugcapsule login
 ```
+
+It shows a code and opens BugCapsule in your browser. Check the code matches,
+pick the project and approve; the CLI saves a personal token for that project
+in `~/.bugcapsule/config.json`. Over SSH or without a browser, use
+`bugcapsule login --no-browser` and open the printed address on any device.
+`bugcapsule logout` revokes the token. A self-hosted backend takes
+`--url https://bugs.example.com`.
+
+In CI, use a service token (`bcv_…`) from **Project settings → Keys & CLI
+access** instead: `bugcapsule login --token bcv_…`, or set `BUGCAPSULE_TOKEN`.
 
 ### Run it
 
