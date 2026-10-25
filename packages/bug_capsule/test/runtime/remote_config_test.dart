@@ -187,6 +187,45 @@ void main() {
     });
   });
 
+  test('a refusal is reported once with its reason; success and failures are tracked', () {
+    fakeAsync((async) {
+      final backend = FakeBackend(async);
+      backend.script.addAll([
+          () => const ConfigFetchFailed('offline'),
+          () => ConfigFetched(backend.config()),
+          () => const ConfigFetchFailed('HTTP 401',
+              status: 401, reason: 'token_revoked', detail: 'generate a new token'),
+          () => const ConfigFetchFailed('HTTP 401', status: 401, reason: 'token_revoked'),
+        ]);
+      final refused = <ConfigFetchFailed>[];
+      final c = RemoteConfigController(
+        fetch: backend.fetch,
+        cache: MemoryCache(),
+        scope: 'prod',
+        onChange: (p, n) => changes.add((p, n)),
+        onRejected: refused.add,
+        now: () => async.getClock(DateTime.utc(2026)).now(),
+        random: Random(1),
+      );
+      c.refresh();
+      async.flushMicrotasks();
+      expect(c.lastFailure?.transient, isTrue);
+      expect(c.fetchedThisSession, isNull);
+      c.refresh();
+      async.flushMicrotasks();
+      expect(c.lastFailure, isNull);
+      expect(c.fetchedThisSession, DateTime.utc(2026));
+      c.refresh();
+      async.flushMicrotasks();
+      c.refresh();
+      async.flushMicrotasks();
+      expect(c.rejected, isTrue);
+      expect(c.lastFailure?.reason, 'token_revoked');
+      expect(refused.single.detail, 'generate a new token');
+      c.dispose();
+    });
+  });
+
   test('pause stops the timer; resume refreshes a stale config at once', () {
     fakeAsync((async) {
       final backend = FakeBackend(async)..ttl = 60;

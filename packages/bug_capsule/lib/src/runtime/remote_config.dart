@@ -111,15 +111,25 @@ class ConfigFetched extends ConfigFetchResult {
 }
 
 class ConfigFetchFailed extends ConfigFetchResult {
-  const ConfigFetchFailed(this.message, {this.status, this.retryAfter});
+  const ConfigFetchFailed(this.message, {this.status, this.retryAfter, this.reason, this.detail});
   final String message;
 
   /// HTTP status, null for network errors.
   final int? status;
   final Duration? retryAfter;
 
-  /// The ingest key was rejected (revoked or rotated).
+  /// From the backend's problem answer: why the credential was refused
+  /// (`token_revoked`, `token_expired`, `token_unknown`,
+  /// `key_unknown_or_revoked`, ...) and what to do about it.
+  final String? reason;
+  final String? detail;
+
+  /// The credential was refused (revoked, expired, unknown).
   bool get unauthorized => status == 401 || status == 403;
+
+  /// Network error, timeout, 5xx, 408 or 429: the backend can't be reached
+  /// right now.
+  bool get transient => status == null || status! >= 500 || status == 408 || status == 429;
 }
 
 /// Where the last good config is persisted between launches.
@@ -148,7 +158,7 @@ abstract interface class RemoteConfigCache {
 /// captures wait in the outbox until a fetch succeeds.
 ///
 /// **Rejected key.** A 401/403 behaves like a kill switch for the rest of
-/// the session (not persisted).
+/// the session (not persisted). [onRejected] is called once.
 class RemoteConfigController {
   RemoteConfigController({
     required this.fetch,
@@ -158,6 +168,7 @@ class RemoteConfigController {
     this.maxStale = const Duration(days: 7),
     this.minInterval = const Duration(seconds: 30),
     this.maxBackoff = const Duration(minutes: 30),
+    this.onRejected,
     DateTime Function()? now,
     Random? random,
   })  : _now = now ?? DateTime.now,
@@ -173,6 +184,10 @@ class RemoteConfigController {
   final Duration maxStale;
   final Duration minInterval;
   final Duration maxBackoff;
+
+  /// The backend refused the credential (401/403), once per session. When
+  /// null, a generic line is printed instead.
+  final void Function(ConfigFetchFailed failure)? onRejected;
   final DateTime Function() _now;
   final Random _random;
 
@@ -183,6 +198,17 @@ class RemoteConfigController {
   Future<void>? _inFlight;
   bool _paused = false;
   bool _disposed = false;
+
+  /// The last failed fetch; null after a success.
+  ConfigFetchFailed? get lastFailure => _lastFailure;
+  ConfigFetchFailed? _lastFailure;
+
+  /// When a fetch last succeeded in this session (not from the cache).
+  DateTime? get fetchedThisSession => _fetchedThisSession;
+  DateTime? _fetchedThisSession;
+
+  /// The backend refused the credential in this session.
+  bool get rejected => _keyRejected;
 
   RemoteCaptureConfig? get current => _current;
 
@@ -233,6 +259,8 @@ class RemoteConfigController {
     switch (result) {
       case ConfigFetched(:final config):
         _failures = 0;
+        _lastFailure = null;
+        _fetchedThisSession = _now();
         final previous = _current;
         _current = config;
         _keyRejected = false;
@@ -246,9 +274,20 @@ class RemoteConfigController {
         _schedule(_ttl);
       case ConfigFetchFailed():
         _failures++;
+        _lastFailure = result;
         if (result.unauthorized && !_keyRejected) {
           _keyRejected = true;
-          debugPrint('[bugcapsule] ingest key rejected (HTTP ${result.status}); capture stopped');
+          final rejected = onRejected;
+          if (rejected == null) {
+            debugPrint('[bugcapsule] ingest key rejected (${result.reason ?? 'HTTP ${result.status}'})'
+                '${result.detail == null ? '' : ': ${result.detail}'}; capture stopped');
+          } else {
+            try {
+              rejected(result);
+            } catch (_) {
+              // Diagnostics never break the SDK.
+            }
+          }
           final previous = _current;
           _notify(previous, _disabledLike(previous));
         }

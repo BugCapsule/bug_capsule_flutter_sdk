@@ -35,9 +35,13 @@ Boot an iOS simulator, then:
 cd example/bug_capsule_demo
 flutter run -d <simulator> \
   --dart-define=BUGCAPSULE_GIT_SHA=$(git rev-parse HEAD) \
-  --dart-define=BUGCAPSULE_BACKEND_URL=http://127.0.0.1:8787 \
-  --dart-define=BUGCAPSULE_INGEST_KEY=bci_...
+  --dart-define=BUGCAPSULE_TOKEN=bcsdk.v1....    # the SDK token from the dashboard
 ```
+
+The SDK token carries the API URL and an upload-only credential. Without a
+token (an older backend, or an ingest key you already have), pass
+`--dart-define=BUGCAPSULE_BACKEND_URL=http://127.0.0.1:8787` and
+`--dart-define=BUGCAPSULE_INGEST_KEY=bci_...` instead.
 
 Trigger the negative-total bug: open the cart until the subtotal is below
 $100, type `SAVE100`, apply. The app raises `cart_total_non_negative`, writes
