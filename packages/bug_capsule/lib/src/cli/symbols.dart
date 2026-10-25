@@ -288,7 +288,7 @@ class _SymbolsUploadCommand extends Command<int> {
     final creds = Credentials.load();
     if (creds == null) {
       throw StateError(
-        'no backend configured; run `bugcapsule login --url ... --token ...`',
+        'no backend configured; run `bugcapsule login`',
       );
     }
     final client = BackendClient(creds);
