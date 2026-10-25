@@ -139,7 +139,7 @@ void main() {
       expect(BugCapsule.lastEventId(), id);
       await flush();
 
-      expect(backend.envelopes.first['sdk'], {'name': 'bugcapsule-flutter', 'version': '0.4.1-beta.1'});
+      expect(backend.envelopes.first['sdk'], {'name': 'bugcapsule-flutter', 'version': '0.4.1-beta.2'});
       final event = backend.items('event').single;
       expect(event['eventId'], id);
       expect(event['runtime'], 'flutter');

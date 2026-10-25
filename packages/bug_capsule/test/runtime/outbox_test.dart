@@ -185,6 +185,15 @@ void main() {
     expect(await o.entries(), isEmpty);
   });
 
+  test('close drains a queued purge before storage can be removed', () async {
+    final o = await open();
+    await o.enqueue('pending', capsuleBytes(10));
+    final purge = o.purge();
+    await o.close();
+    expect(dir.listSync().whereType<File>(), isEmpty);
+    await purge;
+  });
+
   test('after close, enqueue is refused and flush stops', () async {
     final o = await open();
     await o.close();

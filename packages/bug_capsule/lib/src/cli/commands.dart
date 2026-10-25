@@ -17,7 +17,7 @@ import 'replay_server.dart';
 import 'symbols.dart';
 import 'term.dart';
 
-const version = '0.4.1-beta.1';
+const version = '0.4.1-beta.2';
 
 CommandRunner<int> buildRunner() => CommandRunner<int>(
       'bugcapsule',
