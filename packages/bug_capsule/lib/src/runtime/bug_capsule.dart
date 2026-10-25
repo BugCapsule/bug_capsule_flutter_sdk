@@ -1,3 +1,4 @@
+import '../version.dart';
 import 'dart:async';
 import 'dart:async' as async show runZonedGuarded;
 import 'dart:convert';
@@ -28,7 +29,7 @@ import 'status.dart';
 // The capsule's `sdk.name`: the backend and CLI read it to pick the Flutter
 // runtime, so it keeps the old package name.
 const _sdkName = 'bug_capsule_flutter';
-const _sdkVersion = '0.4.1-beta.2';
+const _sdkVersion = bugCapsuleVersion;
 
 List<int> _encodeCapsule(Capsule capsule) => CapsuleCodec.encode(capsule);
 
