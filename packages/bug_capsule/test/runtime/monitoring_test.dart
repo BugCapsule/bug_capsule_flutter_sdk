@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:bug_capsule/bug_capsule.dart';
+import 'package:bug_capsule/src/version.dart';
 
 /// Backend fake for capsules, remote config and envelopes (monitoring-v1).
 class FakeBackend implements BugCapsuleTransport, EnvelopeTransport {
@@ -162,7 +163,7 @@ void main() {
 
         expect(backend.envelopes.first['sdk'], {
           'name': 'bugcapsule-flutter',
-          'version': '0.4.1-beta.2',
+          'version': bugCapsuleVersion,
         });
         final event = backend.items('event').single;
         expect(event['eventId'], id);
