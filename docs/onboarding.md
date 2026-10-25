@@ -10,14 +10,12 @@ own app; the differences are listed at the end.
    project.
 2. Generate an **SDK token** (`bcsdk.v1.…`) in **Project settings → Keys → SDK
    tokens**. It is shown once.
-3. Create a **personal CLI token** (`bcp_…`) in **Project settings → Keys & CLI
-   access**.
 
 ## 2. CLI
 
 ```bash
-dart pub global activate bug_capsule 0.4.1-beta.1
-bugcapsule login --url https://api.bugcapsule.com --token bcp_…
+dart pub global activate bug_capsule 0.4.1-beta.6
+bugcapsule login   # opens your browser: check the code, pick the project, approve
 ```
 
 ## 3. First capture

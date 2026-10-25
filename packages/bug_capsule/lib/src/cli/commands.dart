@@ -8,6 +8,7 @@ import 'package:args/command_runner.dart';
 import '../core/core.dart';
 
 import 'backend_client.dart';
+import 'browser_login.dart';
 import 'capsule_source.dart';
 import 'inspect.dart';
 import 'launcher.dart';
@@ -32,6 +33,7 @@ CommandRunner<int> buildRunner() =>
       ..addCommand(ReplayCommand(ReplayKind.verify))
       ..addCommand(RegressCommand())
       ..addCommand(LoginCommand())
+      ..addCommand(LogoutCommand())
       ..addCommand(ListCommand())
       ..addCommand(PullCommand())
       ..addCommand(PushCommand())
@@ -704,14 +706,21 @@ class LoginCommand extends Command<int> {
     argParser
       ..addOption(
         'url',
-        mandatory: true,
-        help: 'Backend URL, e.g. http://127.0.0.1:8787',
+        help:
+            'Backend URL (default: BUGCAPSULE_URL, then the saved login, then $defaultBackendUrl).',
+      )
+      ..addFlag(
+        'browser',
+        defaultsTo: true,
+        help:
+            'Open the sign-in page in the browser. With --no-browser, only print its address '
+            '(to open on another device, e.g. over SSH).',
       )
       ..addOption(
         'token',
         help:
-            'Your personal token (bcp_...) from the dashboard: Project Settings › Keys & CLI access. '
-            'Or a service token (bcv_...) in CI.',
+            'Sign in without a browser: a personal token (bcp_...) from Project Settings › Keys & CLI access, '
+            'or a service token (bcv_...) in CI.',
       )
       ..addOption(
         'secret-key',
@@ -727,12 +736,22 @@ class LoginCommand extends Command<int> {
   String get name => 'login';
   @override
   String get description =>
-      'Save the backend URL and your token (or keys) to ~/.bugcapsule/config.json.';
+      'Sign in through the browser (or with a token) and save it to ~/.bugcapsule/config.json.';
 
   @override
   Future<int> run() async {
+    final saved = Credentials.loadFile();
+    final url =
+        argResults!['url'] as String? ??
+        Platform.environment['BUGCAPSULE_URL'] ??
+        saved?.url ??
+        defaultBackendUrl;
     var token = argResults!['token'] as String?;
     var secretKey = argResults!['secret-key'] as String?;
+    final ingestKey = argResults!['ingest-key'] as String?;
+    if (token == null && secretKey == null && ingestKey == null) {
+      return _browserLogin(url, saved);
+    }
     if (token != null && secretKey != null) {
       throw UsageException('use --token or --secret-key, not both', usage);
     }
@@ -741,6 +760,14 @@ class LoginCommand extends Command<int> {
       token = secretKey;
       secretKey = null;
     }
+    if (token != null &&
+        (token.startsWith('bcsdk.') || token.startsWith('bct_'))) {
+      throw UsageException(
+        'that is an SDK token: it goes in your app (BugCapsule.init), not in the CLI. '
+        'Run `bugcapsule login` without --token to sign in through the browser.',
+        usage,
+      );
+    }
     if (token != null && !Credentials.isToken(token)) {
       throw UsageException(
         '--token takes a personal (bcp_...) or service (bcv_...) token; a bcs_ project key goes in --secret-key',
@@ -748,10 +775,10 @@ class LoginCommand extends Command<int> {
       );
     }
     final creds = Credentials(
-      url: argResults!['url'] as String,
+      url: url,
       token: token,
       secretKey: secretKey,
-      ingestKey: argResults!['ingest-key'] as String?,
+      ingestKey: ingestKey,
     );
     if (creds.projectCredential != null) {
       final project = await BackendClient(creds).project();
@@ -766,6 +793,86 @@ class LoginCommand extends Command<int> {
     }
     creds.save();
     stdout.writeln('Saved ${Credentials.file.path}');
+    return 0;
+  }
+
+  Future<int> _browserLogin(String url, Credentials? saved) async {
+    if (Platform.environment['CI'] != null) {
+      throw UsageException(
+        'browser sign-in needs a person; in CI use a service token: bugcapsule login --token bcv_...',
+        usage,
+      );
+    }
+    final BrowserLoginResult r;
+    try {
+      r = await BrowserLogin(
+        url: url,
+        launch: argResults!['browser'] as bool,
+      ).run();
+    } on BrowserLoginException catch (e) {
+      stderr.writeln(red('✗ ${e.message}'));
+      return 1;
+    }
+    // The ingest key for `bugcapsule push` stays when signing in to the same backend again.
+    Credentials(
+      url: url,
+      token: r.token,
+      ingestKey: saved?.url == url ? saved?.ingestKey : null,
+    ).save();
+    stdout
+      ..writeln()
+      ..writeln(
+        '${green('✓')} Signed in as ${r.email} to project "${r.projectName}" (${r.projectId})',
+      )
+      ..writeln(
+        dim(
+          '  Personal token saved to ${Credentials.file.path}, valid until ${r.expiresAt.substring(0, 10)}. '
+          'Run `bugcapsule logout` to revoke it.',
+        ),
+      );
+    if (Platform.environment['BUGCAPSULE_TOKEN'] != null) {
+      stdout.writeln(
+        yellow(
+          '  BUGCAPSULE_TOKEN is set in this shell and wins over the saved login; unset it to use this one.',
+        ),
+      );
+    }
+    return 0;
+  }
+}
+
+class LogoutCommand extends Command<int> {
+  @override
+  String get name => 'logout';
+  @override
+  String get description =>
+      'Revoke the CLI’s personal token and remove it from ~/.bugcapsule/config.json.';
+
+  @override
+  Future<int> run() async {
+    final saved = Credentials.loadFile();
+    if (saved == null || saved.projectCredential == null) {
+      stdout.writeln('Not signed in.');
+      return 0;
+    }
+    final token = saved.token;
+    if (token != null && token.startsWith('bcp_')) {
+      try {
+        await BackendClient(saved).revokeOwnToken();
+        stdout.writeln('${green('✓')} Revoked the personal token.');
+      } on Object catch (e) {
+        // Already revoked or expired, or the backend is unreachable: the local copy still goes.
+        stdout.writeln(
+          yellow(
+            'Couldn’t revoke the token on the backend ($e); revoke it in Project Settings › Keys & CLI access if it still shows.',
+          ),
+        );
+      }
+    }
+    Credentials(url: saved.url, ingestKey: saved.ingestKey).save();
+    stdout.writeln(
+      'Signed out. Removed the project credential from ${Credentials.file.path}.',
+    );
     return 0;
   }
 }

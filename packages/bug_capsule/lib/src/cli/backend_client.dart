@@ -50,6 +50,18 @@ class Credentials {
     return File('$home/.bugcapsule/config.json');
   }
 
+  /// What `bugcapsule login` saved, without the environment; null when nothing is.
+  static Credentials? loadFile() {
+    if (!file.existsSync()) return null;
+    try {
+      return Credentials.fromJson(
+        (jsonDecode(file.readAsStringSync()) as Map).cast<String, Object?>(),
+      );
+    } on Object {
+      return null;
+    }
+  }
+
   /// Environment variables win over the file: BUGCAPSULE_URL, BUGCAPSULE_TOKEN,
   /// BUGCAPSULE_SECRET_KEY, BUGCAPSULE_INGEST_KEY.
   static Credentials? load() {
@@ -89,7 +101,8 @@ class ApiException implements Exception {
     final base = 'HTTP $status $code${detail.isEmpty ? '' : ': $detail'}';
     if (status == 401) {
       return '$base\nThe token or key was refused: it may be wrong, expired or revoked, or you were removed from the project. '
-          'Issue a new personal token in the dashboard (Project Settings › Keys & CLI access) and run `bugcapsule login --url <backend> --token <token>`.';
+          'Run `bugcapsule login` to sign in again in the browser. On a machine without a browser, issue a personal token '
+          '(Project Settings › Keys & CLI access) and run `bugcapsule login --url <backend> --token <token>`.';
     }
     if (status == 403) {
       return '$base\nYour role or this token’s scopes don’t allow it; ask a project admin.';
@@ -114,7 +127,7 @@ class BackendClient {
       throw StateError(
         ingest
             ? 'no ingest key; run `bugcapsule login --ingest-key ...` or set BUGCAPSULE_INGEST_KEY'
-            : 'not signed in to a project; run `bugcapsule login --url <backend> --token <token>` or set BUGCAPSULE_TOKEN',
+            : 'not signed in to a project; run `bugcapsule login` or set BUGCAPSULE_TOKEN',
       );
     }
     return key;
@@ -183,6 +196,34 @@ class BackendClient {
   }
 
   Future<Map<String, Object?>> project() => _json('GET', '/v1/project');
+
+  Future<Map<String, Object?>> _unauthenticated(
+    String path,
+    Object body,
+  ) async {
+    final (_, bytes, _) = await _send(
+      'POST',
+      _uri(path),
+      json: body,
+      auth: false,
+    );
+    return (jsonDecode(utf8.decode(bytes)) as Map).cast<String, Object?>();
+  }
+
+  /// Browser sign-in: starts a request the person approves in the dashboard.
+  Future<Map<String, Object?>> startBrowserLogin(String clientName) =>
+      _unauthenticated('/v1/console/cli/logins', {'clientName': clientName});
+
+  /// Pending, denied or expired; or, once, the approved personal token.
+  Future<Map<String, Object?>> pollBrowserLogin(String deviceCode) =>
+      _unauthenticated('/v1/console/cli/logins/poll', {
+        'deviceCode': deviceCode,
+      });
+
+  /// Revokes the personal token this client holds (`bugcapsule logout`).
+  Future<void> revokeOwnToken() async {
+    await _send('POST', _uri('/v1/console/cli/logout'));
+  }
 
   Future<Map<String, Object?>> listCapsules(Map<String, String> query) =>
       _json('GET', '/v1/capsules', query: query);
