@@ -5,20 +5,35 @@ import 'backend.dart' show OutboxLimits;
 import 'monitoring/options.dart';
 
 /// Where capsules are uploaded and remote capture config comes from.
+///
+/// Most apps pass `BugCapsuleConfig(token: ...)` instead; this explicit form
+/// is for self-hosted backends and advanced setups, and wins over a token.
 class BugCapsuleBackendConfig {
   const BugCapsuleBackendConfig({required this.url, required this.ingestKey});
 
   /// e.g. `http://127.0.0.1:8787` locally, `https://bugcapsule.example.com` hosted.
   final String url;
 
-  /// Project ingest key (`bci_...`). Upload-only; safe to ship in the app.
+  /// Ingest credential: an SDK token key (`bct_...`) or a legacy ingest key
+  /// (`bci_...`). Upload-only; safe to ship in the app.
   final String ingestKey;
 }
 
 class BugCapsuleConfig {
+  /// The usual setup is the SDK token from the dashboard:
+  ///
+  /// ```dart
+  /// const BugCapsuleConfig(token: 'bcsdk.v1.…')
+  /// ```
+  ///
+  /// [appVersion] and [appBuild] default to the `BUGCAPSULE_APP_VERSION` /
+  /// `BUGCAPSULE_APP_BUILD` dart-defines, else to the version in
+  /// `MonitoringOptions.release` (`<id>@<version>+<build>`), else `unknown`
+  /// and `0`.
   const BugCapsuleConfig({
-    required this.appVersion,
-    required this.appBuild,
+    this.token,
+    String? appVersion,
+    String? appBuild,
     this.appId,
     this.appName,
     this.flavor,
@@ -47,12 +62,47 @@ class BugCapsuleConfig {
     this.labels = const {},
     this.replayUrl,
     this.monitoring = const MonitoringOptions(),
-  })  : _mode = mode,
+  })  : _appVersion = appVersion,
+        _appBuild = appBuild,
+        _mode = mode,
         _gitSha = gitSha,
         _showOverlay = showOverlay;
 
-  final String appVersion;
-  final String appBuild;
+  /// SDK connection token from the BugCapsule dashboard
+  /// (`bcsdk.v1.<payload>`): the API URL and an upload-only credential in one
+  /// string, safe to ship in the app. Ignored when [backend] is set. A token
+  /// that can't be used never stops the app: it runs without BugCapsule and
+  /// `BugCapsule.status` says why.
+  final String? token;
+  final String? _appVersion;
+  final String? _appBuild;
+
+  String get appVersion {
+    if (_appVersion != null && _appVersion.isNotEmpty) return _appVersion;
+    const fromEnv = String.fromEnvironment('BUGCAPSULE_APP_VERSION');
+    if (fromEnv.isNotEmpty) return fromEnv;
+    return _releaseVersion.$1 ?? 'unknown';
+  }
+
+  String get appBuild {
+    if (_appBuild != null && _appBuild.isNotEmpty) return _appBuild;
+    const fromEnv = String.fromEnvironment('BUGCAPSULE_APP_BUILD');
+    if (fromEnv.isNotEmpty) return fromEnv;
+    return _releaseVersion.$2 ?? '0';
+  }
+
+  /// `com.shop.app@1.4.0+52` → (`1.4.0`, `52`).
+  (String?, String?) get _releaseVersion {
+    final release = monitoring.release;
+    if (release == null || release.isEmpty) return (null, null);
+    final at = release.lastIndexOf('@');
+    final version = at < 0 ? release : release.substring(at + 1);
+    final plus = version.indexOf('+');
+    final name = plus < 0 ? version : version.substring(0, plus);
+    final build = plus < 0 ? '' : version.substring(plus + 1);
+    return (name.isEmpty ? null : name, build.isEmpty ? null : build);
+  }
+
   final String? appId;
   final String? appName;
   final String? flavor;
@@ -60,6 +110,9 @@ class BugCapsuleConfig {
 
   /// Local master switch. The backend kill switch can also disable capture.
   final bool enabled;
+
+  /// Explicit backend URL and ingest key (self-hosted / advanced). Wins over
+  /// [token].
   final BugCapsuleBackendConfig? backend;
   final String? _gitSha;
 

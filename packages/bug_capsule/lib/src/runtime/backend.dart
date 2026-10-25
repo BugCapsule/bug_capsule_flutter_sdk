@@ -13,13 +13,20 @@ import 'remote_config.dart';
 enum UploadStatus { uploaded, rejected, retryLater }
 
 class UploadResult {
-  const UploadResult(this.status, {this.serverId, this.message, this.retryAfter});
+  const UploadResult(this.status, {this.serverId, this.message, this.retryAfter, this.httpStatus});
   final UploadStatus status;
   final String? serverId;
   final String? message;
 
   /// From a `Retry-After` header on 429/503.
   final Duration? retryAfter;
+
+  /// The backend's HTTP status; null when it was not reached.
+  final int? httpStatus;
+
+  /// The backend refused the credential: the runtime re-fetches the config
+  /// to learn why and stops when it is revoked.
+  bool get unauthorized => httpStatus == 401 || httpStatus == 403;
 }
 
 /// How the SDK talks to the backend. [BugCapsuleBackendClient] is the real one;
@@ -60,8 +67,16 @@ class BugCapsuleBackendClient implements BugCapsuleTransport, EnvelopeTransport 
       final res = await req.close().timeout(_timeout);
       final body = await utf8.decodeStream(res).timeout(_timeout);
       if (res.statusCode != 200) {
+        // A refused credential comes with a problem body: `reason` (e.g.
+        // `token_revoked`) and an actionable `detail`.
+        final problem = _tryJson(body);
+        final reason = problem?['reason'];
+        final detail = problem?['detail'];
         return ConfigFetchFailed('HTTP ${res.statusCode}',
-            status: res.statusCode, retryAfter: _retryAfter(res));
+            status: res.statusCode,
+            retryAfter: _retryAfter(res),
+            reason: reason is String && reason.isNotEmpty ? _cut(reason, 100) : null,
+            detail: detail is String && detail.isNotEmpty ? _cut(detail, 500) : null);
       }
       final json = jsonDecode(body);
       if (json is! Map) return const ConfigFetchFailed('config is not a JSON object');
@@ -101,7 +116,7 @@ class BugCapsuleBackendClient implements BugCapsuleTransport, EnvelopeTransport 
           res.statusCode == 408 ||
           res.statusCode == 429;
       return UploadResult(retry ? UploadStatus.retryLater : UploadStatus.rejected,
-          message: code, retryAfter: _retryAfter(res));
+          message: code, retryAfter: _retryAfter(res), httpStatus: res.statusCode);
     } catch (e) {
       return UploadResult(UploadStatus.retryLater, message: '$e');
     } finally {
@@ -135,7 +150,7 @@ class BugCapsuleBackendClient implements BugCapsuleTransport, EnvelopeTransport 
           res.statusCode == 408 ||
           res.statusCode == 429;
       return UploadResult(retry ? UploadStatus.retryLater : UploadStatus.rejected,
-          message: code, retryAfter: _retryAfter(res));
+          message: code, retryAfter: _retryAfter(res), httpStatus: res.statusCode);
     } catch (e) {
       return UploadResult(UploadStatus.retryLater, message: '$e');
     } finally {
@@ -145,6 +160,8 @@ class BugCapsuleBackendClient implements BugCapsuleTransport, EnvelopeTransport 
 
   @override
   void close() {}
+
+  static String _cut(String s, int max) => s.length <= max ? s : s.substring(0, max);
 
   static Map<String, Object?>? _tryJson(String body) {
     try {

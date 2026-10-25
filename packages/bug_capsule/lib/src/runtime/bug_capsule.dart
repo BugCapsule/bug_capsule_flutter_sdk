@@ -14,6 +14,7 @@ import '../core/core.dart';
 import 'actions.dart';
 import 'backend.dart';
 import 'config.dart';
+import 'connection_token.dart';
 import 'integration.dart';
 import 'monitoring/breadcrumbs.dart';
 import 'monitoring/hub.dart';
@@ -21,6 +22,8 @@ import 'monitoring/scope.dart';
 import 'monitoring/tracing.dart';
 import 'remote_config.dart';
 import 'replay_engine.dart';
+import 'state_tracker.dart';
+import 'status.dart';
 
 // The capsule's `sdk.name`: the backend and CLI read it to pick the Flutter
 // runtime, so it keeps the old package name.
@@ -72,11 +75,14 @@ class BugCapsuleTestOverrides {
 ///
 /// ```dart
 /// void main() => BugCapsule.init(
-///       config: const BugCapsuleConfig(appVersion: '1.4.0', appBuild: '52'),
-///       integrations: [BugCapsuleBloc(...), BugCapsuleDio(...), BugCapsuleSharedPreferences()],
+///       config: const BugCapsuleConfig(token: 'bcsdk.v1.…'),
 ///       appRunner: () => runApp(const MyApp()),
 ///     );
 /// ```
+///
+/// Replay gets more complete with each integration the app adds:
+/// `integrations: [BugCapsuleDio(...), BugCapsuleGoRouter(), BugCapsuleBloc(...)]`.
+/// [status] tells what is connected and what is still missing.
 ///
 /// Call [init] first in `main`, before `WidgetsFlutterBinding.ensureInitialized`,
 /// so the binding is created inside BugCapsule's zone and `clock.now()` is
@@ -102,6 +108,12 @@ abstract final class BugCapsule {
   }
 
   static bool get isInitialized => _rt != null;
+
+  /// Connection and instrumentation, for setup checks and support: whether
+  /// the token works, whether the backend accepted the config fetch and the
+  /// first data, and which replay integrations are still missing. Before
+  /// [init] the state is `notConfigured`.
+  static BugCapsuleStatus get status => _rt?.status ?? _Runtime.statusBeforeInit;
   static bool get isReplaying => _rt?.engine != null;
   static bool get isRecording => _rt?.isRecording ?? false;
   static CaptureMode? get mode => _rt?.config.mode;
@@ -388,9 +400,48 @@ class _NoopSink implements TransactionSink {
   void transactionFinished(TransactionImpl transaction) {}
 }
 
+/// How [BugCapsuleConfig.token] and [BugCapsuleConfig.backend] resolve
+/// (spec/connection-token-v1.md): an explicit backend wins; an unusable
+/// token leaves no backend, so the app runs without BugCapsule instead of
+/// failing.
+typedef _Connection = ({
+  BugCapsuleBackendConfig? backend,
+  BugCapsuleConnectionSource? source,
+  InvalidConnectionToken? tokenError,
+});
+
+_Connection _resolveConnection(BugCapsuleConfig config) {
+  final backend = config.backend;
+  final token = config.token;
+  if (backend != null) {
+    if (token != null && token.trim().isNotEmpty) {
+      debugPrint('[bugcapsule] both token and backend are set; using backend and ignoring token');
+    }
+    return (backend: backend, source: BugCapsuleConnectionSource.backend, tokenError: null);
+  }
+  if (token == null) return (backend: null, source: null, tokenError: null);
+  switch (parseConnectionToken(token)) {
+    case ValidConnectionToken(:final backend):
+      return (backend: backend, source: BugCapsuleConnectionSource.token, tokenError: null);
+    case final InvalidConnectionToken error:
+      debugPrint("[bugcapsule] the SDK token can't be used (${error.error.code}): ${error.message}. "
+          'The app runs without BugCapsule.');
+      return (backend: null, source: BugCapsuleConnectionSource.token, tokenError: error);
+  }
+}
+
 class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   _Runtime(this.config, this.integrations, this._overrides, this._appPackage)
-      : _random = _overrides?.random ?? Random();
+      : _random = _overrides?.random ?? Random(),
+        _connection = _resolveConnection(config);
+
+  final _Connection _connection;
+
+  /// From the token or the explicit backend config.
+  BugCapsuleBackendConfig? get _backend => _connection.backend;
+
+  DateTime? _firstEventAcceptedAt;
+  DateTime? _firstCapsuleAcceptedAt;
 
   final String? _appPackage;
 
@@ -602,8 +653,10 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     _redactor = _baseRedactor();
     if (!config.enabled) return;
 
-    final transport = _overrides?.transport ??
-        (config.backend == null ? null : BugCapsuleBackendClient(config.backend!));
+    // No backend (none configured, or an unusable token): capture still runs
+    // locally, nothing is uploaded.
+    final backend = _backend;
+    final transport = _overrides?.transport ?? (backend == null ? null : BugCapsuleBackendClient(backend));
     final storeFuture = store = CapsuleStore.open(root: _overrides?.storageDirectory);
     final s = await storeFuture;
 
@@ -613,9 +666,14 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
       final controller = remote = RemoteConfigController(
         fetch: transport.fetchConfig,
         cache: s.configCache,
-        scope: _scope(config.backend),
+        scope: _scope(backend),
         onChange: _applyRemote,
         maxStale: config.maxStaleConfig,
+        onRejected: (f) => debugPrint(
+            "[bugcapsule] the backend refused this app's "
+            "${_connection.source == BugCapsuleConnectionSource.token ? 'SDK token' : 'ingest key'} "
+            "(${f.reason ?? 'HTTP ${f.status}'})${f.detail == null ? '' : ': ${f.detail}'}. "
+            'Capture and uploads are off for this session.'),
       );
       await controller.loadCached();
     }
@@ -638,8 +696,11 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     if (_setupAbandoned) return _stopRecording();
     // Monitoring starts once capture setup has finished (a setup that never
     // finishes leaves the app without capture and without monitoring).
-    final envelopes = _overrides?.envelopeTransport ??
+    final baseEnvelopes = _overrides?.envelopeTransport ??
         (transport is EnvelopeTransport ? transport as EnvelopeTransport : null);
+    final envelopes = baseEnvelopes == null
+        ? null
+        : _ObservedEnvelopes(baseEnvelopes, () => _firstEventAcceptedAt ??= DateTime.now());
     if (config.monitoring.enabled && (cached?.enabled ?? true)) {
       final h = MonitoringHub(
         options: config.monitoring,
@@ -1100,7 +1161,9 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
       return await outbox.flush(
         upload: (bytes) async {
           final result = await transport.upload(bytes);
-          if (result.message == 'capture_disabled') unawaited(controller.refresh());
+          if (result.status == UploadStatus.uploaded) _firstCapsuleAcceptedAt ??= DateTime.now();
+          // A refused credential: the config fetch learns why and stops.
+          if (result.message == 'capture_disabled' || result.unauthorized) unawaited(controller.refresh());
           return result;
         },
         allowed: () => _uploadsAllowed,
@@ -1203,7 +1266,8 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     final wasRecording = _recording;
     _killed = true;
     _stopRecording();
-    if (wasRecording) debugPrint('[bugcapsule] capture disabled by remote config');
+    // A refused credential was already explained in one line.
+    if (wasRecording && !(remote?.rejected ?? false)) debugPrint('[bugcapsule] capture disabled by remote config');
     final outbox = _outbox;
     if (outbox != null) unawaited(outbox.purge().then((_) {}, onError: (Object _) {}));
     final s = store;
@@ -1315,6 +1379,81 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     return build == null ? version : '$version ($build)';
   }
 
+  // ---------------------------------------------------------------- status
+
+  static const _networkIntegrations = {'dio', 'http'};
+  static const _navigationIntegrations = {'go_router'};
+  static const _stateIntegrations = {'bloc', 'riverpod', 'notifier', 'getx', 'mobx', 'shared_preferences'};
+
+  static const statusBeforeInit = BugCapsuleStatus(
+    connection: BugCapsuleConnectionStatus(state: BugCapsuleConnectionState.notConfigured),
+    instrumentation: BugCapsuleInstrumentationStatus(
+      recording: false,
+      network: false,
+      navigation: false,
+      appState: false,
+      integrations: [],
+      missing: ['network', 'navigation', 'app_state'],
+    ),
+  );
+
+  BugCapsuleStatus get status {
+    final controller = remote;
+    final failure = controller?.lastFailure;
+    final tokenError = _connection.tokenError;
+    final current = controller?.current;
+    final state = switch (tokenError?.error) {
+      ConnectionTokenError.invalidToken => BugCapsuleConnectionState.invalidToken,
+      ConnectionTokenError.unsupportedTokenVersion => BugCapsuleConnectionState.unsupportedTokenVersion,
+      null when _backend == null && _overrides?.transport == null => BugCapsuleConnectionState.notConfigured,
+      null when !config.enabled => BugCapsuleConnectionState.disabled,
+      null when controller?.rejected ?? false => BugCapsuleConnectionState.rejected,
+      null when current != null && !current.enabled => BugCapsuleConnectionState.disabled,
+      null when controller?.fetchedThisSession != null => BugCapsuleConnectionState.connected,
+      null when failure != null && failure.transient => BugCapsuleConnectionState.offline,
+      null => BugCapsuleConnectionState.connecting,
+    };
+    final names = [for (final i in integrations) i.name];
+    final network = names.any(_networkIntegrations.contains);
+    final navigation = names.any(_navigationIntegrations.contains);
+    final appState =
+        names.any(_stateIntegrations.contains) || integrations.any((i) => i is TrackedStateIntegration);
+    return BugCapsuleStatus(
+      connection: BugCapsuleConnectionStatus(
+        state: state,
+        source: _connection.source,
+        apiUrl: _backend?.url.replaceAll(RegExp(r'/+$'), ''),
+        reason: tokenError?.error.code ??
+            switch (state) {
+              BugCapsuleConnectionState.rejected => failure?.reason ?? failure?.message,
+              BugCapsuleConnectionState.offline => failure?.reason ?? failure?.message,
+              _ => null,
+            },
+        message: tokenError?.message ??
+            switch (state) {
+              BugCapsuleConnectionState.rejected => failure?.detail ?? 'the backend refused the credential',
+              BugCapsuleConnectionState.offline => 'the backend could not be reached; data is kept and retried',
+              _ => null,
+            },
+        configFetchedAt: controller?.fetchedThisSession,
+        firstEventAcceptedAt: _firstEventAcceptedAt,
+        firstCapsuleAcceptedAt: _firstCapsuleAcceptedAt,
+      ),
+      instrumentation: BugCapsuleInstrumentationStatus(
+        recording: _recording,
+        network: network,
+        navigation: navigation,
+        appState: appState,
+        integrations: List.unmodifiable(names),
+        missing: List.unmodifiable([
+          if (!network) 'network',
+          if (!navigation) 'navigation',
+          if (!appState) 'app_state',
+        ]),
+      ),
+    );
+  }
+
   Future<void> closeMonitoring() async {
     final h = hub;
     hub = null;
@@ -1336,5 +1475,34 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     await h?.dispose();
     await _outbox?.close();
     _transport?.close();
+  }
+}
+
+/// Notes the first error event the backend accepted (connection
+/// confirmation 2) without changing results.
+class _ObservedEnvelopes implements EnvelopeTransport {
+  _ObservedEnvelopes(this._base, this._onEventAccepted);
+
+  final EnvelopeTransport _base;
+  final void Function() _onEventAccepted;
+  bool _seen = false;
+
+  @override
+  Future<UploadResult> sendEnvelope(List<int> gzippedBody) async {
+    final result = await _base.sendEnvelope(gzippedBody);
+    if (!_seen && result.status == UploadStatus.uploaded && _hasEvent(gzippedBody)) {
+      _seen = true;
+      _onEventAccepted();
+    }
+    return result;
+  }
+
+  static bool _hasEvent(List<int> gzippedBody) {
+    try {
+      final items = EnvelopeCodec.decode(gzippedBody)['items'];
+      return items is List && items.any((i) => i is Map && i['type'] == EnvelopeItemType.event);
+    } catch (_) {
+      return false;
+    }
   }
 }

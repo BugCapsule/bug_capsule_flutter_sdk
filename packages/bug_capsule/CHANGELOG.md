@@ -1,3 +1,9 @@
+## Unreleased
+
+- Single-token setup: `BugCapsuleConfig(token: 'bcsdk.v1.…')` with the SDK token from the dashboard; `appVersion` / `appBuild` are optional. `parseConnectionToken` parses tokens offline (connection token v1, shared test vectors). An explicit `backend` keeps working and wins over a token.
+- `BugCapsule.status`: connection state (`connected`, `offline`, `rejected`, `invalid_token`, …), the backend's refusal reason, configuration-fetched and first-data confirmations, and which replay instrumentation is still missing.
+- A refused credential (revoked, expired or unknown token) is logged once with the backend's explanation and stops capture and uploads for the session.
+
 ## 0.4.1-beta.1
 
 - Public beta packaging of the validated 0.4.0 SDK and multi-runtime CLI.

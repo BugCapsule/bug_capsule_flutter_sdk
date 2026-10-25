@@ -8,6 +8,10 @@ import 'fake_server.dart';
 import 'screens.dart';
 import 'shop.dart';
 
+// The SDK token from the dashboard (Project settings › SDK tokens):
+// --dart-define=BUGCAPSULE_TOKEN=bcsdk.v1.…
+const _token = String.fromEnvironment('BUGCAPSULE_TOKEN');
+// Self-hosted / advanced alternative: an explicit URL and ingest key (wins over the token).
 const _backendUrl = String.fromEnvironment('BUGCAPSULE_BACKEND_URL');
 const _ingestKey = String.fromEnvironment('BUGCAPSULE_INGEST_KEY');
 
@@ -24,6 +28,7 @@ void main() => BugCapsule.init(
         appVersion: '1.0.0',
         appBuild: '1',
         mode: CaptureMode.qa,
+        token: _token.isEmpty ? null : _token,
         backend: _backendUrl.isEmpty || _ingestKey.isEmpty
             ? null
             : const BugCapsuleBackendConfig(url: _backendUrl, ingestKey: _ingestKey),

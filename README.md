@@ -45,16 +45,80 @@ use is tree-shaken out of release builds.
 
 The backend (upload, triage, kill switch, share links) lives in [draz26648/bug_capsule_backend](https://github.com/draz26648/bug_capsule_backend).
 
-## Integrate (about 20 lines)
+## Integrate
 
 ```yaml
 dependencies:
   bug_capsule: {git: {url: https://github.com/draz26648/bug_capsule_flutter_sdk, path: packages/bug_capsule}}
 ```
 
+### 1. Connect with the SDK token (one line)
+
+Copy the SDK token from the dashboard (Project settings › SDK tokens) and
+make `BugCapsule.init` the first line of `main`:
+
 ```dart
 import 'package:bug_capsule/bug_capsule.dart';
 
+void main() => BugCapsule.init(
+      config: const BugCapsuleConfig(token: 'bcsdk.v1.…'),
+      appRunner: () => runApp(const MyApp()),
+    );
+```
+
+The token (`bcsdk.v1.…`) holds the API address and an upload-only
+credential: it can fetch the project's SDK settings and send Capsules and
+monitoring data, nothing else, so it is safe to ship in the app. It works the
+same for the hosted service and a self-hosted backend. `appVersion` and
+`appBuild` are optional (they default to the `BUGCAPSULE_APP_VERSION` /
+`BUGCAPSULE_APP_BUILD` dart-defines, then to the version in
+`MonitoringOptions.release`, then to `unknown` / `0`); set them so capsules
+and releases carry your real version.
+
+A token that can't be used never stops the app: `init` doesn't throw or
+wait, prints one `[bugcapsule] …` line saying what to fix (an ingest or
+secret key pasted instead of a token, a damaged copy, a token from a newer
+SDK) and the app runs without uploads. Being offline, a timeout or a server
+error is never fatal either: Capsules wait in the on-device outbox and go out
+when the backend is reachable again. When the token is revoked or has
+expired, the SDK prints the reason once and stops capture and uploads for the
+session.
+
+### 2. Check the connection: `BugCapsule.status`
+
+```dart
+final status = BugCapsule.status;
+status.connection.state;                   // connected, connecting, offline, rejected, invalid_token, …
+status.connection.reason;                  // e.g. token_revoked
+status.connection.message;                 // what to do about it
+status.connection.configFetchedAt;         // 1st confirmation: the backend accepted the token
+status.connection.firstCapsuleAcceptedAt;  // 2nd confirmation: data arrived
+status.connection.firstEventAcceptedAt;
+status.instrumentation.missing;            // e.g. [network, navigation, app_state]
+```
+
+| `state` | Meaning |
+|---|---|
+| `not_configured` | no token and no backend: capture runs on the device only |
+| `invalid_token` / `unsupported_token_version` | the token can't be used; `message` says why |
+| `connecting` | no configuration fetched yet in this session |
+| `connected` | the configuration was fetched (basic connectivity) |
+| `offline` | the backend can't be reached; data is kept and retried |
+| `rejected` | the backend refused the credential (`reason`: `token_revoked`, `token_expired`, `token_unknown`, …); capture and uploads are off |
+| `disabled` | `enabled: false`, or capture switched off for the project |
+
+Being connected is not the same as complete replay. `instrumentation`
+lists what replay can restore and what is still `missing`:
+
+| Step | `instrumentation` | Add |
+|---|---|---|
+| Network fixtures | `network` | `BugCapsuleDio` or `BugCapsuleHttp` |
+| Navigation | `navigation` | `BugCapsuleGoRouter` |
+| App state | `appState` (`app_state`) | `BugCapsuleBloc`, `BugCapsuleRiverpod`, `BugCapsuleNotifiers`, `BugCapsuleGetx`, `BugCapsuleMobx`, `BugCapsuleSharedPreferences` |
+
+### 3. Add replay integrations, one at a time
+
+```dart
 final bugCapsuleDio = BugCapsuleDio(rules: [
   // Fields that differ on every run must not affect request matching.
   EndpointRule('POST', '/api/checkout', ignoreBodyFields: {'timestamp', 'nonce'}),
@@ -63,10 +127,10 @@ final bugCapsuleRouter = BugCapsuleGoRouter();
 
 void main() => BugCapsule.init(                     // first line of main, before ensureInitialized
       config: const BugCapsuleConfig(
+        token: 'bcsdk.v1.…',
         appVersion: '1.4.0',
         appBuild: '52',
         mode: CaptureMode.qa,                  // or BUGCAPSULE_MODE dart-define
-        backend: BugCapsuleBackendConfig(url: 'https://bugcapsule.example.com', ingestKey: 'bci_...'),
       ),
       integrations: [
         BugCapsuleBloc(states: [
@@ -87,6 +151,21 @@ bugCapsuleRouter.attach(router);
 // QA capture button:
 MaterialApp.router(builder: (context, child) => BugCapsuleOverlay(child: child!), ...);
 ```
+
+### Explicit backend URL and ingest key (self-hosted / advanced)
+
+Apps that already pass a URL and an ingest key keep working unchanged:
+
+```dart
+config: const BugCapsuleConfig(
+  appVersion: '1.4.0',
+  appBuild: '52',
+  backend: BugCapsuleBackendConfig(url: 'https://bugcapsule.example.com', ingestKey: 'bci_...'),
+),
+```
+
+`backend` wins when both are set (the SDK prints that the token was ignored),
+and `BugCapsule.status.connection.source` says which one is in use.
 
 ### Other state management and HTTP clients
 
@@ -165,7 +244,7 @@ the light, high-volume signals of
 [monitoring-v1](https://github.com/draz26648/bug_capsule_backend/blob/main/docs/monitoring-v1.md):
 error events (grouped into issues), sessions (crash-free rates per release),
 transactions (performance) and user feedback, as envelopes to
-`POST /v1/envelope` with the same ingest key. It is on by default. Every item
+`POST /v1/envelope` with the same SDK token or ingest key. It is on by default. Every item
 goes through the capsule redaction rules on the device before it is queued.
 
 ```dart
@@ -174,7 +253,7 @@ void main() => BugCapsule.runZonedGuarded(() => BugCapsule.init(
         appId: 'com.shop.app',                 // release defaults to com.shop.app@1.4.0+52
         appVersion: '1.4.0',
         appBuild: '52',
-        backend: const BugCapsuleBackendConfig(url: '...', ingestKey: 'bci_...'),
+        token: 'bcsdk.v1.…',
         monitoring: MonitoringOptions(
           tracesSampleRate: 0.2,                       // default: the backend's rate, else 0
           tracePropagationTargets: ['api.shop.com'],  // URLs that get traceparent / baggage
@@ -330,7 +409,7 @@ On an iOS simulator the CLI builds once, then launches the installed app for eac
 bugcapsule login --url http://127.0.0.1:8787 --secret-key bcs_... --ingest-key bci_...
 cd example/bug_capsule_demo
 flutter run -d <simulator> --dart-define=BUGCAPSULE_GIT_SHA=$(git rev-parse HEAD) \
-  --dart-define=BUGCAPSULE_BACKEND_URL=http://127.0.0.1:8787 --dart-define=BUGCAPSULE_INGEST_KEY=bci_...
+  --dart-define=BUGCAPSULE_TOKEN=bcsdk.v1....   # or BUGCAPSULE_BACKEND_URL + BUGCAPSULE_INGEST_KEY
 ```
 
 | Bug | How to trigger | What replay needs |
@@ -350,7 +429,7 @@ Measured on an iPhone 18 Pro simulator (iOS 27, Flutter 3.47.7): the race, legac
 Production capture works, but it is the riskiest mode. Before rollout:
 
 1. **Kill switch.** `bugcapsule capture --on` disables capture. The backend refuses uploads from that moment (`403`). Devices see it at their next config refresh: after `configTtlSeconds` (default 5 min), when the app returns to the foreground, or before any upload attempt with a config older than its TTL. They then stop recording, drop the buffer, delete queued and saved captures, and keep the switch across launches even offline. An upload already on the wire finishes. Re-enabling applies from the next app launch. Test it before you need it.
-2. **Remote config.** Fetched after startup, then refreshed on its TTL with exponential backoff (30 s to 30 min, `Retry-After` honoured) and on resume. It is cached per backend URL and ingest key, so a staging config never applies to production. With no cached config (first launch, offline), debug/QA builds record and production builds sample at the app's cap, but **nothing is uploaded until a config fetch succeeds**; a cached config older than `maxStaleConfig` (7 days) also stops uploads. A rejected ingest key (rotated) stops capture for the session. New body and redaction settings apply to the running session, including events already buffered.
+2. **Remote config.** Fetched after startup, then refreshed on its TTL with exponential backoff (30 s to 30 min, `Retry-After` honoured) and on resume. It is cached per backend URL and ingest key, so a staging config never applies to production. With no cached config (first launch, offline), debug/QA builds record and production builds sample at the app's cap, but **nothing is uploaded until a config fetch succeeds**; a cached config older than `maxStaleConfig` (7 days) also stops uploads. A refused credential (a revoked, expired or unknown SDK token, or an inactive ingest key) stops capture and uploads for the session; the SDK prints the reason once and `BugCapsule.status` reports `rejected`. New body and redaction settings apply to the running session, including events already buffered.
 3. **Sampling.** A production session records with probability `min(productionSampleRate, backend sampleRate)`, decided at launch. Lowering the remote rate mid-session keeps a recording session with probability new/old, so the share of recording sessions follows the new rate; raising it applies from the next launch and never above the app's cap (default 0.1). Sessions that aren't sampled install no recorders.
 4. **Redaction.** Applied on the device to events and checkpoints alike, and again to everything integrations record. See the spec's [Redaction](spec/capsule-v1.md#redaction) section for exactly what is caught and what is not. Add `redactKeys`, `redactPatterns`, `beforeRecord` / `beforeCheckpoint` hooks, `BugCapsuleDio(exclude: ...)` / `BugCapsuleHttp(exclude: ...)` for endpoints you must not record and `BugCapsuleGoRouter(sanitizeLocation: ...)` for secrets in paths; then inspect real capsules (`bugcapsule inspect`) before widening the rollout.
 5. **Bodies.** Turn off `captureNetworkBodies` (remotely too) for endpoints you can't send; capsules then become `partial`. HTTP capture never buffers whole bodies: bytes stream to the app unchanged and only a bounded prefix is kept (`maxBodyBytes`, 256 KiB; binary 64 KiB). With bodies off nothing is kept for the recording; request bodies up to 64 KiB are still hashed (never stored) so replay can match requests.
@@ -400,6 +479,9 @@ flutter pub get                       # pub workspace: the package and the demo 
 (cd example/bug_capsule_demo && flutter test)
 (cd packages/bug_capsule && dart run bugcapsule --help)
 ```
+
+`spec/fixtures/connection-token-v1/vectors.json` holds the SDK token test
+vectors every BugCapsule SDK passes ([spec](spec/connection-token-v1.md)).
 
 `spec/fixtures/capsule-v1` holds valid and malformed capsules that both this
 SDK and the backend test against; change them here and copy them to the
