@@ -4,6 +4,8 @@ from pathlib import Path
 import shutil, tarfile, hashlib, subprocess, tempfile
 root = Path(__file__).resolve().parents[1]
 source = root / "packages/bug_capsule"
+if (source / "README.md").read_bytes() != (root / "README.md").read_bytes():
+    raise SystemExit("Package README must match the root README before release")
 version = next(line.split(":", 1)[1].strip() for line in (source / "pubspec.yaml").read_text().splitlines() if line.startswith("version:"))
 stage = root / "dist" / ("bug_capsule-" + version)
 if stage.exists(): shutil.rmtree(stage)

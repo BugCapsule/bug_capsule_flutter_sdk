@@ -28,7 +28,7 @@ import 'status.dart';
 // The capsule's `sdk.name`: the backend and CLI read it to pick the Flutter
 // runtime, so it keeps the old package name.
 const _sdkName = 'bug_capsule_flutter';
-const _sdkVersion = '0.4.1-beta.1';
+const _sdkVersion = '0.4.1-beta.2';
 
 List<int> _encodeCapsule(Capsule capsule) => CapsuleCodec.encode(capsule);
 

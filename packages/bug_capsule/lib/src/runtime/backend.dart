@@ -488,6 +488,8 @@ class UploadOutbox {
   Future<void> close() async {
     _closed = true;
     await _flushing;
+    // Drain queued enqueue/purge operations before callers remove storage.
+    await _lock.run(() async {});
   }
 }
 

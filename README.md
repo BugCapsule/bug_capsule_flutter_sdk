@@ -49,7 +49,7 @@ timing, so races and data-dependent bugs come back.
 ## Install
 
 ```bash
-flutter pub add bug_capsule
+flutter pub add bug_capsule:^0.4.1-beta.2
 ```
 
 Everything ships in this one package, with one import:
@@ -64,11 +64,8 @@ versions must fall in these ranges even for libraries you don't use:
 `go_router` 14 to 18, `shared_preferences` ^2.5. Code you don't use is
 tree-shaken out of release builds.
 
-> **Versions.** The latest release on pub.dev is `0.4.1-beta.1`. This README
-> describes `main`. **SDK tokens** (`token:`) and **`BugCapsule.status`** ship
-> in the next release. On `0.4.1-beta.1`, connect with an
-> [explicit address and ingest key](#connect-with-an-address-and-ingest-key)
-> instead.
+> **Versions.** SDK tokens and connection status are available starting with `0.4.1-beta.2`.
+> Existing explicit backend configuration remains supported.
 
 ## Connect your app
 
@@ -262,7 +259,7 @@ The `bugcapsule` CLI ships in the same package and replays capsules from every
 BugCapsule SDK (Flutter, Android, iOS and web).
 
 ```bash
-dart pub global activate bug_capsule 0.4.1-beta.1
+dart pub global activate bug_capsule 0.4.1-beta.2
 bugcapsule --version
 ```
 
@@ -395,7 +392,7 @@ Production capture works, but it is the riskiest mode. Before rollout:
 
 Capture never crashes the app: if setup fails the app starts without it, and
 storage errors drop the capsule. Release builds never enter replay mode. Full
-details: [docs/how-it-works.md](docs/how-it-works.md) and the
+details: [docs/how-it-works.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/how-it-works.md) and the
 [production checklist](https://docs.bugcapsule.com/production.html).
 
 ## Limitations
@@ -410,11 +407,11 @@ details: [docs/how-it-works.md](docs/how-it-works.md) and the
 - Replay on Android (`flutter run` + `adb reverse`) is implemented but not yet
   tested end to end. iOS simulators are the tested path.
 
-Full list: [docs/how-it-works.md#limitations](docs/how-it-works.md#limitations).
+Full list: [docs/how-it-works.md#limitations](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/how-it-works.md#limitations).
 
 ## Demo app
 
-[`example/bug_capsule_demo`](example/bug_capsule_demo) is a shop app with
+[`example/bug_capsule_demo`](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/example/bug_capsule_demo) is a shop app with
 five planted "can't reproduce" bugs. With an SDK token and the CLI logged in:
 
 ```bash
@@ -433,7 +430,7 @@ flutter run -d <simulator> --dart-define=BUGCAPSULE_GIT_SHA=$(git rev-parse HEAD
 
 Then `bugcapsule list`, `bugcapsule run <id>`, fix the bug and
 `bugcapsule verify <id>`. A step-by-step walkthrough is in
-[docs/onboarding.md](docs/onboarding.md).
+[docs/onboarding.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/onboarding.md).
 
 ## Upgrading
 
@@ -446,7 +443,7 @@ package, `bug_capsule`, with the same API:
 - CLI: `dart pub global deactivate bug_capsule_cli`, then
   [install the CLI](#install-the-cli) again.
 
-Older upgrades: [docs/upgrading.md](docs/upgrading.md).
+Older upgrades: [docs/upgrading.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/upgrading.md).
 
 ## More documentation
 
@@ -455,16 +452,16 @@ Older upgrades: [docs/upgrading.md](docs/upgrading.md).
 | Flutter SDK guide | [docs.bugcapsule.com/flutter](https://docs.bugcapsule.com/flutter.html) |
 | Quickstart (30 minutes, capture to verified fix) | [docs.bugcapsule.com/quickstart](https://docs.bugcapsule.com/quickstart.html) |
 | CLI reference | [docs.bugcapsule.com/cli](https://docs.bugcapsule.com/cli.html) |
-| Replaying Android, iOS and web capsules with the CLI | [docs/cli-runtimes.md](docs/cli-runtimes.md) |
-| Capsule format | [spec/capsule-v1.md](spec/capsule-v1.md) |
-| How capture, uploads and replay work | [docs/how-it-works.md](docs/how-it-works.md) |
+| Replaying Android, iOS and web capsules with the CLI | [docs/cli-runtimes.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/cli-runtimes.md) |
+| Capsule format | [spec/capsule-v1.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/spec/capsule-v1.md) |
+| How capture, uploads and replay work | [docs/how-it-works.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/how-it-works.md) |
 | Feature matrix across SDKs | [docs.bugcapsule.com/feature-matrix](https://docs.bugcapsule.com/feature-matrix.html) |
 | Troubleshooting | [docs.bugcapsule.com/troubleshooting](https://docs.bugcapsule.com/troubleshooting.html) |
-| Working on this repository | [docs/development.md](docs/development.md) |
+| Working on this repository | [docs/development.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/development.md) |
 
 ## Support and license
 
 Questions or access requests: [contact@bugcapsule.com](mailto:contact@bugcapsule.com).
 
 This SDK is proprietary software of Bug Capsule. Use, copying, modification
-and distribution require prior written permission. See [LICENSE](LICENSE).
+and distribution require prior written permission. See [LICENSE](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/LICENSE).
