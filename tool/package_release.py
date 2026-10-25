@@ -7,6 +7,10 @@ source = root / "packages/bug_capsule"
 if (source / "README.md").read_bytes() != (root / "README.md").read_bytes():
     raise SystemExit("Package README must match the root README before release")
 version = next(line.split(":", 1)[1].strip() for line in (source / "pubspec.yaml").read_text().splitlines() if line.startswith("version:"))
+import re
+runtime_version = re.search(r"const bugCapsuleVersion = '([^']+)';", (source / "lib/src/version.dart").read_text())
+if runtime_version is None or runtime_version.group(1) != version:
+    raise SystemExit("CLI/SDK runtime version must match pubspec.yaml")
 stage = root / "dist" / ("bug_capsule-" + version)
 if stage.exists(): shutil.rmtree(stage)
 stage.mkdir(parents=True, exist_ok=True)

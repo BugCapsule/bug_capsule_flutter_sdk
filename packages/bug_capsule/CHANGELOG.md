@@ -1,3 +1,8 @@
+## 0.4.1-beta.5 — 2026-10-25
+
+- Keep the CLI version and captured SDK version in sync with the published package version.
+- Add a release gate that rejects mismatched version metadata.
+
 ## 0.4.1-beta.4 — 2026-10-25
 
 - Let Android instrumentation finish ActivityScenario cleanup before starting another replay attempt, and stop the test APK process during attempt isolation. This prevents subsequent attempts failing to attach on Android 14.

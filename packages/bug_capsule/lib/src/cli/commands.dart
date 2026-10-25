@@ -1,3 +1,4 @@
+import '../version.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -17,7 +18,7 @@ import 'replay_server.dart';
 import 'symbols.dart';
 import 'term.dart';
 
-const version = '0.4.1-beta.2';
+const version = bugCapsuleVersion;
 
 CommandRunner<int> buildRunner() =>
     CommandRunner<int>('bugcapsule', 'Inspect, replay and verify capsules.')
