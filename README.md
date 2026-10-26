@@ -324,6 +324,7 @@ bugcapsule run <id> -d <simulator> -n 3          # replays on the capsule's comm
 bugcapsule verify <id> -n 5                       # replays your working tree; FIXED when the bug is gone
 bugcapsule regress add <id>                       # keep it as a regression test
 bugcapsule regress run                            # in CI: exit 1 when a regression fails
+bugcapsule gate --release com.shop.app@1.5.0+60 --platform android   # release gate in CI
 bugcapsule share <id>                             # expiring download link
 bugcapsule capture --on | --off | --sample-rate 0.05   # kill switch and production sampling
 ```
@@ -347,6 +348,29 @@ against the total, so one clean attempt plus one error is `INCONCLUSIVE`,
 never `FIXED`. Details: [How verdicts work](https://docs.bugcapsule.com/verdicts.html) ·
 [CLI reference](https://docs.bugcapsule.com/cli.html).
 
+A crash capsule reproduces when the app dies with the same crash (same
+signal, Mach exception, ANR or out-of-memory kill); a different crash is
+`INCONCLUSIVE` with reason code `failure.different`. `run` and `verify` record
+each run with the release of the build under test (read from the pubspec,
+the APK or the app's `Info.plist`; `--release` overrides).
+
+### Release gate
+
+`bugcapsule gate` blocks a release that brings a fixed bug back. It asks
+BugCapsule which capsules the release must not reproduce (fixes it claims,
+and bugs fixed earlier), builds the app once, verifies each one, records the
+runs and a gate report on the release, prints a table and writes JUnit XML:
+
+```bash
+BUGCAPSULE_TOKEN=bcv_… bugcapsule gate --release com.shop.app@1.5.0+60 \
+  --platform android --attempts 3 --junit build/bugcapsule-gate.xml
+```
+
+Exit codes: 0 passed, 1 a capsule reproduced, 2 flaky (`--fail-on`, default
+`reproduced,flaky`), 3 a capsule could not run (only with `error` in
+`--fail-on`), 64 usage. `--json` prints the result as JSON. A GitHub Actions
+example is in [docs/cli-runtimes.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/cli-runtimes.md#release-gate).
+
 ## Monitoring
 
 Monitoring is on by default and runs next to capsules:
@@ -354,7 +378,8 @@ Monitoring is on by default and runs next to capsules:
 | Signal | What you get |
 |---|---|
 | Errors | `FlutterError.onError`, `PlatformDispatcher.onError` and zone errors under `BugCapsule.runZonedGuarded`; stack frames, breadcrumbs, user and tags. Repeated errors are rate-limited. |
-| Release health | One session per foreground run; crash-free rates per release. |
+| Native crashes (with `bug_capsule_native`) | Crashes in native code (your plugins', the engine's), ANRs and app hangs, and Android's and iOS's records of how the app died, with every thread and the breadcrumbs of the run that crashed. |
+| Release health | One session per foreground run; crash-free rates per release, counted against the release that ran. |
 | Performance | App start, screen transactions with slow and frozen frames, HTTP spans, `traceparent` / `baggage` propagation. |
 | User feedback | A form, a sheet, shake to report, or your own UI. |
 
@@ -382,9 +407,35 @@ showBugCapsuleFeedback(context, eventId: BugCapsule.lastEventId());
 ```
 
 `MonitoringOptions.disabled` turns monitoring off; capsules keep working.
-Native crashes, ANRs and app hangs inside plugins are reported by the
-BugCapsule Android and iOS SDKs, not from Dart. More:
-[docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.html).
+More: [docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.html).
+
+**Native crashes.** Dart can't see a crash in native code. Add
+`bug_capsule_native` and nothing else: it registers itself and
+`BugCapsule.init` starts it.
+
+```yaml
+dependencies:
+  bug_capsule: ^0.4.1-beta.7
+  bug_capsule_native: ^0.1.0
+```
+
+Native crashes are reported on the next launch, in the same issues and
+sessions as Dart errors, and go through `beforeSend`. The session that crashed
+counts as `crashed`. Turn it off with
+`MonitoringOptions(enableNativeCrashHandling: false)`; tune hangs with
+`enableAppHangTracking` and `appHangTimeout`. On iOS the plugin needs Swift
+Package Manager (`flutter config --enable-swift-package-manager`); with
+CocoaPods it builds but reports no native crashes on iOS.
+
+**Crash capsules.** A crash that kills the process leaves no time to write a
+capsule, so while a session records, the SDK keeps a crash journal on disk:
+the flight recorder's checkpoints and events, flushed at least every 250 ms
+from a background isolate, at most twice `maxCapsuleBytes`. On the next
+launch the crash's event gets a capsule built from that journal (failure
+kind `crash`, linked through `capsuleId`), which `bugcapsule run` replays and
+checks for the same crash. Crash capsules don't count against
+`maxCapsulesPerSession`. Turn the journal off with
+`BugCapsuleConfig(crashJournal: false)`.
 
 **Readable stack traces.** For obfuscated or `--split-debug-info` builds,
 upload symbols for every release:

@@ -94,6 +94,127 @@ launching anything. Cross-runtime replay is not implemented.
   builds; iOS only in `DEBUG` builds launched by the UI test; web only when
   the app passes `allowReplay: true` and the page was opened by the runner.
 
+## App deaths and crash capsules
+
+A capsule whose failure is a crash (failure kind `crash`, built on the next
+launch from the crash journal of the process that died) replays the steps
+and checks for the same crash. Every launcher maps an app process death
+during an attempt to the attempt's result:
+
+| What happens in the app under test | Attempt |
+|---|---|
+| Dies with the same type (signal, Mach exception, ANR, out-of-memory kill) | `reproduced`; another in-app frame adds reason code `failure.different_frame` |
+| Dies with another type | invalid, reason code `failure.different` (the run is `INCONCLUSIVE`) |
+| Replays the window to the end and stays alive | the runner's own `not_reproduced` |
+| Dies and the cause can't be told | `error` |
+
+A death while replaying a capsule of a Dart exception is another failure:
+the attempt proves nothing. How each runtime sees the death:
+
+* **Flutter**: the app process exit (`flutter run` losing the app, with the
+  `Fatal signal` lines of the device log; on the simulator, the app's crash
+  report in `~/Library/Logs/DiagnosticReports`).
+* **Android**: `am instrument` reporting `Process crashed`, then the exit
+  record the attempt added (`dumpsys activity exit-info`, Android 11+) and the
+  crash log buffer (`logcat -b crash`); a runner that outlives the app can
+  report `bugcapsule_crash=<json>` as an instrumentation status.
+* **iOS**: the XCTest output and the simulator's crash report of the app.
+* Any runner can put a `crash` object (`type`, `mechanism`, `signal`,
+  `inAppFrame`, `source`) in its result.
+
+## Releases on runs
+
+`run` and `verify` record each run with the release of the build under test,
+`<appId>@<version>+<build>`, the form SDKs send in events: the pubspec
+`version` and the Android application id or iOS bundle id (flutter), the
+installed APK's `versionName` / `versionCode` (android), the built app's
+`CFBundleShortVersionString` / `CFBundleVersion` (ios), `package.json`
+(web). `--release` and `--environment` override or add to it. A capsule
+fixed by a `verify` run remembers the release that fixed it.
+
+## Release gate
+
+`bugcapsule gate` verifies, in CI, that a build does not reproduce the bugs
+its release claims to fix, nor any bug fixed earlier:
+
+```bash
+bugcapsule gate --release com.shop.app@1.5.0+60 --platform android \
+  [--scope all|fixes|regressions] [--issue <id>] [--attempts 3] \
+  [--fail-on reproduced,flaky] [--junit build/bugcapsule-gate.xml] [--json]
+```
+
+1. Fetches the capsules the release must not reproduce. With none, the gate
+   passes and says so.
+2. Builds the app once, as `verify` does (the working tree, or `--apk` /
+   `--xctestrun` / `--app-url`), then downloads and verifies each capsule
+   with `--attempts`, recording every run with the release and the commit.
+3. Posts the gate report to the release, prints a table (capsule, issue,
+   reason, outcome), writes JUnit XML (one test case per capsule, named
+   `<issue title> (<capsule id>)`) and, with `--json`, prints the result as
+   JSON on stdout (progress goes to stderr).
+
+| Exit code | When |
+|---|---|
+| 0 | Passed |
+| 1 | A capsule reproduced; or the backend could not be reached or refused |
+| 2 | A capsule was flaky (with `flaky` in `--fail-on`, the default `reproduced,flaky`) |
+| 3 | A capsule could not run (inconclusive, incompatible, error), with `error` in `--fail-on` |
+| 64 | Usage |
+
+Credentials: a service token (`bcv_…`) from **Project settings → Keys & CLI
+access** in `BUGCAPSULE_TOKEN` (or `--token`), and the backend in
+`BUGCAPSULE_URL` (or `--url`) unless you use BugCapsule's hosted backend
+after `bugcapsule login`.
+
+### GitHub Actions
+
+```yaml
+name: Release gate
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - run: dart pub global activate bug_capsule
+      - name: Verify the release does not bring fixed bugs back
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          BUGCAPSULE_URL: https://api.bugcapsule.com
+          BUGCAPSULE_TOKEN: ${{ secrets.BUGCAPSULE_TOKEN }}
+        with:
+          api-level: 34
+          arch: x86_64
+          script: >
+            bugcapsule gate
+            --release com.shop.app@${GITHUB_REF_NAME#v}
+            --platform flutter
+            --junit build/bugcapsule-gate.xml
+      - name: Publish the gate results
+        if: always()
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: build/bugcapsule-gate.xml
+```
+
+For iOS, run the job on `macos-latest` with a booted simulator
+(`xcrun simctl boot "iPhone 16"`) and `--platform ios` (or `flutter`).
+
 ## Verdicts
 
 Unchanged and identical for every runtime: REPRODUCED, NOT REPRODUCED,

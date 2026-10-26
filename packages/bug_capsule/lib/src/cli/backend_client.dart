@@ -254,6 +254,27 @@ class BackendClient {
   Future<Map<String, Object?>> createRun(String id, Map<String, Object?> run) =>
       _json('POST', '/v1/capsules/$id/runs', body: run);
 
+  /// `GET /v1/verification/plan` (verification.md §3.1).
+  Future<Map<String, Object?>> verificationPlan({
+    required String release,
+    String? platform,
+    String? scope,
+    String? issue,
+  }) => _json(
+    'GET',
+    '/v1/verification/plan',
+    query: {
+      'release': release,
+      'platform': ?platform,
+      'scope': ?scope,
+      'issue': ?issue,
+    },
+  );
+
+  /// `POST /v1/verification/reports` (verification.md §3.2).
+  Future<Map<String, Object?>> createGateReport(Map<String, Object?> report) =>
+      _json('POST', '/v1/verification/reports', body: report);
+
   Future<Map<String, Object?>> share(String id, int hours) =>
       _json('POST', '/v1/capsules/$id/share', body: {'expiresInHours': hours});
 
