@@ -163,7 +163,7 @@ recorded unless an adapter documents them.
 | `platform.call` | out when `dir` is `dart`, in when `platform` | `channel`, `codec` (`standard.method`, `json.method`, `standard.message`, `json.message`, `string.message`, `binary.message` or a custom id), `call` (call id, unique per capsule), `dir` (`dart` = app to platform, `platform` = platform to app), `method?` (method calls only), `args` (payload), `key`, `occurrence`, `isolate?` (`root` by default), `engine?` |
 | `platform.result` | in for `dir: dart`, out for `dir: platform` | `channel`, `call`, `value` (payload); a `null` result is a payload with value `null` |
 | `platform.error` | like `platform.result` | `channel`, `call`, `kind` (`platform` = an error envelope, `missing` = no handler on the other side, `exception` = the handler threw), `code?`, `message?`, `details?` (payload) |
-| `platform.listen` | out | `channel`, `codec`, `sub` (subscription id, unique per capsule), `gen` (0-based count of earlier subscriptions on that channel), `args` (payload), `key`, `occurrence` |
+| `platform.listen` | out | `channel`, `codec`, `sub` (subscription id, unique per capsule), `gen` (0-based count of earlier subscriptions on that channel), `args` (payload), `key`, `occurrence`, `call?` (id of the listen call: its answer is a `platform.result` or `platform.error` with this `call`, because a failed listen is what the app sees) |
 | `platform.event` | in | `channel`, `sub`, `index` (0-based per subscription), `value` (payload) or `error` `{code, message?, details?}` |
 | `platform.cancel` | out | `channel`, `sub` |
 | `platform.done` | in | `channel`, `sub` |

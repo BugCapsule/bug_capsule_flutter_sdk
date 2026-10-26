@@ -173,7 +173,9 @@ class BugCapsulePlatformChannels extends InteractionIntegration
     } catch (_) {
       current = null;
     }
-    final covered = current is _ChannelMessenger && current.owner == this;
+    final covered =
+        BugCapsuleBinding.isInstalled(this) ||
+        (current is _ChannelMessenger && current.owner == this);
     if (covered) return;
     _late = true;
     const detail =
@@ -185,6 +187,15 @@ class BugCapsulePlatformChannels extends InteractionIntegration
       stats.gap(DependencyGaps.channelLate, detail);
     }
   }
+
+  void _endSub(String sub) {
+    if (_eventIndex.remove(sub) != null) host?.release();
+  }
+
+  @override
+  List<Map<String, Object?>> openInteractions() => [
+    for (final sub in _captureSubs.values) {'type': 'platform.sub', 'id': sub},
+  ];
 
   /// Whether the default messenger is covered (false after a late setup).
   bool get coversDefaultMessenger => interceptDefaultMessenger && !_late;
@@ -305,7 +316,12 @@ class _ChannelMessenger implements BinaryMessenger {
     if (spec.kind == PlatformChannelKind.event &&
         (method == 'listen' || method == 'cancel')) {
       if (method == 'listen') {
+        if (!(owner.host?.acquire() ?? false)) {
+          owner.stats.gap(DependencyGaps.connectionsLimit, channel);
+          return inner.send(channel, message);
+        }
         final sub = 'p${owner._nextSub++}';
+        final call = 'c${owner._nextCall++}';
         final key = owner._key(channel, 'listen', args);
         owner._captureSubs[channel] = sub;
         owner._eventIndex[sub] = 0;
@@ -313,13 +329,21 @@ class _ChannelMessenger implements BinaryMessenger {
           'channel': channel,
           'codec': spec.codec,
           'sub': sub,
+          'call': call,
           'gen': owner._generations[channel] =
               (owner._generations[channel] ?? -1) + 1,
           'args': owner._payload(spec, args),
           'key': key,
           'occurrence': owner._occurrences.next(key),
         });
-      } else if (owner._captureSubs.remove(channel) case final sub?) {
+        // A failed listen is reported by Flutter itself (FlutterError), so
+        // its answer is part of what the app saw.
+        final reply = await inner.send(channel, message);
+        _recordReply(spec, call, reply, missingIsError: true);
+        return reply;
+      }
+      if (owner._captureSubs.remove(channel) case final sub?) {
+        owner._endSub(sub);
         _record(InteractionTypes.platformCancel, {
           'channel': channel,
           'sub': sub,
@@ -423,6 +447,8 @@ class _ChannelMessenger implements BinaryMessenger {
             'channel': channel,
             'sub': sub,
           });
+          owner._captureSubs.remove(channel);
+          owner._endSub(sub);
         } else {
           final index = owner._eventIndex[sub] ?? 0;
           owner._eventIndex[sub] = index + 1;
@@ -516,6 +542,15 @@ class _ChannelMessenger implements BinaryMessenger {
         }
         _replaySubs[channel] = recorded;
         replay.bind(recorded.scope, (e) => _deliverEvent(spec, e));
+        final call = recorded.data['call'];
+        if (call is String) {
+          final reply = Completer<ByteData?>();
+          replay.bind('platform.call:$call', (e) {
+            replay.unbind('platform.call:$call');
+            reply.complete(_encodeReply(spec, e));
+          });
+          return reply.future;
+        }
       } else if (_replaySubs.remove(channel) case final sub?) {
         replay
           ..takeNext(sub.scope, const {InteractionTypes.platformCancel})

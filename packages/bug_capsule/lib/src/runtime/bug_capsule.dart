@@ -558,8 +558,27 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
   @override
   final InteractionHost interactions = InteractionHost();
 
-  Iterable<InteractionIntegration> get _interactionAdapters =>
-      integrations.whereType<InteractionIntegration>();
+  /// Interaction adapters with unique dependency ids (a duplicate would
+  /// make every capsule invalid; it is left out with a warning).
+  late final List<InteractionIntegration> _interactionAdapters = () {
+    final seen = <String>{};
+    final out = <InteractionIntegration>[];
+    for (final a in integrations.whereType<InteractionIntegration>()) {
+      if (seen.add(a.dependencyId)) {
+        out.add(a);
+      } else {
+        assert(
+          false,
+          'two interaction adapters use the dependency id "${a.dependencyId}"',
+        );
+        debugPrint(
+          '[bugcapsule] ${a.adapter}: dependency id "${a.dependencyId}" is '
+          'already used; give one of them an `id:` (it is not recorded)',
+        );
+      }
+    }
+    return out;
+  }();
   Redactor _redactor = Redactor();
   bool _recording = false;
   bool _captureBodies = true;
@@ -1296,7 +1315,12 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
 
     final view = WidgetsBinding.instance.platformDispatcher.views.first;
     final logical = view.physicalSize / view.devicePixelRatio;
-    final events = [for (final e in window.events) e.shift(anchor)];
+    final events = rebaseOccurrences([
+      for (final e in window.events)
+        if (!InteractionTypes.isInteraction(e.type) ||
+            _interactionAdapters.any((a) => a.dependencyId == e.data['dep']))
+          e.shift(anchor),
+    ]);
     final capsule = Capsule(
       manifest: CapsuleManifest(
         capsuleId: uuidV4(),
@@ -1564,8 +1588,25 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
   /// Interaction adapters (capsule-v2 §7): per-adapter kill switch and
   /// payload limits no higher than the body limit and remote policy.
   void _applyInteractionPolicy(RemoteCaptureConfig? remote) {
+    final disabled = {...?remote?.disabledAdapters};
+    final newly = disabled.difference(interactions.disabledAdapters);
+    // What a now-disabled adapter already buffered is dropped too (the
+    // adapter may have been turned off for the data it records).
+    final dropped = {
+      for (final a in _interactionAdapters)
+        if (newly.contains(a.adapter)) a.dependencyId,
+    };
+    if (dropped.isNotEmpty) {
+      _recorder?.rewrite(
+        event: (e) =>
+            InteractionTypes.isInteraction(e.type) &&
+                dropped.contains(e.data['dep'])
+            ? null
+            : e,
+      );
+    }
     interactions
-      ..disabledAdapters = {...?remote?.disabledAdapters}
+      ..disabledAdapters = disabled
       ..limits = const InteractionLimits().lowered(
         maxPayloadBytes: remote?.maxInteractionPayloadBytes == null
             ? config.maxBodyBytes

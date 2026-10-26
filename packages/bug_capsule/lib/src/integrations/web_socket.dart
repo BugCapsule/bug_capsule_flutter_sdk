@@ -30,6 +30,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
+
 import 'dart:typed_data';
 
 import 'package:stream_channel/stream_channel.dart';
@@ -101,7 +102,7 @@ class BugCapsuleWebSocket extends InteractionIntegration {
     final uri = Uri.parse(url);
     final replay = replayInteractions;
     if (replay != null || replayingWithoutRecording) {
-      final transport = _ReplayTransport(this, replay, uri);
+      final transport = _ReplayTransport(this, replay, uri, dartIo: true);
       await transport.ready;
       return _IoFacade(transport);
     }
@@ -317,9 +318,25 @@ class _RecordingTransport implements _Transport {
   bool _connectError = false;
   bool _clientClosed = false;
   bool _ended = false;
-  Stream<dynamic>? _stream;
+  StreamSubscription<dynamic>? _sub;
+
+  /// The inner stream is read from the start, so a connection the app
+  /// never listens to (a failed connect) or stops listening to still ends
+  /// and frees its capture slot.
+  late final StreamController<dynamic> _relay = StreamController(
+    onPause: () => _sub?.pause(),
+    onResume: () => _sub?.resume(),
+    onCancel: () {
+      final sub = _sub;
+      _sub = null;
+      _end(cancelled: true);
+      return sub?.cancel();
+    },
+  );
 
   void _record(String type, Map<String, Object?> data) {
+    // Remote config may disable the adapter while the connection is open.
+    if (!owner.capturing) return;
     try {
       owner.recordInteraction(type, {'conn': conn, ...data});
     } catch (_) {
@@ -340,6 +357,31 @@ class _RecordingTransport implements _Transport {
         if (inner.protocol != null) 'protocol': inner.protocol,
       });
     }, onError: connectFailed);
+    _sub = inner.stream.listen(
+      (data) {
+        _record(InteractionTypes.wsMessage, {
+          'index': _received++,
+          'payload': owner._payload(data, metadata: metadataOnly).toJson(),
+        });
+        _relay.add(data);
+      },
+      onError: (Object error, StackTrace st) {
+        if (_opened) {
+          _record(InteractionTypes.wsError, {
+            'phase': 'stream',
+            'error': _error(error),
+          });
+        } else {
+          connectFailed(error);
+        }
+        _relay.addError(error, st);
+      },
+      onDone: () {
+        _sub = null;
+        _end();
+        _relay.close();
+      },
+    );
   }
 
   void connectFailed(Object e) {
@@ -348,13 +390,16 @@ class _RecordingTransport implements _Transport {
     _record(InteractionTypes.wsError, {'phase': 'connect', 'error': _error(e)});
   }
 
-  void _end() {
+  void _end({bool cancelled = false}) {
     if (_ended) return;
     _ended = true;
     _record(InteractionTypes.wsClose, {
-      'initiator': _clientClosed || _inner.closeCode == null
+      'initiator': cancelled
+          ? 'client'
+          : _clientClosed || _inner.closeCode == null
           ? 'unknown'
           : 'server',
+      if (cancelled) 'cancelled': true,
       if (_inner.closeCode != null) 'code': _inner.closeCode,
       if (_inner.closeReason != null && _inner.closeReason!.isNotEmpty)
         'reason': _inner.closeReason,
@@ -367,32 +412,7 @@ class _RecordingTransport implements _Transport {
   Future<void> get ready => _inner.ready;
 
   @override
-  Stream<dynamic> get stream => _stream ??= _inner.stream.transform(
-    StreamTransformer.fromHandlers(
-      handleData: (data, sink) {
-        _record(InteractionTypes.wsMessage, {
-          'index': _received++,
-          'payload': owner._payload(data, metadata: metadataOnly).toJson(),
-        });
-        sink.add(data);
-      },
-      handleError: (error, st, sink) {
-        if (_opened) {
-          _record(InteractionTypes.wsError, {
-            'phase': 'stream',
-            'error': _error(error),
-          });
-        } else {
-          connectFailed(error);
-        }
-        sink.addError(error, st);
-      },
-      handleDone: (sink) {
-        _end();
-        sink.close();
-      },
-    ),
-  );
+  Stream<dynamic> get stream => _relay.stream;
 
   @override
   String? get protocol => _inner.protocol;
@@ -429,7 +449,14 @@ class _RecordingTransport implements _Transport {
         if (reason != null && reason.isNotEmpty) 'reason': reason,
       });
     }
-    return _inner.close(code, reason);
+    return _inner.close(code, reason).whenComplete(() {
+      // The close handshake is over even if nobody reads the stream.
+      if (_relay.hasListener) return;
+      final sub = _sub;
+      _sub = null;
+      unawaited(sub?.cancel());
+      _end();
+    });
   }
 
   @override
@@ -440,7 +467,7 @@ class _RecordingTransport implements _Transport {
 /// no [replay] (the capsule has no WebSocket recording) every connection is
 /// unrecorded.
 class _ReplayTransport implements _Transport {
-  _ReplayTransport(this.owner, this.replay, Uri url) {
+  _ReplayTransport(this.owner, this.replay, Uri url, {this.dartIo = false}) {
     final key = owner.keyFor(url);
     final recorded = replay?.take(
       owner.dependencyId,
@@ -458,6 +485,7 @@ class _ReplayTransport implements _Transport {
         ..addError(error)
         ..close();
       _scope = null;
+      _markDone();
       return;
     }
     _scope = recorded.scope;
@@ -466,8 +494,33 @@ class _ReplayTransport implements _Transport {
 
   final BugCapsuleWebSocket owner;
   final ReplayInteractions? replay;
+
+  /// A `dart:io` socket: recorded errors are rebuilt as `dart:io` types.
+  final bool dartIo;
   late final String? _scope;
   final Completer<void> _ready = Completer();
+  final Completer<void> _done = Completer();
+
+  void _markDone() {
+    if (!_done.isCompleted) _done.complete();
+  }
+
+  Object _errorOf(Map<String, Object?> data) {
+    final error = (data['error'] as Map?) ?? const {};
+    final message = '${error['message'] ?? 'recorded error'}';
+    if (dartIo) {
+      switch (error['type']) {
+        case 'SocketException':
+          return io.SocketException(message);
+        case 'HandshakeException':
+          return io.HandshakeException(message);
+        case 'WebSocketException':
+          return io.WebSocketException(message);
+      }
+    }
+    return WebSocketChannelException(message);
+  }
+
   final StreamController<dynamic> _controller = StreamController();
   String? _protocol;
   int? _closeCode;
@@ -494,9 +547,7 @@ class _ReplayTransport implements _Transport {
         final value = payload.decoded;
         _controller.add(value is List<int> ? Uint8List.fromList(value) : value);
       case InteractionTypes.wsError:
-        final error = WebSocketChannelException(
-          '${(r.data['error'] as Map?)?['message'] ?? 'recorded error'}',
-        );
+        final error = _errorOf(r.data);
         if (r.data['phase'] == 'connect' && !_ready.isCompleted) {
           _ready.completeError(error);
           _ready.future.ignore();
@@ -518,7 +569,14 @@ class _ReplayTransport implements _Transport {
   void _finish() {
     final scope = _scope;
     if (scope != null) replay?.unbind(scope);
+    if (!_ready.isCompleted) {
+      _ready.completeError(
+        WebSocketChannelException('connection closed before it opened'),
+      );
+      _ready.future.ignore();
+    }
     if (!_controller.isClosed) _controller.close();
+    _markDone();
   }
 
   @override
@@ -580,20 +638,30 @@ class _ReplayTransport implements _Transport {
       final scope = _scope;
       final replay = this.replay;
       if (scope != null && replay != null) {
-        replay.takeNext(scope, const {InteractionTypes.wsClose});
-        // Without a recorded server close the connection ends here.
-        if (replay.scheduledIn(scope) == 0) {
+        final matched = replay.takeNext(scope, const {
+          InteractionTypes.wsClose,
+        });
+        // Nothing more reaches the app after it closed, except the
+        // server's close answering a recorded client close; anything else
+        // still scheduled is reported as unused.
+        replay.drop(
+          scope,
+          keep: matched == null ? const {} : const {InteractionTypes.wsClose},
+        );
+        if (matched == null || replay.scheduledIn(scope) == 0) {
           _closeCode = code;
           _closeReason = reason;
           _finish();
         }
+      } else {
+        _finish();
       }
     }
     return done;
   }
 
   @override
-  Future<void> get done => _controller.done.then((_) {}, onError: (_) {});
+  Future<void> get done => _done.future;
 }
 
 // ---------------------------------------------------------------- facades

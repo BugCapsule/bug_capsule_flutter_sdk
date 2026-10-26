@@ -278,4 +278,57 @@ void main() {
     await expectLater(channel.ready, throwsA(isA<Exception>()));
     expect([for (final d in replay.finish()) d.type], ['ws.unrecorded']);
   });
+
+  test('failed and cancelled connections free their capture slot', () async {
+    final h = InteractionHarness.capture(
+      limits: const InteractionLimits(maxActive: 1),
+    );
+    final sockets = BugCapsuleWebSocket();
+    await h.setUp([sockets]);
+    final dead = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final deadPort = dead.port;
+    await dead.close();
+    final failed = sockets.connect(Uri.parse('ws://127.0.0.1:$deadPort/'));
+    await expectLater(failed.ready, throwsA(anything));
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    final channel = sockets.connect(url);
+    await channel.ready;
+    final sub = channel.stream.listen((_) {});
+    await sub.cancel();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(sockets.openInteractions(), isEmpty);
+
+    await runScenario(sockets, url);
+    expect(h.events.where((e) => e.type == 'ws.connect'), hasLength(3));
+    expect(
+      h.events.where(
+        (e) => e.type == 'ws.close' && e.data['cancelled'] == true,
+      ),
+      hasLength(1),
+    );
+    expect(
+      sockets.stats.gaps.map((g) => g.code),
+      isNot(contains('connections.limit')),
+    );
+  });
+
+  test('closing early in replay stops deliveries and reports them', () async {
+    final (h, _) = await capture(captureBinary: true);
+    final replay = InteractionHarness.replay(
+      h.encodedEvents(),
+      dependencies: h.dependencies(),
+    );
+    final sockets = BugCapsuleWebSocket(captureBinary: true);
+    await replay.setUp([sockets]);
+    final channel = sockets.connect(url, protocols: ['quotes.v1']);
+    await channel.ready;
+    final received = <Object?>[];
+    channel.stream.listen(received.add);
+    await channel.sink.close(1000);
+    await channel.sink.done.timeout(const Duration(seconds: 1));
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    expect(received, isEmpty);
+    expect(replay.finish().map((d) => d.type), contains('ws.unused'));
+  });
 }

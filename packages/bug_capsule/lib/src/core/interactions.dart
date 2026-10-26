@@ -171,11 +171,13 @@ enum PayloadMode { full, redacted, metadata, omitted, truncated }
 class InteractionPayload {
   const InteractionPayload({
     required this.mode,
-    required this.replayable,
+    required bool replayable,
     this.value,
     this.bytes,
     this.kind,
-  });
+    bool hasValue = true,
+  }) : _replayable = replayable,
+       _hasValue = hasValue;
 
   factory InteractionPayload.fromJson(Map<String, Object?> j) =>
       InteractionPayload(
@@ -184,6 +186,7 @@ class InteractionPayload {
         value: j['value'],
         bytes: j['bytes'] as int?,
         kind: j['kind'] as String?,
+        hasValue: j.containsKey('value'),
       );
 
   /// Null when [json] is not a payload object.
@@ -202,7 +205,15 @@ class InteractionPayload {
   );
 
   final PayloadMode mode;
-  final bool replayable;
+
+  /// Only `full` and `redacted` payloads with a value can be replayed,
+  /// whatever a (malformed) capsule claims.
+  bool get replayable =>
+      _replayable &&
+      (mode == PayloadMode.full || mode == PayloadMode.redacted) &&
+      _hasValue;
+  final bool _replayable;
+  final bool _hasValue;
 
   /// Typed-value JSON (see [TypedValue]).
   final Object? value;
@@ -322,12 +333,17 @@ class PayloadEncoder {
     required this.now,
     this.captureBinary = false,
     this.redactedReplayable = false,
+    this.capturePayloads,
   });
 
   final Redactor Function() redactor;
   final PayloadBudget budget;
   final DependencyStats stats;
   final int Function() now;
+
+  /// False while body capture is off (local or remote setting): payloads
+  /// are then `omitted`.
+  final bool Function()? capturePayloads;
 
   /// Binary values (byte frames, typed arrays) are kept only when true;
   /// otherwise recorded as metadata.
@@ -359,6 +375,14 @@ class PayloadEncoder {
       );
     }
     final size = _size(value, typed);
+    if (!(capturePayloads?.call() ?? true)) {
+      return InteractionPayload(
+        mode: PayloadMode.omitted,
+        replayable: false,
+        bytes: size,
+        kind: kind,
+      );
+    }
     if (!captureBinary && (kind == 'binary' || TypedValue.hasBinary(typed))) {
       stats.gap(
         DependencyGaps.payloadBinaryMetadata,
@@ -372,8 +396,8 @@ class PayloadEncoder {
       );
     }
     final (redacted, changed) = TypedValue.redact(typed, redactor());
-    final encoded = jsonEncode(redacted);
-    if (encoded.length > budget.limits.maxPayloadBytes) {
+    final encoded = utf8.encode(jsonEncode(redacted)).length;
+    if (encoded > budget.limits.maxPayloadBytes) {
       stats
         ..truncated += 1
         ..gap(DependencyGaps.payloadTruncated);
@@ -384,7 +408,7 @@ class PayloadEncoder {
         kind: kind,
       );
     }
-    if (!budget.spend(now(), encoded.length)) {
+    if (!budget.spend(now(), encoded)) {
       stats
         ..dropped += 1
         ..gap(DependencyGaps.payloadDropped, 'capsule payload budget spent');
@@ -395,7 +419,7 @@ class PayloadEncoder {
         kind: kind,
       );
     }
-    stats.payloadBytes += encoded.length;
+    stats.payloadBytes += encoded;
     if (changed) stats.gap(DependencyGaps.payloadRedacted);
     final replayable =
         TypedValue.isReplayable(redacted) &&
@@ -435,14 +459,51 @@ String interactionKey(String scope, String? method, Object? argsJson) =>
     '$scope|${method ?? ''}|${stableHash(canonicalJson(argsJson))}';
 
 /// Counts occurrences per key on the capture side.
+///
+/// Occurrences are session-relative here; the runtime renumbers them from
+/// the capsule window when it writes a capsule ([rebaseOccurrences]), so
+/// the counter may forget keys when it grows large.
 class OccurrenceCounter {
+  OccurrenceCounter({this.maxKeys = 10000});
+
+  final int maxKeys;
   final Map<String, int> _counts = {};
 
   int next(String key) {
+    if (_counts.length >= maxKeys && !_counts.containsKey(key)) {
+      _counts.clear();
+    }
     final n = _counts[key] ?? 0;
     _counts[key] = n + 1;
     return n;
   }
+}
+
+/// Renumbers `occurrence` of keyed outbound interaction events from the
+/// start of [events] (capsule-v2 §5: occurrences count within the capsule).
+List<BugCapsuleEvent> rebaseOccurrences(List<BugCapsuleEvent> events) {
+  final counts = <String, int>{};
+  return [
+    for (final e in events)
+      if (InteractionTypes.isInteraction(e.type) &&
+          e.data['key'] is String &&
+          e.data['occurrence'] is int)
+        () {
+          final id = '${e.data['dep']}|${e.type}|${e.data['key']}';
+          final n = counts[id] ?? 0;
+          counts[id] = n + 1;
+          return n == e.data['occurrence']
+              ? e
+              : BugCapsuleEvent(
+                  seq: e.seq,
+                  t: e.t,
+                  type: e.type,
+                  data: {...e.data, 'occurrence': n},
+                );
+        }()
+      else
+        e,
+  ];
 }
 
 /// A recorded interaction event plus its scheduling metadata.
@@ -539,6 +600,10 @@ class InteractionScript {
     for (final e in events) {
       if (e.type == InteractionTypes.platformCall) {
         calls['${e.data['call']}'] = '${e.data['dir']}';
+      } else if (e.type == InteractionTypes.platformListen &&
+          e.data['call'] != null) {
+        // The answer to the listen call itself (capsule-v2 §4.2).
+        calls['${e.data['call']}'] = 'dart';
       }
     }
     final lastOutbound = <String, RecordedInteraction>{};
@@ -557,6 +622,10 @@ class InteractionScript {
       if (outbound) {
         lastOutbound[scope] = r;
         if (channelScope != null) lastOutbound[channelScope] = r;
+        if (e.type == InteractionTypes.platformListen &&
+            e.data['call'] != null) {
+          lastOutbound['platform.call:${e.data['call']}'] = r;
+        }
         final key = e.data['key'];
         if (key is String) {
           (_keyed['${r.dep}|${e.type}|$key'] ??= ListQueue()).add(r);
@@ -757,19 +826,35 @@ class InteractionScript {
       ..clear()
       ..addAll(keep);
     for (final r in due) {
-      r
-        ..consumed = true
-        ..at = now;
       final handler = _handlers[r.scope];
       if (handler == null) {
         // Unbound by an earlier delivery in this batch (a close).
         _pending.add(r);
         continue;
       }
-      handler(r);
+      r
+        ..consumed = true
+        ..at = now;
+      try {
+        handler(r);
+      } catch (e) {
+        _divergences.add(('dispatch.error', '${_describe(r)}: $e'));
+      }
       delivered++;
     }
     return delivered;
+  }
+
+  /// Stops delivering what is scheduled for [scope] (the app closed the
+  /// connection or cancelled the subscription), except event types in
+  /// [keep] (the server's close answering the app's). Dropped events count
+  /// as unused.
+  void drop(String scope, {Set<String> keep = const {}}) {
+    _pending.removeWhere((r) {
+      if (r.scope != scope || keep.contains(r.type)) return false;
+      r.dueAt = null;
+      return true;
+    });
   }
 
   static int _byDue(RecordedInteraction a, RecordedInteraction b) {

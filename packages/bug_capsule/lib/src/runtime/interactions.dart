@@ -55,7 +55,10 @@ abstract class InteractionIntegration extends BugCapsuleIntegration {
   InteractionIntegration({
     this.captureBinary = false,
     this.redactedReplayable = false,
-  });
+    String? id,
+  }) : _id = id;
+
+  final String? _id;
 
   /// Adapter identity, e.g. `bug_capsule.web_socket_channel`.
   String get adapter;
@@ -71,8 +74,9 @@ abstract class InteractionIntegration extends BugCapsuleIntegration {
 
   String get adapterVersion => bugCapsuleVersion;
 
-  /// `manifest.dependencies[].id`; one per adapter instance in a session.
-  String get dependencyId => name;
+  /// `manifest.dependencies[].id`: [name] unless the constructor was given
+  /// an `id`. Two adapters in one session need different ids.
+  String get dependencyId => _id ?? name;
 
   /// False for capture-only (diagnostic) adapters: their events are never
   /// served during replay and never block preflight.
@@ -114,6 +118,7 @@ abstract class InteractionIntegration extends BugCapsuleIntegration {
       now: session.now,
       captureBinary: captureBinary,
       redactedReplayable: redactedReplayable,
+      capturePayloads: () => session.captureNetworkBodies,
     );
   }
 
@@ -264,6 +269,11 @@ class ReplayInteractions {
 
   int scheduledIn(String scope) => script.scheduledIn(scope);
 
+  void drop(String scope, {Set<String> keep = const {}}) {
+    script.drop(scope, keep: keep);
+    _arm();
+  }
+
   T _after<T>(T value) {
     _arm();
     return value;
@@ -357,8 +367,14 @@ abstract class NativeAdapter extends InteractionIntegration {
   String get kind => DependencyKinds.native;
 
   final OccurrenceCounter _occurrences = OccurrenceCounter();
+  final Set<String> _openSubs = {};
   int _nextOp = 0;
   int _nextSub = 0;
+
+  @override
+  List<Map<String, Object?>> openInteractions() => [
+    for (final sub in _openSubs) {'type': 'native.sub', 'id': sub},
+  ];
 
   /// The code, message and details recorded for [error] (override to read
   /// SDK exception types, e.g. `FirebaseException.code`).
@@ -549,9 +565,10 @@ abstract class NativeAdapter extends InteractionIntegration {
     var active = false;
     void stop({required bool cancelled}) {
       if (sub == null) return;
-      if (cancelled) {
+      if (cancelled && capturing) {
         recordInteraction(InteractionTypes.nativeCancel, {'sub': sub});
       }
+      _openSubs.remove(sub);
       sub = null;
       if (active) host?.release();
       active = false;
@@ -562,6 +579,7 @@ abstract class NativeAdapter extends InteractionIntegration {
         if (capturing && (active = host?.acquire() ?? false)) {
           final key = _key(operation, args, instance);
           sub = 'n${_nextSub++}';
+          _openSubs.add(sub!);
           recordInteraction(InteractionTypes.nativeSubscribe, {
             'sub': sub,
             'operation': operation,
@@ -576,7 +594,7 @@ abstract class NativeAdapter extends InteractionIntegration {
         }
         inner = open().listen(
           (value) {
-            final s = sub;
+            final s = capturing ? sub : null;
             if (s != null) {
               InteractionPayload payload;
               try {
@@ -597,12 +615,12 @@ abstract class NativeAdapter extends InteractionIntegration {
             controller.add(value);
           },
           onError: (Object error, StackTrace st) {
-            final s = sub;
+            final s = capturing ? sub : null;
             if (s != null) _recordError({'sub': s}, error);
             controller.addError(error, st);
           },
           onDone: () {
-            final s = sub;
+            final s = capturing ? sub : null;
             if (s != null) {
               recordInteraction(InteractionTypes.nativeDone, {'sub': s});
             }

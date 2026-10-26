@@ -146,13 +146,25 @@ class ReplayEngine implements ReplayContext {
   /// Replay clock in recorded milliseconds since [run] started.
   int elapsed() => _clock.elapsedMilliseconds + _skippedMs;
 
+  /// Expected divergences stop being kept at 200; material ones at 400,
+  /// then one material `divergences.truncated` marks the loss, so a capped
+  /// list can never read as clean.
   @override
   void diverge(String type, String detail) {
     final t = _clock.isRunning ? elapsed() : null;
-    if (_divergences.length < 200) {
-      _divergences.add(Divergence(type, detail, t: t));
+    final d = Divergence(type, detail, t: t);
+    final material = DivergencePolicy.isMaterial(d);
+    if (_divergences.length < 200 || (material && _divergences.length < 400)) {
+      _divergences.add(d);
+    } else if (material && !_truncated) {
+      _truncated = true;
+      _divergences.add(
+        const Divergence('divergences.truncated', 'too many divergences'),
+      );
     }
   }
+
+  bool _truncated = false;
 
   @override
   void fixtureServed() => _fixturesServed++;
@@ -358,10 +370,11 @@ class ReplayEngine implements ReplayContext {
       observed = await _reproduced.future;
     }
 
+    // Interactions first: their unused entries are material.
+    interactions?.finish(expected?.t);
     for (final key in fixtures.unusedKeys()) {
       diverge('network.unused', key);
     }
-    interactions?.finish(expected?.t);
 
     final outcome = expected == null
         ? ReplayOutcome.noAssertion

@@ -33,11 +33,19 @@ class BugCapsuleBinding extends WidgetsFlutterBinding {
       var out = m;
       for (final i in interceptors) {
         out = i.wrapDefaultMessenger(out);
+        _installed.add(i);
       }
       return out;
     });
     return WidgetsBinding.instance;
   }
+
+  static final Set<MessengerInterceptor> _installed = Set.identity();
+
+  /// Whether [interceptor] wraps the default messenger of this binding
+  /// (anywhere in the chain of interceptors).
+  static bool isInstalled(MessengerInterceptor interceptor) =>
+      _installed.contains(interceptor);
 
   /// Whether a binding exists already.
   static bool get hasBinding {

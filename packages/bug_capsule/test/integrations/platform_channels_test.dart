@@ -363,4 +363,59 @@ void main() {
     expect(native.calls, 0);
     expect([for (final d in replay.finish()) d.type], ['platform.unrecorded']);
   });
+
+  test('a failed EventChannel listen replays as failed', () async {
+    final h = InteractionHarness.capture();
+    final integration = BugCapsulePlatformChannels(
+      interceptDefaultMessenger: false,
+      channels: [const PlatformChannel.event('sensor')],
+    );
+    await h.setUp([integration]);
+    Future<Object?> listen(BinaryMessenger platform) async {
+      final m = integration.messenger(platform);
+      final reply = await m.send(
+        'sensor',
+        _codec.encodeMethodCall(const MethodCall('listen')),
+      );
+      try {
+        return _codec.decodeEnvelope(reply!);
+      } on PlatformException catch (e) {
+        return e.code;
+      }
+    }
+
+    final denied = _Denying();
+    expect(await listen(denied), 'PERMISSION_DENIED');
+    expect(integration.openInteractions(), hasLength(1));
+    final replay = InteractionHarness.replay(
+      h.encodedEvents(),
+      dependencies: h.dependencies(),
+    );
+    final again = BugCapsulePlatformChannels(
+      interceptDefaultMessenger: false,
+      channels: [const PlatformChannel.event('sensor')],
+    );
+    await replay.setUp([again]);
+    final m = again.messenger(FakePlatform(forbidden: true));
+    final reply = await m.send(
+      'sensor',
+      _codec.encodeMethodCall(const MethodCall('listen')),
+    );
+    expect(
+      () => _codec.decodeEnvelope(reply!),
+      throwsA(
+        isA<PlatformException>().having(
+          (e) => e.code,
+          'code',
+          'PERMISSION_DENIED',
+        ),
+      ),
+    );
+  });
+}
+
+class _Denying extends FakePlatform {
+  @override
+  Future<ByteData?> send(String channel, ByteData? message) async =>
+      _codec.encodeErrorEnvelope(code: 'PERMISSION_DENIED', message: 'no');
 }
