@@ -63,6 +63,10 @@ abstract final class DependencyGaps {
   static const channelLate = 'channel.late';
   static const captureFailed = 'adapter.captureFailed';
   static const eventsDropped = 'events.dropped';
+
+  /// The app used an operation the adapter does not record (it reached the
+  /// real dependency while capturing and fails during replay).
+  static const operationUnsupported = 'operation.unsupported';
 }
 
 class DependencyGap {
@@ -334,7 +338,13 @@ class PayloadEncoder {
   bool redactedReplayable;
 
   /// Encodes [value]. [kind] is `text`/`binary` for WebSocket frames.
-  InteractionPayload encode(Object? value, {String? kind}) {
+  /// [redactedReplayable] overrides the encoder's setting for this payload
+  /// (an adapter that knows the redacted fields are safe to replay).
+  InteractionPayload encode(
+    Object? value, {
+    String? kind,
+    bool? redactedReplayable,
+  }) {
     final Object? typed;
     try {
       typed = value is String && kind == 'text'
@@ -388,7 +398,8 @@ class PayloadEncoder {
     stats.payloadBytes += encoded.length;
     if (changed) stats.gap(DependencyGaps.payloadRedacted);
     final replayable =
-        TypedValue.isReplayable(redacted) && (!changed || redactedReplayable);
+        TypedValue.isReplayable(redacted) &&
+        (!changed || (redactedReplayable ?? this.redactedReplayable));
     return InteractionPayload(
       mode: changed ? PayloadMode.redacted : PayloadMode.full,
       replayable: replayable,

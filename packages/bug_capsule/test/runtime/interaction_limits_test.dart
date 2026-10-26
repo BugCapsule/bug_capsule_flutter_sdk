@@ -107,4 +107,15 @@ void main() {
     expect(value['mode'], 'redacted');
     expect('$value', isNot(contains('sk_live_123')));
   });
+
+  test('a capsule without this adapter fails its calls offline', () async {
+    final replay = InteractionHarness.replay(const [], dependencies: const []);
+    final adapter = TickerAdapter(() => throw StateError('live call'));
+    await replay.setUp([adapter]);
+    await expectLater(
+      adapter.ticks().drain<void>(),
+      throwsA(isA<NativeAdapterException>()),
+    );
+    expect([for (final d in replay.finish()) d.type], ['native.unrecorded']);
+  });
 }

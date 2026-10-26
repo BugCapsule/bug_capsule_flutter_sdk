@@ -269,4 +269,13 @@ void main() {
       contains(DependencyGaps.connectionsLimit),
     );
   });
+
+  test('a capsule without WebSocket traffic never connects for real', () async {
+    final replay = InteractionHarness.replay(const [], dependencies: const []);
+    final sockets = BugCapsuleWebSocket();
+    await replay.setUp([sockets]);
+    final channel = sockets.connect(url);
+    await expectLater(channel.ready, throwsA(isA<Exception>()));
+    expect([for (final d in replay.finish()) d.type], ['ws.unrecorded']);
+  });
 }

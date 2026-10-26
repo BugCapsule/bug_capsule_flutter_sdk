@@ -239,6 +239,12 @@ class _ChannelMessenger implements BinaryMessenger {
     if (spec == null) return inner.send(channel, message);
     final replay = owner.replayInteractions;
     if (replay != null) return _replaySend(replay, spec, message);
+    if (owner.replayingWithoutRecording) {
+      owner.diverge('platform.unrecorded', '$channel (not in the capsule)');
+      return Future.value(
+        _errorEnvelope(spec, 'bugcapsule.unrecorded', 'not in the capsule'),
+      );
+    }
     if (!owner.capturing) return inner.send(channel, message);
     return _captureSend(spec, message);
   }
@@ -252,6 +258,8 @@ class _ChannelMessenger implements BinaryMessenger {
       _replaySetHandler(replay, spec, handler);
       return;
     }
+    // Replaying without a recording: the native side must not call in.
+    if (owner.replayingWithoutRecording) return;
     inner.setMessageHandler(
       channel,
       handler == null

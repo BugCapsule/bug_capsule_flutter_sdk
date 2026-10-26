@@ -78,7 +78,7 @@ class BugCapsuleWebSocket extends InteractionIntegration {
   /// otherwise.
   WebSocketChannel connect(Uri url, {Iterable<String>? protocols}) {
     final replay = replayInteractions;
-    if (replay != null) {
+    if (replay != null || replayingWithoutRecording) {
       return _ChannelFacade(_ReplayTransport(this, replay, url));
     }
     if (!capturing) return WebSocketChannel.connect(url, protocols: protocols);
@@ -100,7 +100,7 @@ class BugCapsuleWebSocket extends InteractionIntegration {
   }) async {
     final uri = Uri.parse(url);
     final replay = replayInteractions;
-    if (replay != null) {
+    if (replay != null || replayingWithoutRecording) {
       final transport = _ReplayTransport(this, replay, uri);
       await transport.ready;
       return _IoFacade(transport);
@@ -436,11 +436,13 @@ class _RecordingTransport implements _Transport {
   Future<void> get done => _done.future;
 }
 
-/// A connection served from the capsule: nothing leaves the device.
+/// A connection served from the capsule: nothing leaves the device. With
+/// no [replay] (the capsule has no WebSocket recording) every connection is
+/// unrecorded.
 class _ReplayTransport implements _Transport {
   _ReplayTransport(this.owner, this.replay, Uri url) {
     final key = owner.keyFor(url);
-    final recorded = replay.take(
+    final recorded = replay?.take(
       owner.dependencyId,
       InteractionTypes.wsConnect,
       key,
@@ -459,11 +461,11 @@ class _ReplayTransport implements _Transport {
       return;
     }
     _scope = recorded.scope;
-    replay.bind(recorded.scope, _deliver);
+    replay!.bind(recorded.scope, _deliver);
   }
 
   final BugCapsuleWebSocket owner;
-  final ReplayInteractions replay;
+  final ReplayInteractions? replay;
   late final String? _scope;
   final Completer<void> _ready = Completer();
   final StreamController<dynamic> _controller = StreamController();
@@ -515,7 +517,7 @@ class _ReplayTransport implements _Transport {
 
   void _finish() {
     final scope = _scope;
-    if (scope != null) replay.unbind(scope);
+    if (scope != null) replay?.unbind(scope);
     if (!_controller.isClosed) _controller.close();
   }
 
@@ -540,7 +542,8 @@ class _ReplayTransport implements _Transport {
       throw StateError('Cannot add event after closing.');
     }
     final scope = _scope;
-    if (scope == null) return;
+    final replay = this.replay;
+    if (scope == null || replay == null) return;
     final recorded = replay.takeNext(scope, const {InteractionTypes.wsSend});
     if (recorded == null) {
       owner.diverge('ws.unrecorded', '${scope.substring(3)}: extra send');
@@ -575,7 +578,8 @@ class _ReplayTransport implements _Transport {
     if (!_clientClosed) {
       _clientClosed = true;
       final scope = _scope;
-      if (scope != null) {
+      final replay = this.replay;
+      if (scope != null && replay != null) {
         replay.takeNext(scope, const {InteractionTypes.wsClose});
         // Without a recorded server close the connection ends here.
         if (replay.scheduledIn(scope) == 0) {

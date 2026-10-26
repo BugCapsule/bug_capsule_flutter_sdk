@@ -346,4 +346,21 @@ void main() {
       contains(DependencyGaps.channelLate),
     );
   });
+
+  test('a capsule without channel traffic never calls the plugin', () async {
+    final replay = InteractionHarness.replay(const [], dependencies: const []);
+    final integration = channels();
+    await replay.setUp([integration]);
+    final native = FakePlatform(forbidden: true);
+    await expectLater(
+      MethodChannel(
+        'battery',
+        _codec,
+        integration.messenger(native),
+      ).invokeMethod<double>('getLevel'),
+      throwsA(isA<PlatformException>()),
+    );
+    expect(native.calls, 0);
+    expect([for (final d in replay.finish()) d.type], ['platform.unrecorded']);
+  });
 }

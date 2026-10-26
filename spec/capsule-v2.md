@@ -212,7 +212,9 @@ Each outbound event has a **scope** and a **match key**:
 | `native.call`, `native.subscribe` | the adapter instance | `key` + `occurrence` |
 | `native.cancel` | the subscription | — |
 
-`key` is `<channel or operation>|<method?>|<hash of the redacted, normalized arguments>`
+`key` is `<scope>|<method?>|<hash of the redacted, normalized arguments>`,
+where the scope is the channel, the WebSocket match URL, or the operation
+name (`<operation>@<instance>` when a native call names an adapter instance)
 (the HTTP request-key hash: two 32-bit FNV-1a passes with offsets
 `0x811C9DC5` and `0x050C5D1F` over the UTF-8 canonical typed-value JSON with
 sorted object keys, as 16 lowercase hex digits); `occurrence` is the 0-based count of earlier outbound
@@ -243,7 +245,7 @@ not keep replay busy.
 
 | Type | Expected? | Meaning |
 |---|---|---|
-| `ws.unrecorded`, `platform.unrecorded`, `native.unrecorded` | material | The app performed an operation with no recorded match. Replay fails it (connection error, `PlatformException` with code `bugcapsule.unrecorded`, adapter error); it never contacts the real dependency. |
+| `ws.unrecorded`, `platform.unrecorded`, `native.unrecorded` | material | The app performed an operation with no recorded match, including when the capsule has no recording for that adapter at all. Replay fails it (connection error, `PlatformException` with code `bugcapsule.unrecorded`, adapter error); it never contacts the real dependency. |
 | `ws.mismatch`, `platform.mismatch`, `native.mismatch` | material | Matched by order, but the payload differs from the recording. |
 | `ws.unused`, `platform.unused`, `native.unused` | material | A recorded interaction at or before the failure time was never matched or delivered. |
 | `ws.unusedAfterFailure`, `platform.unusedAfterFailure`, `native.unusedAfterFailure` | expected | The same, recorded after the failure. |
@@ -285,7 +287,8 @@ can lower them further):
 
 Gap codes: `payload.truncated`, `payload.dropped`, `payload.binaryMetadata`,
 `payload.redacted`, `connections.limit`, `codec.unsupported`,
-`channel.late`, `adapter.captureFailed`, `events.dropped`. A dependency
+`channel.late`, `adapter.captureFailed`, `operation.unsupported` (the app
+used an operation the adapter does not record), `events.dropped`. A dependency
 with any gap has `coverage: partial`, and the capsule eligibility gets a
 `dependency.<id>` entry. Incomplete message sequences (a dropped or
 truncated payload that replay would have to serve) never verify as fixed:

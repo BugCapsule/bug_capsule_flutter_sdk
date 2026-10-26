@@ -137,6 +137,12 @@ abstract class InteractionIntegration extends BugCapsuleIntegration {
     return r.serves(dependencyId) ? r : null;
   }
 
+  /// True while replaying a capsule that has no recording for this
+  /// adapter: every operation is then unrecorded and must fail, never reach
+  /// the real dependency.
+  bool get replayingWithoutRecording =>
+      _session?.replay != null && replayInteractions == null;
+
   /// Encodes payloads with the session's redaction and limits.
   PayloadEncoder get encoder {
     final e = _encoder;
@@ -366,13 +372,30 @@ abstract class NativeAdapter extends InteractionIntegration {
   Object rebuildError(String code, String? message, Object? details) =>
       NativeAdapterException(code, message, details);
 
-  String _key(String operation, Object? args) =>
-      interactionKey(operation, null, encoder.keyInput(args));
+  /// Calls are matched within their adapter instance (capsule-v2 §5).
+  static String _scope(String operation, String? instance) =>
+      instance == null ? operation : '$operation@$instance';
+
+  String _key(String operation, Object? args, String? instance) =>
+      interactionKey(_scope(operation, instance), null, encoder.keyInput(args));
+
+  Object _unrecorded(String operation, {bool subscription = false}) {
+    diverge('native.unrecorded', '$adapter $operation (not in the capsule)');
+    return rebuildError(
+      'bugcapsule.unrecorded',
+      'no recorded $operation${subscription ? ' subscription' : ''} in this capsule',
+      null,
+    );
+  }
 
   /// Runs a one-shot operation. Capture: calls [invoke] and records its
   /// result or error. Replay: returns the recorded result through [decode]
   /// (or throws the recorded error); [invoke] is not called. Unrecorded
-  /// calls fail with `bugcapsule.unrecorded`.
+  /// calls fail with `bugcapsule.unrecorded`, also when the capsule has no
+  /// recording for this adapter at all.
+  ///
+  /// [encode] returns a value [TypedValue] can encode (JSON values, typed
+  /// data, maps); [decode] receives that value back, decoded.
   Future<T> call<T>(
     String operation, {
     Object? args,
@@ -386,8 +409,9 @@ abstract class NativeAdapter extends InteractionIntegration {
     if (replay != null) {
       return _replayCall(replay, operation, args, decode, instance);
     }
+    if (replayingWithoutRecording) return Future.error(_unrecorded(operation));
     if (!capturing) return invoke();
-    final key = _key(operation, args);
+    final key = _key(operation, args, instance);
     final op = 'o${_nextOp++}';
     recordInteraction(InteractionTypes.nativeCall, {
       'op': op,
@@ -442,7 +466,7 @@ abstract class NativeAdapter extends InteractionIntegration {
     T Function(Object? json) decode,
     String? instance,
   ) {
-    final key = _key(operation, args);
+    final key = _key(operation, args, instance);
     final recorded = replay.take(
       dependencyId,
       InteractionTypes.nativeCall,
@@ -452,7 +476,7 @@ abstract class NativeAdapter extends InteractionIntegration {
       final mismatch = replay.hasUnconsumed(
         dependencyId,
         InteractionTypes.nativeCall,
-        '$operation|',
+        '${_scope(operation, instance)}|',
       );
       diverge(
         mismatch ? 'native.mismatch' : 'native.unrecorded',
@@ -483,7 +507,7 @@ abstract class NativeAdapter extends InteractionIntegration {
         return;
       }
       try {
-        completer.complete(decode(payload.value));
+        completer.complete(decode(payload.decoded));
       } catch (e, st) {
         completer.completeError(e, st);
       }
@@ -514,6 +538,9 @@ abstract class NativeAdapter extends InteractionIntegration {
     if (replay != null) {
       return _replaySubscribe(replay, operation, args, decode, instance);
     }
+    if (replayingWithoutRecording) {
+      return Stream.error(_unrecorded(operation, subscription: true));
+    }
     if (!capturing) return open();
     late StreamController<T> controller;
     StreamSubscription<T>? inner;
@@ -533,7 +560,7 @@ abstract class NativeAdapter extends InteractionIntegration {
     controller = StreamController<T>(
       onListen: () {
         if (capturing && (active = host?.acquire() ?? false)) {
-          final key = _key(operation, args);
+          final key = _key(operation, args, instance);
           sub = 'n${_nextSub++}';
           recordInteraction(InteractionTypes.nativeSubscribe, {
             'sub': sub,
@@ -605,7 +632,7 @@ abstract class NativeAdapter extends InteractionIntegration {
     RecordedInteraction? recorded;
     controller = StreamController<T>(
       onListen: () {
-        final key = _key(operation, args);
+        final key = _key(operation, args, instance);
         recorded = replay.take(
           dependencyId,
           InteractionTypes.nativeSubscribe,
@@ -616,7 +643,7 @@ abstract class NativeAdapter extends InteractionIntegration {
           final mismatch = replay.hasUnconsumed(
             dependencyId,
             InteractionTypes.nativeSubscribe,
-            '$operation|',
+            '${_scope(operation, instance)}|',
           );
           diverge(
             mismatch ? 'native.mismatch' : 'native.unrecorded',
@@ -642,7 +669,7 @@ abstract class NativeAdapter extends InteractionIntegration {
                 return;
               }
               try {
-                controller.add(decode(payload.value));
+                controller.add(decode(payload.decoded));
               } catch (err, st) {
                 controller.addError(err, st);
               }
