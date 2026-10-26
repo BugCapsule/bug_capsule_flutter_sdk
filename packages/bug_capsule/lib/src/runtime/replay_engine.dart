@@ -9,6 +9,7 @@ import '../core/core.dart';
 
 import 'actions.dart';
 import 'integration.dart';
+import 'interactions.dart';
 
 /// Downloads a capsule from the CLI and reports the result back.
 class ReplayChannel {
@@ -79,7 +80,34 @@ class ReplayEngine implements ReplayContext {
     required this.actions,
     required this.buildGitSha,
   }) : fixtures = FixtureStore(capsule.events),
-       _idle = IdleCompressor(capsule.events);
+       _idle = IdleCompressor(capsule.events) {
+    final served = {
+      for (final d in capsule.manifest.requiredDependencies) d.id,
+    };
+    if (served.isNotEmpty) {
+      interactions = ReplayInteractions(
+        InteractionScript(
+          capsule.events,
+          dependencies: served,
+          clock: _interactionClock,
+          base: capsule.checkpoint.kind == CheckpointKind.launch
+              ? 0
+              : capsule.checkpoint.t,
+        ),
+        dependencies: served,
+        diverge: diverge,
+        activity: activity,
+      );
+    }
+  }
+
+  /// Recorded interactions (capsule-v2) the adapters serve; null for
+  /// capsules without required dependencies.
+  ReplayInteractions? interactions;
+
+  /// Clock of the interaction scheduler: runs from engine creation (apps
+  /// connect before the first frame) and includes skipped idle time.
+  int _interactionClock() => _sinceRestore.elapsedMilliseconds + _skippedMs;
 
   @override
   final Capsule capsule;
@@ -173,6 +201,43 @@ class ReplayEngine implements ReplayContext {
     }
   }
 
+  /// capsule-v2 §2 preflight: every required dependency has an installed
+  /// adapter that supports its schema, and nothing open at a periodic
+  /// checkpoint needs restoring. Returns why the capsule cannot replay, or
+  /// null.
+  String? preflight(Iterable<InteractionIntegration> adapters) {
+    for (final d in capsule.manifest.requiredDependencies) {
+      final candidates = [
+        for (final a in adapters)
+          if (a.adapter == d.adapter) a,
+      ];
+      if (candidates.isEmpty) {
+        return 'dependency.unsupported: ${d.adapter} (dependency "${d.id}") '
+            'is not set up in this build; add the adapter to BugCapsule.init';
+      }
+      if (!candidates.any((a) => a.supportsSchema(d.schema))) {
+        return 'dependency.schema: ${d.adapter} cannot replay schema '
+            '${d.schema} (recorded by ${d.adapterVersion}); update the adapter';
+      }
+      if (!candidates.any((a) => a.dependencyId == d.id)) {
+        return 'dependency.unsupported: ${d.adapter} is set up as '
+            '"${candidates.first.dependencyId}", the capsule needs "${d.id}"';
+      }
+    }
+    final interactions = capsule.checkpoint.data['interactions'];
+    final open = interactions is Map ? interactions['open'] : null;
+    if (open is List) {
+      for (final o in open) {
+        if (o is Map && o['restorable'] != true) {
+          return 'dependency.unrestorable: ${o['type']} ${o['id']} of '
+              '"${o['dep']}" was open at the periodic checkpoint and cannot '
+              'be restored; capture a capsule whose window starts at launch';
+        }
+      }
+    }
+    return null;
+  }
+
   /// Checks that can make replay pointless before the app even starts.
   ReplayReport? precheck() {
     final m = capsule.manifest;
@@ -212,6 +277,7 @@ class ReplayEngine implements ReplayContext {
   /// Call after the first frame of the replayed app.
   Future<ReplayReport> run() async {
     _clock.start();
+    interactions?.runStarted();
     _strategy = _chooseStrategy();
     final expected = capsule.manifest.failure;
     final base = capsule.checkpoint.kind == CheckpointKind.launch
@@ -243,9 +309,25 @@ class ReplayEngine implements ReplayContext {
               busy: _busy,
               quietMs: _quietMs,
             )) {
-          _skippedMs += wait;
-          _gapsCompressed++;
-          break;
+          // A recorded delivery due before the input bounds the jump: it
+          // must arrive at its time, then the gap is re-checked.
+          final nextDue = interactions?.nextDueAt;
+          final untilDue = nextDue == null
+              ? wait
+              : nextDue - _interactionClock();
+          if (untilDue <= 0) {
+            await Future<void>.delayed(Duration.zero);
+            continue;
+          }
+          final skip = untilDue < wait ? untilDue : wait;
+          _skippedMs += skip;
+          interactions?.clockJumped();
+          if (skip == wait) {
+            _gapsCompressed++;
+            break;
+          }
+          await Future<void>.delayed(Duration.zero);
+          continue;
         }
         // Inside a compressible gap, re-check idleness every 50 ms.
         final step = idleSince == null || wait < 50 ? wait : 50;
@@ -279,6 +361,7 @@ class ReplayEngine implements ReplayContext {
     for (final key in fixtures.unusedKeys()) {
       diverge('network.unused', key);
     }
+    interactions?.finish(expected?.t);
 
     final outcome = expected == null
         ? ReplayOutcome.noAssertion

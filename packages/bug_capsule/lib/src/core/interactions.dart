@@ -706,6 +706,11 @@ class InteractionScript {
     return next;
   }
 
+  /// Scheduled, undelivered events of [scope] (e.g. the server's close
+  /// after the app closed a connection).
+  int scheduledIn(String scope) =>
+      _pending.where((r) => r.scope == scope).length;
+
   /// Whether any scheduled event waits for a handler.
   bool get hasWaiting => _pending.any((r) => !_handlers.containsKey(r.scope));
 

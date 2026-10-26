@@ -14,9 +14,11 @@ import '../core/core.dart';
 
 import 'actions.dart';
 import 'backend.dart';
+import 'binding.dart';
 import 'config.dart';
 import 'connection_token.dart';
 import 'integration.dart';
+import 'interactions.dart';
 import 'monitoring/breadcrumbs.dart';
 import 'monitoring/hub.dart';
 import 'monitoring/scope.dart';
@@ -520,7 +522,7 @@ _Connection _resolveConnection(BugCapsuleConfig config) {
   }
 }
 
-class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
+class _Runtime with WidgetsBindingObserver implements InteractionSession {
   _Runtime(this.config, this.integrations, this._overrides, this._appPackage)
     : _random = _overrides?.random ?? Random(),
       _connection = _resolveConnection(config);
@@ -552,6 +554,12 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
 
   FlightRecorder? _recorder;
   ReplayEngine? engine;
+
+  @override
+  final InteractionHost interactions = InteractionHost();
+
+  Iterable<InteractionIntegration> get _interactionAdapters =>
+      integrations.whereType<InteractionIntegration>();
   Redactor _redactor = Redactor();
   bool _recording = false;
   bool _captureBodies = true;
@@ -648,7 +656,9 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
           BugCapsuleEvent(seq: 0, t: 0, type: type, data: out),
         ).data;
       }
-      if (type != EventTypes.pointer && type != EventTypes.lifecycle) {
+      if (InteractionTypes.isInteraction(type)) {
+        out = _redactInteraction(out);
+      } else if (type != EventTypes.pointer && type != EventTypes.lifecycle) {
         out = (_redactor.redactJson(out) as Map).cast<String, Object?>();
         // Fields derived from already-redacted input stay byte-identical:
         // the request key must match what replay computes, and base64 bodies
@@ -676,6 +686,39 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     }
   }
 
+  /// Interaction events: payload objects hold typed values (bytes must
+  /// stay base64, numbers keep their tags), so they are redacted with
+  /// [TypedValue.redact]; a payload the current rules change is no longer
+  /// replayable. Match keys were computed from redacted input and are kept.
+  Map<String, Object?> _redactInteraction(Map<String, Object?> data) {
+    final out = <String, Object?>{};
+    for (final e in data.entries) {
+      final v = e.value;
+      if (e.key == 'key' || e.key == 'dep') {
+        out[e.key] = v;
+      } else if (InteractionTypes.payloadFields.contains(e.key) &&
+          v is Map &&
+          v.containsKey('mode')) {
+        final payload = Map<String, Object?>.of(v.cast<String, Object?>());
+        if (payload.containsKey('value')) {
+          final (value, changed) = TypedValue.redact(
+            payload['value'],
+            _redactor,
+          );
+          payload['value'] = value;
+          if (changed) {
+            payload['mode'] = PayloadMode.redacted.name;
+            payload['replayable'] = false;
+          }
+        }
+        out[e.key] = payload;
+      } else {
+        out[e.key] = _redactor.redactJson(v);
+      }
+    }
+    return out;
+  }
+
   @override
   void reportError(Object error, StackTrace? stack) =>
       _onError(error, stack, Mechanism.manual);
@@ -683,7 +726,12 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   // ---------------------------------------------------------------- startup
 
   Future<void> start(FutureOr<void> Function() appRunner) async {
-    final binding = WidgetsFlutterBinding.ensureInitialized();
+    // Platform channel capture wraps the default messenger before plugins
+    // can use it, so the binding is created here.
+    final binding = BugCapsuleBinding.ensureInitialized([
+      for (final i in integrations.whereType<MessengerInterceptor>())
+        if (i.interceptDefaultMessenger) i,
+    ]);
     String? replayUrl;
     try {
       replayUrl =
@@ -805,6 +853,7 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
     _captureBodies =
         config.captureNetworkBodies && (cached?.captureNetworkBodies ?? true);
     _maxCapsuleBytes = cached?.maxCapsuleBytes ?? _maxCapsuleBytes;
+    _applyInteractionPolicy(cached);
     _recording = _decideRecording(cached);
     if (_setupAbandoned) return _stopRecording();
 
@@ -1008,6 +1057,8 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
       final t = now();
       final afterSeq = recorder.lastSeq;
       final data = await _snapshot(CheckpointKind.periodic);
+      final open = _openInteractions();
+      if (open.isNotEmpty) data['interactions'] = {'open': open};
       if (epoch != _captureEpoch || !identical(recorder, _recorder)) return;
       recorder.addCheckpoint(
         Checkpoint(
@@ -1022,6 +1073,24 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
       _warnOnce('periodic checkpoint failed: $e');
     } finally {
       _checkpointBusy = false;
+    }
+  }
+
+  /// Connections and subscriptions open now (capsule-v2 §6).
+  List<Map<String, Object?>> _openInteractions() => [
+    for (final a in _interactionAdapters)
+      for (final o in _tryOr<List<Map<String, Object?>>>(
+        a.openInteractions,
+        const [],
+      ))
+        {'dep': a.dependencyId, ...o},
+  ];
+
+  static T _tryOr<T>(T Function() fn, T fallback) {
+    try {
+      return fn();
+    } catch (_) {
+      return fallback;
     }
   }
 
@@ -1197,6 +1266,23 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
         'events between the checkpoint and the window were evicted; raise window or maxEvents',
       );
     }
+    final dependencies = [
+      for (final a in _interactionAdapters)
+        ?_tryOr(() => a.dependency(window), null),
+    ];
+    final open = window.checkpoint.kind == CheckpointKind.periodic
+        ? window.checkpoint.data['interactions']
+        : null;
+    final openList = open is Map ? open['open'] : null;
+    if (openList is List &&
+        openList.any((o) => o is Map && o['restorable'] != true)) {
+      eligibility.missing(
+        'interactions.restore',
+        '${openList.length} connections or subscriptions were open at the '
+            'periodic checkpoint and cannot be restored',
+        blocking: true,
+      );
+    }
     for (final integration in integrations) {
       try {
         integration.describeEligibility(eligibility, window);
@@ -1269,8 +1355,11 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
           'clock.virtual': 'explicit',
           'random.seeded': 'explicit',
           for (final i in integrations) 'integration.${i.name}': 'supported',
+          for (final d in dependencies)
+            'interaction.${d.adapter}': d.required ? 'supported' : 'partial',
         },
         monitoring: monitoring,
+        dependencies: dependencies,
       ),
       checkpoint: window.checkpoint.shift(anchor),
       events: events,
@@ -1404,6 +1493,7 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
   /// * `maxCapsuleBytes`: applies to the next capsule.
   void _applyRemote(RemoteCaptureConfig? previous, RemoteCaptureConfig next) {
     _maxCapsuleBytes = next.maxCapsuleBytes;
+    _applyInteractionPolicy(next);
     _guard(() => hub?.onRemoteConfig(next));
     if (!next.enabled) {
       _disableCapture();
@@ -1444,7 +1534,10 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
           // Buffered exchanges are dropped (the capsule reports it), the rest
           // is redacted again. Events that cannot be are dropped too.
           event: (e) {
-            if (e.type == EventTypes.http) return null;
+            if (e.type == EventTypes.http ||
+                InteractionTypes.isInteraction(e.type)) {
+              return null;
+            }
             final data = _sanitizeEvent(e.type, e.data, hook: false);
             return data == null
                 ? null
@@ -1466,6 +1559,18 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
         _stopRecording();
       }
     }
+  }
+
+  /// Interaction adapters (capsule-v2 §7): per-adapter kill switch and
+  /// payload limits no higher than the body limit and remote policy.
+  void _applyInteractionPolicy(RemoteCaptureConfig? remote) {
+    interactions
+      ..disabledAdapters = {...?remote?.disabledAdapters}
+      ..limits = const InteractionLimits().lowered(
+        maxPayloadBytes: remote?.maxInteractionPayloadBytes == null
+            ? config.maxBodyBytes
+            : min(config.maxBodyBytes, remote!.maxInteractionPayloadBytes!),
+      );
   }
 
   static BugCapsuleEvent _withoutBodies(BugCapsuleEvent e) {
@@ -1576,6 +1681,26 @@ class _Runtime with WidgetsBindingObserver implements BugCapsuleSession {
       return;
     }
     replay.precheck();
+    interactions.replay = replay.interactions;
+    final blocked = replay.preflight(_interactionAdapters);
+    if (blocked != null) {
+      await channel.report(
+        ReplayReport(
+          outcome: ReplayOutcome.incompatible,
+          attempt: settings.attempt,
+          durationMs: 0,
+          strategy: settings.strategy,
+          expectedSignature: capsule.manifest.failure?.signature,
+          message: blocked,
+          attemptId: settings.attemptId,
+          runtime: 'flutter',
+        ),
+      );
+      engine = null;
+      interactions.replay = null;
+      await appRunner();
+      return;
+    }
 
     _installErrorHandlers();
 

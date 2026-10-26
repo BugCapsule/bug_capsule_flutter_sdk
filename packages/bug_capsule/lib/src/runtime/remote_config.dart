@@ -20,6 +20,8 @@ class RemoteCaptureConfig {
     this.sessionTracking = true,
     this.maxBreadcrumbs = 100,
     this.tracePropagationTargets,
+    this.disabledAdapters = const [],
+    this.maxInteractionPayloadBytes,
   });
 
   /// Parses the `/v1/sdk/config` body (or the cache file). Throws
@@ -63,6 +65,14 @@ class RemoteCaptureConfig {
       tracePropagationTargets: targets == null
           ? null
           : [for (final t in targets) '$t'],
+      disabledAdapters: [
+        for (final a
+            in (field<List<Object?>>('disabledAdapters') ?? const []).take(100))
+          '$a',
+      ],
+      maxInteractionPayloadBytes: field<int>(
+        'maxInteractionPayloadBytes',
+      )?.clamp(0, 64 * 1024),
     );
   }
 
@@ -92,6 +102,13 @@ class RemoteCaptureConfig {
   /// Replaces the app's list when set.
   final List<String>? tracePropagationTargets;
 
+  /// Interaction adapters (capsule-v2) that must stop recording, by adapter
+  /// id, e.g. `bug_capsule.web_socket_channel`. HTTP capture is unaffected.
+  final List<String> disabledAdapters;
+
+  /// Lowers the per-payload limit of interaction adapters (never raises it).
+  final int? maxInteractionPayloadBytes;
+
   Map<String, Object?> toJson() => {
     'enabled': enabled,
     'sampleRate': sampleRate,
@@ -106,6 +123,8 @@ class RemoteCaptureConfig {
     'sessionTracking': sessionTracking,
     'maxBreadcrumbs': maxBreadcrumbs,
     'tracePropagationTargets': tracePropagationTargets,
+    'disabledAdapters': disabledAdapters,
+    'maxInteractionPayloadBytes': ?maxInteractionPayloadBytes,
   };
 }
 
