@@ -6,7 +6,7 @@
 - `NativeAdapter` for third-party SDKs, and `package:bug_capsule/testing.dart` with `InteractionHarness` and `AdapterConformance`.
 - Replay preflight blocks capsules whose required adapters are missing (`dependency.unsupported`) or cannot be restored (`dependency.unrestorable`). Idle compression never skips past a due delivery.
 - `bugcapsule inspect` lists dependencies, adapter versions, coverage and gaps; `verify` reports and uploads reason codes.
-- Remote config: `disabledAdapters` turns off one adapter's capture; `maxInteractionPayloadBytes` lowers the payload limit.
+- Project capture settings can turn off one adapter's capture and lower the interaction payload limit.
 
 ## 0.4.1-beta.6 — 2026-10-25
 

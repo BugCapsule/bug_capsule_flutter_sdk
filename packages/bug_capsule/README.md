@@ -265,8 +265,8 @@ final quotes = sockets.connect(Uri.parse('wss://quotes.example.com/v1'));
 Native adapters replay what the app saw (a Firestore snapshot, a location
 fix, the outcome of a payment sheet). They do not reproduce native
 rendering, map tiles or provider behaviour, and never make a real charge.
-The remote config can turn off one adapter (`disabledAdapters`) without
-touching HTTP capture.
+The project's capture settings can turn off one adapter without touching
+HTTP capture.
 
 ### Hooks that make more bugs reproducible
 
