@@ -58,6 +58,10 @@ abstract final class DivergencePolicy {
     'screen.size',
     // the recording continues after the failure; a fix may also skip calls.
     'network.unused',
+    // capsule-v2 §5: interactions recorded after the failure.
+    'ws.unusedAfterFailure',
+    'platform.unusedAfterFailure',
+    'native.unusedAfterFailure',
   };
   // Not expected: `text.redacted`, `storage.redacted`, `route.redacted`. A
   // placeholder replayed instead of a token, an OTP or a route can send the
@@ -65,16 +69,45 @@ abstract final class DivergencePolicy {
   // never fires, which must not read as a fix.
 
   static bool isMaterial(Divergence d) => !expected.contains(d.type);
+
+  /// The capsule-v2 §8 reason code of a material interaction divergence,
+  /// or null for other divergence types.
+  static String? reasonCode(String type) {
+    if (type == 'dependency.live' || type == 'dependency.late') {
+      return 'interaction.live';
+    }
+    final family = type.split('.').first;
+    if (family != 'ws' && family != 'platform' && family != 'native') {
+      return null;
+    }
+    return switch (type.substring(family.length + 1)) {
+      'unused' || 'undelivered' => 'interaction.missing',
+      'unrecorded' => 'interaction.unexpected',
+      'mismatch' => 'interaction.mismatch',
+      'noPayload' => 'interaction.incomplete',
+      'unrestored' => 'interaction.unrestored',
+      _ => null,
+    };
+  }
 }
 
 class AttemptAssessment {
-  const AttemptAssessment(this.report, this.status, this.reasons);
+  const AttemptAssessment(
+    this.report,
+    this.status,
+    this.reasons, [
+    this.reasonCodes = const [],
+  ]);
 
   final ReplayReport report;
   final AttemptStatus status;
 
   /// Why an attempt is invalid (empty otherwise).
   final List<String> reasons;
+
+  /// Machine-readable codes for [reasons] that concern interaction
+  /// dependencies (capsule-v2 §8), e.g. `interaction.missing`.
+  final List<String> reasonCodes;
 }
 
 /// Classifies one attempt.
@@ -85,6 +118,7 @@ class AttemptAssessment {
 /// dispatched, no other failure, and no material divergence.
 AttemptAssessment assessAttempt(ReplayReport r) {
   final reasons = <String>[];
+  final codes = <String>{};
   switch (r.outcome) {
     case ReplayOutcome.reproduced:
       if (r.expectedSignature == null) {
@@ -96,6 +130,9 @@ AttemptAssessment assessAttempt(ReplayReport r) {
       reasons.add(
         'incompatible: ${r.message ?? 'capsule cannot run against this build'}',
       );
+      if (r.message?.startsWith('dependency.') ?? false) {
+        codes.add('dependency.unsupported');
+      }
     case ReplayOutcome.noAssertion:
       reasons.add('capsule has no failure assertion');
     case ReplayOutcome.error:
@@ -120,12 +157,15 @@ AttemptAssessment assessAttempt(ReplayReport r) {
       for (final type in material) {
         final n = r.divergences.where((d) => d.type == type).length;
         reasons.add('divergence $type${n > 1 ? ' ×$n' : ''}');
+        final code = DivergencePolicy.reasonCode(type);
+        if (code != null) codes.add(code);
       }
   }
   return AttemptAssessment(
     r,
     reasons.isEmpty ? AttemptStatus.clean : AttemptStatus.invalid,
     reasons,
+    codes.toList()..sort(),
   );
 }
 
@@ -136,6 +176,7 @@ class RunEvaluation {
     required this.verdict,
     required this.attempts,
     required this.reasons,
+    this.reasonCodes = const [],
   });
 
   final RunKind kind;
@@ -145,6 +186,9 @@ class RunEvaluation {
 
   /// Why the verdict is not a clean success (deduplicated).
   final List<String> reasons;
+
+  /// Interaction reason codes over all attempts (capsule-v2 §8), sorted.
+  final List<String> reasonCodes;
 
   int get completedAttempts => attempts.length;
   int get reproductions =>
@@ -237,5 +281,6 @@ RunEvaluation evaluateRun(
     verdict: verdict,
     attempts: attempts,
     reasons: reasons.toList(),
+    reasonCodes: {for (final a in attempts) ...a.reasonCodes}.toList()..sort(),
   );
 }
