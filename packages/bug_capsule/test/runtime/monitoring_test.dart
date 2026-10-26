@@ -84,6 +84,33 @@ class EchoServer implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+/// Stands in for `bug_capsule_native`.
+class FakeNativeReporter implements NativeCrashReporter {
+  FakeNativeReporter({this.lastRunCrashed = false, this.previous = const []});
+
+  final bool lastRunCrashed;
+  final List<String> previous;
+  final List<String> scopes = [];
+  final StreamController<String> live = StreamController<String>.broadcast();
+  NativeCrashSettings? settings;
+
+  @override
+  Future<NativeCrashStart> start(NativeCrashSettings settings) async {
+    this.settings = settings;
+    return NativeCrashStart(
+      lastRunCrashed: lastRunCrashed,
+      events: previous,
+      handlerInstalled: true,
+    );
+  }
+
+  @override
+  void updateScope(String scopeJson) => scopes.add(scopeJson);
+
+  @override
+  Stream<String> get events => live.stream;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -100,6 +127,7 @@ void main() {
   });
 
   tearDown(() async {
+    NativeCrashReporter.instance = null;
     await BugCapsule.resetForTest();
     BugCapsule.debugOverrides = null;
     debugPrint = originalDebugPrint;
@@ -447,6 +475,238 @@ void main() {
         expect(previous['timestamp'], '2026-10-21T14:00:00.000Z');
       },
     );
+  });
+
+  group('native crashes', () {
+    String nativeCrash({String release = 'com.shop.app@0.9.0+8'}) =>
+        jsonEncode({
+          'eventId': '22222222-2222-4222-8222-222222222222',
+          'timestamp': '2026-10-21T14:00:05.000Z',
+          'level': 'fatal',
+          'runtime': 'android',
+          'release': release,
+          'environment': 'qa',
+          'exception': {
+            'values': [
+              {
+                'type': 'SIGSEGV',
+                'value': 'Segmentation violation (code 1) at 0x0',
+                'mechanism': {'type': 'signal', 'handled': false},
+                'stacktrace': {
+                  'frames': [
+                    {
+                      'instructionAddr': '0x7a00002000',
+                      'imageAddr': '0x7a00000000',
+                      'package': '/data/app/x/lib/arm64/libflutter.so',
+                      'inApp': true,
+                    },
+                    {
+                      'instructionAddr': '0x7b00001000',
+                      'imageAddr': '0x7b00000000',
+                      'package': '/data/app/x/lib/arm64/libcamera_plugin.so',
+                      'function': 'take_picture',
+                      'inApp': true,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          'user': {'id': 'u_crashed'},
+          'tags': {'screen': 'camera'},
+          'contexts': {
+            'app': {'appVersion': '0.9.0'},
+          },
+          'breadcrumbs': [
+            {
+              'timestamp': '2026-10-21T14:00:04.000Z',
+              'type': 'navigation',
+              'message': '/camera',
+              'level': 'info',
+            },
+          ],
+          'threads': [
+            {'id': 1, 'name': 'main', 'crashed': true, 'current': true},
+          ],
+          'debugImages': [
+            {
+              'type': 'elf',
+              'codeFile': 'libcamera_plugin.so',
+              'debugId': 'abc',
+              'imageAddr': '0x7b00000000',
+            },
+          ],
+        });
+
+    test(
+      'a native crash of the last run crashes its session and is sent through beforeSend',
+      () async {
+        File('${dir.path}/session.json').writeAsStringSync(
+          jsonEncode({
+            'sid': '11111111-1111-4111-8111-111111111111',
+            'did': 'install',
+            'seq': 1,
+            'release': 'com.shop.app@0.9.0+8',
+            'environment': 'qa',
+            'started': '2026-10-21T13:58:00.000Z',
+            'errors': 0,
+            'status': 'ok',
+            'foreground': true,
+            'lastUpdate': '2026-10-21T14:00:00.000Z',
+          }),
+        );
+        final native = NativeCrashReporter.instance = FakeNativeReporter(
+          lastRunCrashed: true,
+          previous: [nativeCrash()],
+        );
+        await start(
+          monitoring: MonitoringOptions(
+            beforeSend: (event, hint) {
+              event.tags['seen'] = hint.mechanism?.type ?? '-';
+              return event;
+            },
+          ),
+        );
+        await flush();
+        expect(native.settings!.release, 'com.shop.app@1.0.0+1');
+        expect(native.settings!.inAppIncludes, ['com.shop.app']);
+
+        final previous = backend
+            .items('session')
+            .firstWhere(
+              (s) => s['sid'] == '11111111-1111-4111-8111-111111111111',
+            );
+        expect(previous['status'], 'crashed');
+        expect(previous['errors'], 1);
+        expect(previous['release'], 'com.shop.app@0.9.0+8');
+        expect(previous['timestamp'], '2026-10-21T14:00:05.000Z');
+
+        final event = backend.items('event').single;
+        expect(event['eventId'], '22222222-2222-4222-8222-222222222222');
+        expect(event['runtime'], 'flutter');
+        expect(event['level'], 'fatal');
+        expect(event['release'], 'com.shop.app@0.9.0+8');
+        expect(event['user'], {'id': 'u_crashed'});
+        expect(event['tags'], {'screen': 'camera', 'seen': 'signal'});
+        final contexts = event['contexts']! as Map;
+        expect((contexts['app'] as Map)['appVersion'], '0.9.0');
+        expect(
+          contexts['os'],
+          isNotNull,
+          reason: 'device contexts of this launch',
+        );
+        final frames =
+            ((((event['exception']! as Map)['values'] as List).single
+                        as Map)['stacktrace']
+                    as Map)['frames']
+                as List;
+        expect((frames[0] as Map)['inApp'], isFalse, reason: 'the engine');
+        expect((frames[1] as Map)['inApp'], isTrue, reason: 'a plugin');
+        expect((frames[1] as Map)['imageAddr'], '0x7b00000000');
+        expect((event['threads'] as List).single, containsPair('name', 'main'));
+        expect(
+          (event['debugImages'] as List).single,
+          containsPair('debugId', 'abc'),
+        );
+      },
+    );
+
+    test(
+      'a hang while running counts in the session and can be sampled',
+      () async {
+        final native = NativeCrashReporter.instance = FakeNativeReporter();
+        await start();
+        native.live.add(
+          jsonEncode({
+            'eventId': '33333333-3333-4333-8333-333333333333',
+            'timestamp': '2026-10-21T14:00:05.000Z',
+            'level': 'error',
+            'exception': {
+              'values': [
+                {
+                  'type': 'ApplicationNotResponding',
+                  'mechanism': {'type': 'anr', 'handled': false},
+                },
+              ],
+            },
+          }),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await flush();
+        final event = backend.items('event').single;
+        expect(event['level'], 'error');
+        expect(
+          BugCapsule.lastEventId(),
+          '33333333-3333-4333-8333-333333333333',
+        );
+        expect(backend.items('session').map((s) => s['errors']), contains(1));
+      },
+    );
+
+    test('the scope reaches the native handler redacted', () async {
+      final native = NativeCrashReporter.instance = FakeNativeReporter();
+      await start();
+      BugCapsule.setUser(const MonitoringUser(id: 'u_7'));
+      BugCapsule.setTag('screen', 'checkout');
+      BugCapsule.addBreadcrumb(
+        Breadcrumb(message: 'pay', data: {'password': 'hunter2'}),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      final scope = (jsonDecode(native.scopes.last) as Map)
+          .cast<String, Object?>();
+      expect(scope['user'], {'id': 'u_7'});
+      expect(scope['tags'], containsPair('screen', 'checkout'));
+      expect(((scope['contexts'] as Map)['app'] as Map)['appVersion'], '1.0.0');
+      expect(jsonEncode(scope['breadcrumbs']), contains('pay'));
+      expect(native.scopes.last, isNot(contains('hunter2')));
+    });
+
+    test(
+      'enableNativeCrashHandling: false leaves the native SDK alone',
+      () async {
+        final native = NativeCrashReporter.instance = FakeNativeReporter(
+          lastRunCrashed: true,
+          previous: [nativeCrash()],
+        );
+        await start(
+          monitoring: const MonitoringOptions(enableNativeCrashHandling: false),
+        );
+        await flush();
+        expect(native.settings, isNull);
+        expect(backend.items('event'), isEmpty);
+      },
+    );
+  });
+
+  group('sessions after an update', () {
+    test('a recovered session keeps the release it ran with', () async {
+      File('${dir.path}/session.json').writeAsStringSync(
+        jsonEncode({
+          'sid': '44444444-4444-4444-8444-444444444444',
+          'did': 'install',
+          'seq': 1,
+          'release': 'com.shop.app@0.9.0+8',
+          'environment': 'production',
+          'started': '2026-10-21T13:58:00.000Z',
+          'errors': 0,
+          'status': 'ok',
+          'foreground': true,
+          'lastUpdate': '2026-10-21T14:00:00.000Z',
+        }),
+      );
+      await start();
+      await flush();
+      final previous = backend
+          .items('session')
+          .firstWhere(
+            (s) => s['sid'] == '44444444-4444-4444-8444-444444444444',
+          );
+      expect(previous['status'], 'abnormal');
+      expect(previous['release'], 'com.shop.app@0.9.0+8');
+      expect(previous['environment'], 'production');
+      final current = backend.items('session').last;
+      expect(current['release'], 'com.shop.app@1.0.0+1');
+    });
   });
 
   group('tracing', () {

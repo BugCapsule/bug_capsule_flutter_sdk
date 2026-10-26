@@ -28,6 +28,7 @@ export 'remote_config.dart'
 export 'bug_capsule.dart';
 export 'monitoring/feedback.dart';
 export 'monitoring/navigation.dart';
+export 'monitoring/native.dart';
 export 'monitoring/options.dart';
 export 'monitoring/scope.dart' show Scope;
 export 'monitoring/tracing.dart' show BugCapsuleSpan, BugCapsuleTransaction;

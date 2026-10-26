@@ -13,6 +13,7 @@ import '../backend.dart';
 import '../config.dart';
 import '../remote_config.dart';
 import 'breadcrumbs.dart';
+import 'native.dart';
 import 'options.dart';
 import 'scope.dart';
 import 'sessions.dart';
@@ -126,6 +127,11 @@ class MonitoringHub implements TransactionSink {
   final Set<TransactionImpl> _open = {};
   final Map<TransactionImpl, _FrameCounter> _frames = {};
   final List<(String, DateTime)> _recentUnhandled = [];
+  NativeCrashReporter? _native;
+  StreamSubscription<String>? _nativeEvents;
+  Timer? _scopeMirrorTimer;
+  bool _scopeMirrorScheduled = false;
+  String? _lastScopeMirror;
 
   RemoteCaptureConfig? get _remote => host.remote();
   BugCapsuleConfig get _config => host.config;
@@ -211,9 +217,18 @@ class MonitoringHub implements TransactionSink {
       },
       persist: _persistSession,
     );
-    final previous = sessions.recover(_readSession());
+    final native = await _startNative();
+    final previous = sessions.recover(
+      _readSession(),
+      crashedAt: native == null || !native.lastRunCrashed
+          ? null
+          : _latestCrash(native.events),
+    );
     if (previous != null) {
       _enqueue([EnvelopeItem(EnvelopeItemType.session, previous)]);
+    }
+    for (final json in native?.events ?? const <String>[]) {
+      _submitNative(json, live: false);
     }
     _persistSession(null);
     if (_sessionTracking && _inForeground) sessions.start();
@@ -232,6 +247,156 @@ class MonitoringHub implements TransactionSink {
       );
     }
     current = this;
+  }
+
+  // ------------------------------------------------------------ native
+
+  /// Starts `bug_capsule_native` when it is installed and enabled; null
+  /// otherwise (or when it fails: native capture is best effort).
+  Future<NativeCrashStart?> _startNative() async {
+    final reporter = NativeCrashReporter.instance;
+    if (reporter == null || !options.enableNativeCrashHandling) return null;
+    try {
+      final started = await reporter
+          .start(
+            NativeCrashSettings(
+              release: release,
+              environment: environment,
+              inAppIncludes: [?_config.appId],
+              appHangs: options.enableAppHangTracking,
+              appHangTimeout: options.appHangTimeout,
+            ),
+          )
+          .timeout(const Duration(seconds: 5));
+      _native = reporter;
+      _nativeEvents = reporter.events.listen(
+        (e) => _submitNative(e, live: true),
+      );
+      _mirrorScope();
+      _scopeMirrorTimer = Timer.periodic(
+        const Duration(seconds: 2),
+        (_) => _mirrorScope(),
+      );
+      return started;
+    } catch (e) {
+      debugPrint('[bugcapsule] native crash reporting is off: $e');
+      return null;
+    }
+  }
+
+  /// When the previous run's native crash happened (its newest fatal event).
+  static DateTime _latestCrash(List<String> events) {
+    var latest = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+    for (final json in events) {
+      try {
+        final e = (jsonDecode(json) as Map).cast<String, Object?>();
+        final t = DateTime.tryParse('${e['timestamp']}');
+        if (e['level'] == 'fatal' && t != null && t.isAfter(latest)) latest = t;
+      } catch (_) {}
+    }
+    return latest;
+  }
+
+  /// Queues a native event: crashes of an earlier run (fatal, never sampled
+  /// out, their session was recovered separately) or a hang now ([live]:
+  /// counted in this session, sampled like other errors). It goes through
+  /// `beforeSend` and redaction like a Dart error.
+  void _submitNative(String json, {required bool live}) {
+    if (_disposed) return;
+    final ErrorEvent? event;
+    try {
+      event = ErrorEvent.fromJson((jsonDecode(json) as Map).cast());
+    } catch (e) {
+      debugPrint('[bugcapsule] dropping a malformed native event: $e');
+      return;
+    }
+    if (event == null) return;
+    // Device contexts are this launch's; `app` and the app's own contexts
+    // in the event are the process that failed.
+    event.contexts = {..._contexts(), ...event.contexts};
+    _markEngineFrames(event);
+    final fatal = event.level == EventLevel.fatal;
+    final prepared = PreparedEvent(
+      event,
+      EventHint(
+        mechanism: event.exceptions.isEmpty
+            ? null
+            : event.exceptions.last.mechanism,
+      ),
+      sampledOut: !fatal && _random.nextDouble() >= errorSampleRate,
+      sessionUpdate: live ? _sessions?.onError(crashed: fatal) : null,
+    );
+    if (!prepared.sampledOut) _lastEventId = event.eventId;
+    _finish(prepared, linked: false);
+  }
+
+  /// The Flutter engine is not app code, whatever the native SDK thought.
+  static void _markEngineFrames(ErrorEvent event) {
+    bool engine(String? p) =>
+        p != null &&
+        (p.endsWith('/libflutter.so') ||
+            p.contains('/Flutter.framework/') ||
+            p.endsWith('/Flutter'));
+    void mark(Iterable<Object?> frames) {
+      for (final f in frames) {
+        if (f is EventFrame && engine(f.package)) f.inApp = false;
+        if (f is Map && engine(f['package'] as String?)) f['inApp'] = false;
+      }
+    }
+
+    for (final v in event.exceptions) {
+      mark(v.frames);
+    }
+    for (final t in event.threads ?? const <Map<String, Object?>>[]) {
+      final frames = (t['stacktrace'] as Map?)?['frames'];
+      if (frames is List) mark(frames);
+    }
+  }
+
+  void _scheduleScopeMirror() {
+    if (_native == null || _scopeMirrorScheduled || _disposed) return;
+    _scopeMirrorScheduled = true;
+    Timer(const Duration(milliseconds: 100), () {
+      _scopeMirrorScheduled = false;
+      _mirrorScope();
+    });
+  }
+
+  /// Hands the native crash handler the current scope (redacted, at most
+  /// 60 KiB: the oldest breadcrumbs go first), when it changed.
+  void _mirrorScope() {
+    final native = _native;
+    if (native == null || _disposed) return;
+    try {
+      final scope = Scope.root;
+      var crumbs = [for (final b in _breadcrumbs.snapshot()) b.toJson()];
+      while (true) {
+        final json = jsonEncode(
+          _redact({
+            'level': ?scope.level?.name,
+            'fingerprint': ?scope.fingerprint,
+            'tags': scope.tags,
+            'user': ?_user(scope)?.toJson(),
+            'extra': scope.extras,
+            'contexts': {'app': _contexts()['app'], ...scope.contexts},
+            'breadcrumbs': crumbs,
+          }),
+          toEncodable: (o) => '$o',
+        );
+        if (utf8.encode(json).length <= 60 * 1024 || crumbs.isEmpty) {
+          if (json != _lastScopeMirror) {
+            _lastScopeMirror = json;
+            native.updateScope(json);
+          }
+          return;
+        }
+        crumbs = crumbs.sublist(max(1, crumbs.length ~/ 4));
+      }
+    } catch (e) {
+      debugPrint(
+        '[bugcapsule] could not mirror the scope for native crashes: $e',
+      );
+    }
   }
 
   String _readInstallId(Directory root) {
@@ -352,6 +517,7 @@ class MonitoringHub implements TransactionSink {
       _remote?.maxBreadcrumbs ?? 100,
     ).clamp(0, 100);
     _breadcrumbs.add(b);
+    _scheduleScopeMirror();
   }
 
   void navigationBreadcrumb(String to, {String? from}) {
@@ -1092,6 +1258,9 @@ class MonitoringHub implements TransactionSink {
     _disposed = true;
     if (identical(current, this)) current = null;
     _flushTimer?.cancel();
+    _scopeMirrorTimer?.cancel();
+    await _nativeEvents?.cancel();
+    _native = null;
     for (final tx in List.of(_open)) {
       tx.abandon();
     }
