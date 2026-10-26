@@ -91,7 +91,8 @@ class FakeNativeReporter implements NativeCrashReporter {
   final bool lastRunCrashed;
   final List<String> previous;
   final List<String> scopes = [];
-  final StreamController<String> live = StreamController<String>.broadcast();
+  final StreamController<NativeCrashEvent> live =
+      StreamController<NativeCrashEvent>.broadcast();
   NativeCrashSettings? settings;
 
   @override
@@ -108,7 +109,7 @@ class FakeNativeReporter implements NativeCrashReporter {
   void updateScope(String scopeJson) => scopes.add(scopeJson);
 
   @override
-  Stream<String> get events => live.stream;
+  Stream<NativeCrashEvent> get events => live.stream;
 }
 
 void main() {
@@ -617,19 +618,22 @@ void main() {
         final native = NativeCrashReporter.instance = FakeNativeReporter();
         await start();
         native.live.add(
-          jsonEncode({
-            'eventId': '33333333-3333-4333-8333-333333333333',
-            'timestamp': '2026-10-21T14:00:05.000Z',
-            'level': 'error',
-            'exception': {
-              'values': [
-                {
-                  'type': 'ApplicationNotResponding',
-                  'mechanism': {'type': 'anr', 'handled': false},
-                },
-              ],
-            },
-          }),
+          NativeCrashEvent(
+            jsonEncode({
+              'eventId': '33333333-3333-4333-8333-333333333333',
+              'timestamp': '2026-10-21T14:00:05.000Z',
+              'level': 'error',
+              'exception': {
+                'values': [
+                  {
+                    'type': 'ApplicationNotResponding',
+                    'mechanism': {'type': 'anr', 'handled': false},
+                  },
+                ],
+              },
+            }),
+            live: true,
+          ),
         );
         await Future<void>.delayed(const Duration(milliseconds: 10));
         await flush();

@@ -48,6 +48,17 @@ class NativeCrashStart {
   final bool handlerInstalled;
 }
 
+/// One event from the native SDK, as monitoring-v1 `event` JSON.
+class NativeCrashEvent {
+  const NativeCrashEvent(this.json, {required this.live});
+
+  final String json;
+
+  /// Captured in this run (a hang): it counts in the current session.
+  /// False for a failure of an earlier run reported late (MetricKit).
+  final bool live;
+}
+
 /// Native crash capture for the hub; see the library comment.
 abstract class NativeCrashReporter {
   /// Set by `bug_capsule_native` (its plugin registration); the hub starts
@@ -62,6 +73,7 @@ abstract class NativeCrashReporter {
   /// record.
   void updateScope(String scopeJson);
 
-  /// Events captured while the app runs (hangs), as event JSON.
-  Stream<String> get events;
+  /// Events after [start]: hangs as they happen, and earlier runs' failures
+  /// the system reports late (MetricKit). Each event once.
+  Stream<NativeCrashEvent> get events;
 }

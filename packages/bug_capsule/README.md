@@ -354,7 +354,8 @@ Monitoring is on by default and runs next to capsules:
 | Signal | What you get |
 |---|---|
 | Errors | `FlutterError.onError`, `PlatformDispatcher.onError` and zone errors under `BugCapsule.runZonedGuarded`; stack frames, breadcrumbs, user and tags. Repeated errors are rate-limited. |
-| Release health | One session per foreground run; crash-free rates per release. |
+| Native crashes (with `bug_capsule_native`) | Crashes in native code (your plugins', the engine's), ANRs and app hangs, and Android's and iOS's records of how the app died, with every thread and the breadcrumbs of the run that crashed. |
+| Release health | One session per foreground run; crash-free rates per release, counted against the release that ran. |
 | Performance | App start, screen transactions with slow and frozen frames, HTTP spans, `traceparent` / `baggage` propagation. |
 | User feedback | A form, a sheet, shake to report, or your own UI. |
 
@@ -382,9 +383,25 @@ showBugCapsuleFeedback(context, eventId: BugCapsule.lastEventId());
 ```
 
 `MonitoringOptions.disabled` turns monitoring off; capsules keep working.
-Native crashes, ANRs and app hangs inside plugins are reported by the
-BugCapsule Android and iOS SDKs, not from Dart. More:
-[docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.html).
+More: [docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.html).
+
+**Native crashes.** Dart can't see a crash in native code. Add
+`bug_capsule_native` and nothing else: it registers itself and
+`BugCapsule.init` starts it.
+
+```yaml
+dependencies:
+  bug_capsule: ^0.4.1-beta.7
+  bug_capsule_native: ^0.1.0
+```
+
+Native crashes are reported on the next launch, in the same issues and
+sessions as Dart errors, and go through `beforeSend`. The session that crashed
+counts as `crashed`. Turn it off with
+`MonitoringOptions(enableNativeCrashHandling: false)`; tune hangs with
+`enableAppHangTracking` and `appHangTimeout`. On iOS the plugin needs Swift
+Package Manager (`flutter config --enable-swift-package-manager`); with
+CocoaPods it builds but reports no native crashes on iOS.
 
 **Readable stack traces.** For obfuscated or `--split-debug-info` builds,
 upload symbols for every release:

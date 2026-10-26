@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Native crash reporting through the new `bug_capsule_native` package: crashes of the previous run (signals, NDK and Mach crashes, Android exit records, MetricKit) become events with that run's release and breadcrumbs, go through `beforeSend`, and make its session `crashed`; hangs while running count in the session. The redacted scope is mirrored to the native handler. New `MonitoringOptions.enableNativeCrashHandling`, `enableAppHangTracking` and `appHangTimeout`; `NativeCrashReporter` for the native side.
+- A session recovered on the next launch reports the release and environment it ran with, not the current ones, so an app update no longer moves a crash to the new release.
+- `ErrorEvent.fromJson` (and `fromJson` on its parts).
+
 - `BugCapsule.refreshRemoteConfig()` now always returns a config fetched after the call. Before, a call made while another fetch was running (such as the one `init` starts) returned that older answer, so a just-flipped kill switch or body setting could be missed.
 - Capsule spec v2 (`spec/capsule-v2.md`): required replay dependencies, payload recording modes, lossless typed values and reason codes for verification. The codec reads v1 and v2 and writes v2 only for capsules with interaction dependencies.
 - `BugCapsuleWebSocket`: record and replay `web_socket_channel` and `dart:io` WebSockets offline, with recorded ordering and timing, send checks and reconnect attempts.

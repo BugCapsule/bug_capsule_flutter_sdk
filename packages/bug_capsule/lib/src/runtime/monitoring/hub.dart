@@ -128,7 +128,7 @@ class MonitoringHub implements TransactionSink {
   final Map<TransactionImpl, _FrameCounter> _frames = {};
   final List<(String, DateTime)> _recentUnhandled = [];
   NativeCrashReporter? _native;
-  StreamSubscription<String>? _nativeEvents;
+  StreamSubscription<NativeCrashEvent>? _nativeEvents;
   Timer? _scopeMirrorTimer;
   bool _scopeMirrorScheduled = false;
   String? _lastScopeMirror;
@@ -270,7 +270,7 @@ class MonitoringHub implements TransactionSink {
           .timeout(const Duration(seconds: 5));
       _native = reporter;
       _nativeEvents = reporter.events.listen(
-        (e) => _submitNative(e, live: true),
+        (e) => _submitNative(e.json, live: e.live),
       );
       _mirrorScope();
       _scopeMirrorTimer = Timer.periodic(
