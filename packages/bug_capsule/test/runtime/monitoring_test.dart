@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:bug_capsule/bug_capsule.dart';
+import 'package:bug_capsule/src/runtime/monitoring/hub.dart' show MonitoringHub;
 import 'package:bug_capsule/src/version.dart';
 
 /// Backend fake for capsules, remote config and envelopes (monitoring-v1).
@@ -492,65 +493,69 @@ void main() {
   });
 
   group('native crashes', () {
-    String nativeCrash({String release = 'com.shop.app@0.9.0+8'}) =>
-        jsonEncode({
-          'eventId': '22222222-2222-4222-8222-222222222222',
-          'timestamp': '2026-10-21T14:00:05.000Z',
-          'level': 'fatal',
-          'runtime': 'android',
-          'release': release,
-          'environment': 'qa',
-          'exception': {
-            'values': [
-              {
-                'type': 'SIGSEGV',
-                'value': 'Segmentation violation (code 1) at 0x0',
-                'mechanism': {'type': 'signal', 'handled': false},
-                'stacktrace': {
-                  'frames': [
-                    {
-                      'instructionAddr': '0x7a00002000',
-                      'imageAddr': '0x7a00000000',
-                      'package': '/data/app/x/lib/arm64/libflutter.so',
-                      'inApp': true,
-                    },
-                    {
-                      'instructionAddr': '0x7b00001000',
-                      'imageAddr': '0x7b00000000',
-                      'package': '/data/app/x/lib/arm64/libcamera_plugin.so',
-                      'function': 'take_picture',
-                      'inApp': true,
-                    },
-                  ],
+    String nativeCrash({
+      String release = 'com.shop.app@0.9.0+8',
+      String timestamp = '2026-10-21T14:00:05.000Z',
+      Map<String, Object?> contexts = const {},
+    }) => jsonEncode({
+      'eventId': '22222222-2222-4222-8222-222222222222',
+      'timestamp': timestamp,
+      'level': 'fatal',
+      'runtime': 'android',
+      'release': release,
+      'environment': 'qa',
+      'exception': {
+        'values': [
+          {
+            'type': 'SIGSEGV',
+            'value': 'Segmentation violation (code 1) at 0x0',
+            'mechanism': {'type': 'signal', 'handled': false},
+            'stacktrace': {
+              'frames': [
+                {
+                  'instructionAddr': '0x7a00002000',
+                  'imageAddr': '0x7a00000000',
+                  'package': '/data/app/x/lib/arm64/libflutter.so',
+                  'inApp': true,
                 },
-              },
-            ],
-          },
-          'user': {'id': 'u_crashed'},
-          'tags': {'screen': 'camera'},
-          'contexts': {
-            'app': {'appVersion': '0.9.0'},
-          },
-          'breadcrumbs': [
-            {
-              'timestamp': '2026-10-21T14:00:04.000Z',
-              'type': 'navigation',
-              'message': '/camera',
-              'level': 'info',
+                {
+                  'instructionAddr': '0x7b00001000',
+                  'imageAddr': '0x7b00000000',
+                  'package': '/data/app/x/lib/arm64/libcamera_plugin.so',
+                  'function': 'take_picture',
+                  'inApp': true,
+                },
+              ],
             },
-          ],
-          'threads': [
-            {'id': 1, 'name': 'main', 'crashed': true, 'current': true},
-          ],
-          'debugImages': [
-            {
-              'type': 'elf',
-              'codeFile': 'libcamera_plugin.so',
-              'debugId': 'abc',
-              'imageAddr': '0x7b00000000',
-            },
-          ],
-        });
+          },
+        ],
+      },
+      'user': {'id': 'u_crashed'},
+      'tags': {'screen': 'camera'},
+      'contexts': {
+        'app': {'appVersion': '0.9.0'},
+        ...contexts,
+      },
+      'breadcrumbs': [
+        {
+          'timestamp': '2026-10-21T14:00:04.000Z',
+          'type': 'navigation',
+          'message': '/camera',
+          'level': 'info',
+        },
+      ],
+      'threads': [
+        {'id': 1, 'name': 'main', 'crashed': true, 'current': true},
+      ],
+      'debugImages': [
+        {
+          'type': 'elf',
+          'codeFile': 'libcamera_plugin.so',
+          'debugId': 'abc',
+          'imageAddr': '0x7b00000000',
+        },
+      ],
+    });
 
     test(
       'a native crash of the last run crashes its session and is sent through beforeSend',
@@ -730,6 +735,147 @@ void main() {
         expect(backend.items('event'), hasLength(2));
       },
     );
+
+    /// Runs a recording session that leaves its crash journal behind, as a
+    /// process that dies does.
+    Future<void> crashedSession() async {
+      await start();
+      BugCapsule.log('opened checkout');
+      BugCapsule.log('tapped pay');
+      await BugCapsule.resetForTest();
+      expect(
+        Directory('${dir.path}/journal/$pid/events').listSync(),
+        isNotEmpty,
+      );
+    }
+
+    Future<Map<String, Object?>> linkedEvent() async {
+      for (var i = 0; i < 100; i++) {
+        await BugCapsule.flush();
+        final events = backend.items('event');
+        if (events.isNotEmpty) return events.single;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      fail('no event was sent');
+    }
+
+    test(
+      'a native crash of the last run gives a crash capsule from its journal, linked to the event',
+      () async {
+        await crashedSession();
+        NativeCrashReporter.instance = FakeNativeReporter(
+          lastRunCrashed: true,
+          previous: [
+            nativeCrash(
+              release: 'com.shop.app@1.0.0+1',
+              timestamp: DateTime.now().toUtc().toIso8601String(),
+            ),
+          ],
+        );
+        await start();
+        final event = await linkedEvent();
+        await BugCapsule.flushUploads();
+
+        final capsule = CapsuleCodec.decode(backend.capsules.single);
+        final m = capsule.manifest;
+        expect(event['capsuleId'], m.capsuleId);
+        expect(m.failure!.kind, FailureKind.crash);
+        expect(m.failure!.signature, 'crash:SIGSEGV');
+        expect(m.failure!.crash!.inAppFrame, 'take_picture');
+        expect(m.monitoring!.eventId, event['eventId']);
+        expect(m.monitoring!.release, 'com.shop.app@1.0.0+1');
+        expect(m.labels['source'], 'crash_journal');
+        expect(m.labels['crash.mechanism'], 'signal');
+        expect(
+          m.eligibility.missing.map((g) => g.dependency),
+          contains('crash.native'),
+        );
+        expect(
+          [
+            for (final e in capsule.eventsOfType(EventTypes.log))
+              e.data['message'],
+          ],
+          ['opened checkout', 'tapped pay'],
+        );
+        expect(
+          CapsuleCodec.toJson(capsule)['specVersion'],
+          2,
+          reason: 'crash capsules are format v2',
+        );
+        // The claimed journal is gone; this process keeps its own.
+        final journals = Directory('${dir.path}/journal').listSync().map(
+          (d) => d.uri.pathSegments.where((s) => s.isNotEmpty).last,
+        );
+        expect(journals, ['$pid']);
+      },
+    );
+
+    test(
+      'the journal named in the crashed scope is used, and the marker is never sent',
+      () async {
+        await crashedSession();
+        final native = NativeCrashReporter.instance = FakeNativeReporter(
+          previous: [
+            nativeCrash(
+              timestamp: DateTime.now().toUtc().toIso8601String(),
+              contexts: {
+                MonitoringHub.journalContext: {'id': '$pid'},
+              },
+            ),
+          ],
+        );
+        await start();
+        final event = await linkedEvent();
+        expect(event['capsuleId'], isNotNull);
+        expect(
+          (event['contexts']! as Map).keys,
+          isNot(contains(MonitoringHub.journalContext)),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        expect(
+          native.scopes.last,
+          contains('"${MonitoringHub.journalContext}":{"id":"$pid"}'),
+          reason: 'this process names its journal for its own crashes',
+        );
+      },
+    );
+
+    test(
+      'without a journal (or a crashed last run) the event comes alone; stale journals go',
+      () async {
+        await crashedSession();
+        NativeCrashReporter.instance = FakeNativeReporter(
+          previous: [
+            nativeCrash(timestamp: DateTime.now().toUtc().toIso8601String()),
+          ],
+        );
+        await start();
+        final event = await linkedEvent();
+        expect(event.containsKey('capsuleId'), isFalse);
+        expect(backend.capsules, isEmpty);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        final journals = Directory('${dir.path}/journal').listSync().map(
+          (d) => d.uri.pathSegments.where((s) => s.isNotEmpty).last,
+        );
+        expect(journals, ['$pid'], reason: 'no event claimed the old journal');
+      },
+    );
+
+    test('crash capsules do not count against maxCapsulesPerSession', () async {
+      await crashedSession();
+      NativeCrashReporter.instance = FakeNativeReporter(
+        lastRunCrashed: true,
+        previous: [
+          nativeCrash(timestamp: DateTime.now().toUtc().toIso8601String()),
+        ],
+      );
+      await start(autoCapture: true);
+      await linkedEvent();
+      BugCapsule.fail('checkout_stuck', 'spinner never stopped');
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      await BugCapsule.flushUploads();
+      expect(backend.capsules, hasLength(2));
+    });
 
     test('closing BugCapsule stops the native reporter', () async {
       final native = NativeCrashReporter.instance = FakeNativeReporter();

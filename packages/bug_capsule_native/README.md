@@ -33,6 +33,15 @@ MonitoringOptions(
 )
 ```
 
+**Crash capsules.** When the session that crashed was recording, the crash
+also gets a capsule: `bug_capsule` keeps a crash journal per process while it
+records and, on the next launch, builds a capsule from the journal of the
+process the crash is about. Which journal: the one the crash's own scope
+names (Android, and iOS crash reports, attach the crashed process's scope,
+where the SDK mirrors its journal id); otherwise, when the previous run
+crashed, the previous process's journal if the crash falls within its
+lifetime; otherwise none, and the event comes alone.
+
 **iOS needs Swift Package Manager**, which brings in the BugCapsule iOS SDK:
 `flutter config --enable-swift-package-manager`. With CocoaPods the plugin
 builds but reports no native crashes on iOS (it logs why). Minimums: iOS 15,

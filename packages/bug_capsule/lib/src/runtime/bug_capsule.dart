@@ -35,6 +35,21 @@ const _sdkVersion = bugCapsuleVersion;
 
 List<int> _encodeCapsule(Capsule capsule) => CapsuleCodec.encode(capsule);
 
+/// Reads [journalPath] and builds its crash capsule; top-level so that only
+/// its arguments cross to the background isolate.
+CrashCapsuleBuild? _buildFromJournal(
+  String journalPath,
+  CrashCapsuleRequest request,
+) {
+  final contents = JournalContents.read(Directory(journalPath));
+  return contents == null ? null : buildCrashCapsule(contents, request);
+}
+
+Future<CrashCapsuleBuild?> _buildInBackground(
+  String journalPath,
+  CrashCapsuleRequest request,
+) => Isolate.run(() => _buildFromJournal(journalPath, request));
+
 /// Result of writing a capsule.
 class CaptureResult {
   const CaptureResult({
@@ -558,6 +573,17 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
   FlightRecorder? _recorder;
   ReplayEngine? engine;
 
+  /// The crash journal of this process while it records (crash-capsules §1).
+  CrashJournal? _journal;
+  Directory? _storageRoot;
+
+  /// Journals of earlier processes already claimed by a fatal event.
+  final Set<String> _claimedJournals = {};
+
+  /// Names this process's journal: the process id, the same as the native
+  /// pid (the Dart VM runs in the app's process on Android and iOS).
+  final String _journalId = '$pid';
+
   @override
   final InteractionHost interactions = InteractionHost();
 
@@ -847,6 +873,16 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       root: _overrides?.storageDirectory,
     );
     final s = await storeFuture;
+    _storageRoot = s.root;
+    try {
+      CrashJournals.reserve(s.root, _journalId);
+      CrashJournals.sweep(
+        s.root,
+        olderThan: DateTime.now().subtract(CrashJournalLayout.maxAge),
+      );
+    } catch (e) {
+      debugPrint('[bugcapsule] could not prepare crash journals: $e');
+    }
 
     if (transport != null) {
       _transport = transport;
@@ -922,6 +958,8 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
             return queued;
           },
           isRecording: () => _recording,
+          crashCapsule: _crashCapsule,
+          journalId: () => _journal == null ? null : _journalId,
         ),
         sdkVersion: _sdkVersion,
         startedAt: _startedAt,
@@ -936,6 +974,19 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       }
       hub = h;
     }
+    // Journals no fatal event of an earlier run claimed go once those events
+    // were handled (crash-capsules §1).
+    final pending = hub?.nativePendingHandled ?? Future<void>.value();
+    unawaited(
+      pending.then((_) {
+        try {
+          CrashJournals.sweep(
+            s.root,
+            keep: CrashJournals.dirFor(s.root, _journalId),
+          );
+        } catch (_) {}
+      }),
+    );
     binding.addObserver(this);
     _observing = true;
     if (hub != null) _installErrorHandlers();
@@ -948,18 +999,219 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         data: await _snapshot(CheckpointKind.launch),
       );
       if (_setupAbandoned) return _stopRecording();
-      _recorder = FlightRecorder(
+      final recorder = _recorder = FlightRecorder(
         launch: launch,
         maxEvents: config.maxEvents,
         windowMs: config.window.inMilliseconds,
       );
+      _startJournal(s.root, recorder);
       _installCapture();
     }
 
     binding.addPostFrameCallback((_) {
       _anchorMs = now();
       _wallAtAnchorMs = DateTime.now().millisecondsSinceEpoch;
+      _refreshJournalHeader();
     });
+  }
+
+  // ---------------------------------------------------------- crash journal
+
+  void _startJournal(Directory root, FlightRecorder recorder) {
+    if (!config.crashJournal) return;
+    try {
+      final dir = CrashJournals.dirFor(root, _journalId);
+      final maxBytes = 2 * _maxCapsuleBytes;
+      _journal = CrashJournal.start(
+        directory: dir,
+        recorder: recorder,
+        header: _journalHeader(recorder),
+        sink: _overrides == null
+            ? IsolateJournalSink.start(dir, maxBytes: maxBytes)
+            : InlineJournalSink(JournalWriter(dir, maxBytes: maxBytes)),
+      );
+      hub?.onJournalChanged();
+    } catch (e) {
+      debugPrint('[bugcapsule] crash journal is off: $e');
+    }
+  }
+
+  void _refreshJournalHeader() {
+    final journal = _journal;
+    final recorder = _recorder;
+    if (journal == null || recorder == null) return;
+    _guard(() => journal.updateHeader(_journalHeader(recorder)));
+  }
+
+  /// Every manifest field known now (crash-capsules §1), plus what the
+  /// next launch needs to finish the capsule: the anchor, this process's
+  /// integration gaps for either checkpoint kind and each interaction
+  /// adapter's dependency entry.
+  Map<String, Object?> _journalHeader(FlightRecorder recorder) {
+    final templates = [
+      for (final a in _interactionAdapters)
+        ?_tryOr(
+          () => a.dependency(
+            RecordedWindow(
+              checkpoint: recorder.launch,
+              events: [
+                BugCapsuleEvent(
+                  seq: 1,
+                  t: 0,
+                  type: InteractionTypes.wsSend,
+                  data: {'dep': a.dependencyId},
+                ),
+              ],
+              droppedEvents: 0,
+              hasGap: false,
+            ),
+          ),
+          null,
+        ),
+    ];
+    List<Map<String, Object?>> gaps(CheckpointKind kind) {
+      final b = EligibilityBuilder();
+      final window = RecordedWindow(
+        checkpoint: Checkpoint(kind: kind, t: 0, wallClockMs: 0, afterSeq: 0),
+        events: const [],
+        droppedEvents: 0,
+        hasGap: false,
+      );
+      for (final integration in integrations) {
+        try {
+          integration.describeEligibility(b, window);
+        } catch (_) {}
+      }
+      return [for (final m in b.build().missing) m.toJson()];
+    }
+
+    final h = hub;
+    return {
+      'journal': CrashJournalLayout.version,
+      'pid': pid,
+      'processId': _journalId,
+      'release': h?.release,
+      'environment': h?.environment,
+      'writtenAt': DateTime.now().toUtc().toIso8601String(),
+      'anchorMs': _anchorMs,
+      'mode': config.mode.name,
+      'app': _appInfo().toJson(),
+      'source': {'gitSha': config.gitSha, 'dirty': config.gitDirty},
+      'sdk': {'name': _sdkName, 'version': _sdkVersion},
+      'stateSchemaVersion': config.stateSchemaVersion,
+      'platform': _platformInfo().toJson(),
+      'session': {
+        'id': _sessionId,
+        'startedAt': _startedAt.toUtc().toIso8601String(),
+        'wallClockAtAnchorMs': _wallAtAnchorMs,
+        'seed': _seed,
+      },
+      'integrations': [for (final i in integrations) i.name],
+      'redaction': {
+        'extraKeys': _redactor.extraKeys,
+        'extraHeaders': _redactor.extraHeaders,
+      },
+      'labels': _sanitizeLabels(config.labels),
+      'runtime': _runtimeInfo().toJson(),
+      'capabilities': _capabilities(templates),
+      'dependencies': [for (final d in templates) d.toJson()],
+      'eligibilityGaps': {
+        for (final kind in CheckpointKind.values) kind.name: gaps(kind),
+      },
+      'rewriteDropped': recorder.rewriteDropped,
+    };
+  }
+
+  /// The crash capsule of an earlier process's fatal [event], built from
+  /// that process's journal and queued; completes with its id once queued.
+  /// Null when nothing is tried (capture off, no journal for the event).
+  /// Crash capsules do not count against `maxCapsulesPerSession`.
+  Future<String?>? _crashCapsule(
+    ErrorEvent event, {
+    String? journalId,
+    required bool lastRunCrashed,
+  }) {
+    final root = _storageRoot;
+    final s = store;
+    if (root == null ||
+        s == null ||
+        !config.enabled ||
+        !config.crashJournal ||
+        _killed ||
+        remote?.current?.enabled == false) {
+      return null;
+    }
+    final JournalInfo? journal;
+    try {
+      journal = CrashJournals.forCrash(
+        [
+          for (final j in CrashJournals.list(
+            root,
+            except: CrashJournals.dirFor(root, _journalId),
+          ))
+            if (!_claimedJournals.contains(j.dir.path)) j,
+        ],
+        crashedAt: event.timestamp,
+        lastRunCrashed: lastRunCrashed,
+        journalId: journalId,
+      );
+    } catch (e) {
+      debugPrint('[bugcapsule] could not read crash journals: $e');
+      return null;
+    }
+    if (journal == null) return null;
+    _claimedJournals.add(journal.dir.path);
+    final request = CrashCapsuleRequest(
+      capsuleId: uuidV4(),
+      createdAt: DateTime.now(),
+      failure: CrashFailure.fromEvent(event),
+      monitoring: CapsuleMonitoring(
+        eventId: event.eventId,
+        release: event.release,
+        environment: event.environment,
+      ),
+      maxCapsuleBytes: _maxCapsuleBytes,
+      crashedAt: event.timestamp,
+    );
+    return _queueCrashCapsule(journal.dir, request, storeFuture: s);
+  }
+
+  Future<String?> _queueCrashCapsule(
+    Directory journal,
+    CrashCapsuleRequest request, {
+    required Future<CapsuleStore> storeFuture,
+  }) async {
+    try {
+      final build = await (_overrides == null
+          ? _buildInBackground(journal.path, request)
+          : Future.sync(() => _buildFromJournal(journal.path, request)));
+      if (build == null || _killed) return null;
+      final id = request.capsuleId;
+      final s = await storeFuture;
+      await s.save(id, build.bytes);
+      final outbox = _outbox;
+      if (outbox == null || !await outbox.enqueue(id, build.bytes)) {
+        return null;
+      }
+      if (_killed) {
+        await outbox.purge();
+        return null;
+      }
+      debugPrint(
+        '[bugcapsule] crash capsule $id (${build.eligibility.status.name}) '
+        'from the journal of an earlier process',
+      );
+      unawaited(flushOutbox(onlyId: id));
+      return id;
+    } catch (e) {
+      debugPrint('[bugcapsule] crash capsule failed: $e');
+      return null;
+    } finally {
+      // The journal goes once the capsule is in the outbox (or cannot be).
+      try {
+        if (journal.existsSync()) journal.deleteSync(recursive: true);
+      } catch (_) {}
+    }
   }
 
   void _afterAppStarted() {
@@ -1091,6 +1343,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
           data: data,
         ),
       );
+      _refreshJournalHeader();
     } catch (e) {
       _warnOnce('periodic checkpoint failed: $e');
     } finally {
@@ -1150,6 +1403,13 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _guard(() => record(EventTypes.lifecycle, {'state': state.name}));
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      // Going to the background: the system may kill the process.
+      _refreshJournalHeader();
+      _guard(() => _journal?.flush());
+    }
     _guard(() => hub?.onLifecycle(state));
     final controller = remote;
     if (controller == null) return;
@@ -1204,6 +1464,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     if (!_recording) return null;
     record(EventTypes.failure, failure.toJson()..remove('stack'));
     lastFailure = failure;
+    _guard(() => _journal?.flush());
     if (!_seenSignatures.add(failure.signature)) return null;
     if (!config.autoCaptureOnFailure) return null;
     if (_capsulesWritten >= config.maxCapsulesPerSession) return null;
@@ -1316,8 +1577,6 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       }
     }
 
-    final view = WidgetsBinding.instance.platformDispatcher.views.first;
-    final logical = view.physicalSize / view.devicePixelRatio;
     final events = rebaseOccurrences([
       for (final e in window.events)
         if (!InteractionTypes.isInteraction(e.type) ||
@@ -1329,27 +1588,13 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         capsuleId: uuidV4(),
         createdAt: DateTime.now(),
         mode: config.mode,
-        app: AppInfo(
-          id: _cutOrNull(config.appId, 200),
-          name: _cutOrNull(config.appName, 200),
-          version: _cut(config.appVersion, 200),
-          build: _cut(config.appBuild, 200),
-          flavor: _cutOrNull(config.flavor, 200),
-        ),
+        app: _appInfo(),
         gitSha: config.gitSha,
         dirty: config.gitDirty,
         sdkName: _sdkName,
         sdkVersion: _sdkVersion,
         stateSchemaVersion: config.stateSchemaVersion,
-        platform: PlatformInfo(
-          os: Platform.operatingSystem,
-          osVersion: _osVersion(),
-          locale: Platform.localeName,
-          screenWidth: logical.width,
-          screenHeight: logical.height,
-          pixelRatio: view.devicePixelRatio,
-          dartVersion: Platform.version.split(' ').first,
-        ),
+        platform: _platformInfo(),
         session: SessionInfo(
           id: _sessionId,
           startedAt: _startedAt,
@@ -1366,25 +1611,8 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         labels: _sanitizeLabels({...config.labels, ...labels}),
         redactionKeys: _redactor.extraKeys,
         redactionHeaders: _redactor.extraHeaders,
-        runtime: RuntimeInfo(
-          name: 'flutter',
-          version: Platform.version.split(' ').first,
-          language: 'dart',
-          frameworks: const ['flutter'],
-        ),
-        capabilities: {
-          'input.pointer.capture': 'supported',
-          'input.pointer.replay': 'supported',
-          'input.semantic.replay': 'supported',
-          'text.replay': 'supported',
-          'lifecycle.replay': 'supported',
-          'errors.uncaught': 'supported',
-          'clock.virtual': 'explicit',
-          'random.seeded': 'explicit',
-          for (final i in integrations) 'integration.${i.name}': 'supported',
-          for (final d in dependencies)
-            'interaction.${d.adapter}': d.required ? 'supported' : 'partial',
-        },
+        runtime: _runtimeInfo(),
+        capabilities: _capabilities(dependencies),
         monitoring: monitoring,
         dependencies: dependencies,
       ),
@@ -1445,6 +1673,49 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       upload: upload,
     );
   }
+
+  AppInfo _appInfo() => AppInfo(
+    id: _cutOrNull(config.appId, 200),
+    name: _cutOrNull(config.appName, 200),
+    version: _cut(config.appVersion, 200),
+    build: _cut(config.appBuild, 200),
+    flavor: _cutOrNull(config.flavor, 200),
+  );
+
+  PlatformInfo _platformInfo() {
+    final view = WidgetsBinding.instance.platformDispatcher.views.first;
+    final logical = view.physicalSize / view.devicePixelRatio;
+    return PlatformInfo(
+      os: Platform.operatingSystem,
+      osVersion: _osVersion(),
+      locale: Platform.localeName,
+      screenWidth: logical.width,
+      screenHeight: logical.height,
+      pixelRatio: view.devicePixelRatio,
+      dartVersion: Platform.version.split(' ').first,
+    );
+  }
+
+  static RuntimeInfo _runtimeInfo() => RuntimeInfo(
+    name: 'flutter',
+    version: Platform.version.split(' ').first,
+    language: 'dart',
+    frameworks: const ['flutter'],
+  );
+
+  Map<String, String> _capabilities(List<CapsuleDependency> dependencies) => {
+    'input.pointer.capture': 'supported',
+    'input.pointer.replay': 'supported',
+    'input.semantic.replay': 'supported',
+    'text.replay': 'supported',
+    'lifecycle.replay': 'supported',
+    'errors.uncaught': 'supported',
+    'clock.virtual': 'explicit',
+    'random.seeded': 'explicit',
+    for (final i in integrations) 'integration.${i.name}': 'supported',
+    for (final d in dependencies)
+      'interaction.${d.adapter}': d.required ? 'supported' : 'partial',
+  };
 
   /// Redacted and cut to the capsule format's bounds (100 labels, 100-char
   /// keys, 2,000-char values), so a long QA note never invalidates a capsule.
@@ -1519,6 +1790,9 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
   ///   app's `productionSampleRate`;
   /// * `maxCapsuleBytes`: applies to the next capsule.
   void _applyRemote(RemoteCaptureConfig? previous, RemoteCaptureConfig next) {
+    if (next.maxCapsuleBytes != _maxCapsuleBytes) {
+      _journal?.maxBytes = 2 * next.maxCapsuleBytes;
+    }
     _maxCapsuleBytes = next.maxCapsuleBytes;
     _applyInteractionPolicy(next);
     _guard(() => hub?.onRemoteConfig(next));
@@ -1632,6 +1906,12 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     _captureEpoch++;
     _recording = false;
     _recorder = null;
+    final journal = _journal;
+    _journal = null;
+    if (journal != null) {
+      unawaited(journal.discard());
+      _guard(() => hub?.onJournalChanged());
+    }
     _checkpointTimer?.cancel();
     _checkpointTimer = null;
   }
@@ -1657,6 +1937,15 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         s
             .then((s) => s.clearSavedCaptures())
             .then((_) {}, onError: (Object _) {}),
+      );
+    }
+    // Journals are captured data too.
+    final root = _storageRoot;
+    if (root != null) {
+      unawaited(
+        Future(
+          () => CrashJournals.sweep(root),
+        ).then((_) {}, onError: (Object _) {}),
       );
     }
   }
@@ -1914,6 +2203,10 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     _disposed = true;
     final h = hub;
     hub = null;
+    // Disposing is not a crash, but the journal stays like at a normal exit.
+    final journal = _journal;
+    _journal = null;
+    await journal?.close();
     _stopRecording();
     remote?.dispose();
     if (_observing) WidgetsBinding.instance.removeObserver(this);

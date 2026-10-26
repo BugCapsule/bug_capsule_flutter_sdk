@@ -107,6 +107,40 @@ Envelopes wait in their own outbox (30 envelopes / 5 MiB / 7 days,
 `Retry-After` handling, and are sent only once a remote config fetch has
 succeeded.
 
+## Crash journal and crash capsules
+
+A crash that ends the process (a native signal or Mach exception, an ANR the
+system killed the app for, a low-memory kill) leaves no time to write a
+capsule. While a session records, the SDK therefore mirrors the flight
+recorder to `<storage>/journal/<pid>/`:
+
+* `header.json`: the capsule manifest fields known while the app runs (app,
+  platform, session, integrations, redaction, labels, interaction adapters),
+  rewritten when they change;
+* `checkpoints/<afterSeq>.json`: the launch checkpoint while the whole
+  session is still within the recorder's window, and the newest periodic
+  checkpoint;
+* `events/<firstSeq>.jsonl`: the recorded (already redacted) events, a new
+  file at each checkpoint.
+
+The UI isolate only hands events to a writer isolate, which writes them in
+one batch at least every 250 ms, and at once on a checkpoint, a failure and
+going to the background. The journal follows the recorder's eviction and
+stays under twice `maxCapsuleBytes` (the oldest events file goes first). New
+redaction rules from the backend rewrite it; a session that stops recording
+deletes it.
+
+On the next launch, `bug_capsule_native` hands over the crashes of earlier
+runs. For each one, the SDK picks the journal of the process that crashed
+(the journal id the crash's mirrored scope carries; else, when the previous
+run crashed, the previous process's journal if the crash falls within its
+lifetime) and builds a capsule from it before sending the event: the launch
+checkpoint when everything after it is on disk, else the newest periodic
+one; failure kind `crash` with the signal or exception type; the
+`crash.native` gap; `labels.source = crash_journal`. The event carries the
+capsule's id. Journals no crash claims are deleted after the launch's
+pending crashes are handled, and any older than 7 days.
+
 ## Verdicts in detail
 
 `run` and `verify` judge every attempt, then the batch:
