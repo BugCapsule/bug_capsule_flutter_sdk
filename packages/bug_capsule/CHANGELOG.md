@@ -1,5 +1,6 @@
 ## Unreleased
 
+- `BugCapsule.refreshRemoteConfig()` now always returns a config fetched after the call. Before, a call made while another fetch was running (such as the one `init` starts) returned that older answer, so a just-flipped kill switch or body setting could be missed.
 - Capsule spec v2 (`spec/capsule-v2.md`): required replay dependencies, payload recording modes, lossless typed values and reason codes for verification. The codec reads v1 and v2 and writes v2 only for capsules with interaction dependencies.
 - `BugCapsuleWebSocket`: record and replay `web_socket_channel` and `dart:io` WebSockets offline, with recorded ordering and timing, send checks and reconnect attempts.
 - `BugCapsulePlatformChannels`: record and replay allowlisted MethodChannel, EventChannel and BasicMessageChannel traffic in both directions. `BugCapsule.init` creates a binding that wraps the default messenger; a late setup is reported as `channel.late` / `dependency.late`.
