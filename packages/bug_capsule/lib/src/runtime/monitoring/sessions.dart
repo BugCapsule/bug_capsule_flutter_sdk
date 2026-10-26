@@ -41,23 +41,20 @@ class SessionTracker {
   String? get sessionId => _current?.sid;
 
   /// The update for a session left open by the previous process, or null.
-  /// [crashedAt]: the previous process ended in a native crash then.
+  /// [crashed]: the previous process ended in a native crash.
   Map<String, Object?>? recover(
     Map<String, Object?>? state, {
-    DateTime? crashedAt,
+    bool crashed = false,
   }) {
     if (state == null || state['status'] != 'ok') return null;
     try {
       final s = _Session.fromJson(state);
       final foreground = state['foreground'] != false;
       final backgroundAt = DateTime.tryParse('${state['backgroundAt']}');
-      if (crashedAt != null) {
+      if (crashed) {
         s.status = 'crashed';
         s.errors++;
-        return s.payload(
-          this,
-          at: crashedAt.isAfter(s.lastUpdate) ? crashedAt : s.lastUpdate,
-        );
+        return s.payload(this, at: s.lastUpdate);
       }
       s.status = foreground ? 'abnormal' : 'exited';
       return s.payload(

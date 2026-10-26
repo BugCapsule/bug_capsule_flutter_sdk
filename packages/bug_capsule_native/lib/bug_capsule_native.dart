@@ -55,10 +55,6 @@ class BugCapsuleNative
       'appHangs': settings.appHangs,
       'appHangTimeoutMs': settings.appHangTimeout?.inMilliseconds,
     });
-    final events = [
-      for (final e in (result?['events'] as List?) ?? const [])
-        if (e is String && _first(e)) e,
-    ];
     if (!_started) {
       _started = true;
       _live = _liveEvents.receiveBroadcastStream().listen(
@@ -74,9 +70,17 @@ class BugCapsuleNative
     }
     return NativeCrashStart(
       lastRunCrashed: result?['lastRunCrashed'] == true,
-      events: events,
       handlerInstalled: result?['handlerInstalled'] == true,
     );
+  }
+
+  @override
+  Future<void> stop() async {
+    if (!_started) return;
+    _started = false;
+    WidgetsBinding.instance.removeObserver(this);
+    await _live?.cancel();
+    _live = null;
   }
 
   @override
@@ -95,8 +99,12 @@ class BugCapsuleNative
     if (state == AppLifecycleState.resumed) unawaited(collectPending());
   }
 
-  /// Hands on events the native SDK holds that were not handed on yet.
+  /// Hands on events the native SDK holds that were not handed on yet:
+  /// only while the hub listens, so nothing is taken from the native SDK
+  /// (which deletes what it hands out) and dropped.
+  @override
   Future<void> collectPending() async {
+    if (!_started || !_events.hasListener) return;
     try {
       final pending =
           await _channel.invokeListMethod<Object?>('takePending') ?? const [];
@@ -114,13 +122,5 @@ class BugCapsuleNative
     final match = RegExp(r'"eventId"\s*:\s*"([^"]+)"').firstMatch(json);
     final id = match?.group(1);
     return id == null || _delivered.add(id);
-  }
-
-  /// Tests: stops listening.
-  @visibleForTesting
-  Future<void> dispose() async {
-    WidgetsBinding.instance.removeObserver(this);
-    await _live?.cancel();
-    _started = false;
   }
 }

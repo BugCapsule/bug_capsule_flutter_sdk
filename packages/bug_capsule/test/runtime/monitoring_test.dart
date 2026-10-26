@@ -89,21 +89,34 @@ class FakeNativeReporter implements NativeCrashReporter {
   FakeNativeReporter({this.lastRunCrashed = false, this.previous = const []});
 
   final bool lastRunCrashed;
-  final List<String> previous;
+  List<String> previous;
   final List<String> scopes = [];
   final StreamController<NativeCrashEvent> live =
       StreamController<NativeCrashEvent>.broadcast();
   NativeCrashSettings? settings;
+  int stops = 0;
 
   @override
   Future<NativeCrashStart> start(NativeCrashSettings settings) async {
     this.settings = settings;
     return NativeCrashStart(
       lastRunCrashed: lastRunCrashed,
-      events: previous,
       handlerInstalled: true,
     );
   }
+
+  @override
+  Future<void> collectPending() async {
+    if (!live.hasListener) return;
+    final taken = previous;
+    previous = const [];
+    for (final json in taken) {
+      live.add(NativeCrashEvent(json, live: false));
+    }
+  }
+
+  @override
+  Future<void> stop() async => stops++;
 
   @override
   void updateScope(String scopeJson) => scopes.add(scopeJson);
@@ -580,7 +593,7 @@ void main() {
         expect(previous['status'], 'crashed');
         expect(previous['errors'], 1);
         expect(previous['release'], 'com.shop.app@0.9.0+8');
-        expect(previous['timestamp'], '2026-10-21T14:00:05.000Z');
+        expect(previous['timestamp'], '2026-10-21T14:00:00.000Z');
 
         final event = backend.items('event').single;
         expect(event['eventId'], '22222222-2222-4222-8222-222222222222');
@@ -663,6 +676,67 @@ void main() {
       expect(((scope['contexts'] as Map)['app'] as Map)['appVersion'], '1.0.0');
       expect(jsonEncode(scope['breadcrumbs']), contains('pay'));
       expect(native.scopes.last, isNot(contains('hunter2')));
+    });
+
+    test(
+      "an earlier run's event never gets this launch's app context",
+      () async {
+        final event = (jsonDecode(nativeCrash()) as Map)..remove('contexts');
+        NativeCrashReporter.instance = FakeNativeReporter(
+          previous: [jsonEncode(event)],
+        );
+        await start();
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await flush();
+        final contexts = backend.items('event').single['contexts']! as Map;
+        expect(contexts.containsKey('app'), isFalse);
+        expect(contexts['os'], isNotNull);
+      },
+    );
+
+    test(
+      'malformed native events are dropped, the hub keeps running',
+      () async {
+        NativeCrashReporter.instance = FakeNativeReporter(
+          previous: [
+            'not json',
+            jsonEncode({
+              'eventId': 'x',
+              'threads': [
+                {'stacktrace': 'oops'},
+              ],
+              'exception': {
+                'values': [
+                  {
+                    'type': 'E',
+                    'stacktrace': {
+                      'frames': [
+                        {'package': 7, 'lineno': '12'},
+                      ],
+                    },
+                  },
+                ],
+              },
+            }),
+          ],
+        );
+        await start();
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await flush();
+        final event = backend.items('event').single;
+        expect(event['eventId'], 'x');
+        BugCapsule.captureException(StateError('still works'));
+        await flush();
+        expect(backend.items('event'), hasLength(2));
+      },
+    );
+
+    test('closing BugCapsule stops the native reporter', () async {
+      final native = NativeCrashReporter.instance = FakeNativeReporter();
+      await start();
+      expect(native.stops, 0);
+      await BugCapsule.resetForTest();
+      expect(native.stops, 1);
     });
 
     test(

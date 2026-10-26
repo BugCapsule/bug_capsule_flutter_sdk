@@ -29,6 +29,8 @@ List<Map<String, Object?>> _maps(Object? v) => [
 
 String? _str(Object? v) => v is String ? v : null;
 
+int? _int(Object? v) => v is num ? v.toInt() : int.tryParse('${v ?? ''}');
+
 /// How an error was caught (`mechanism` in monitoring-v1 §2).
 class Mechanism {
   const Mechanism(this.type, {required this.handled, this.data});
@@ -91,8 +93,8 @@ class EventFrame {
     module: _str(j['module']),
     filename: _str(j['filename']),
     absPath: _str(j['absPath']),
-    lineno: (j['lineno'] as num?)?.toInt(),
-    colno: (j['colno'] as num?)?.toInt(),
+    lineno: _int(j['lineno']),
+    colno: _int(j['colno']),
     inApp: j['inApp'] is bool ? j['inApp'] as bool : null,
     instructionAddr: _str(j['instructionAddr']),
     imageAddr: _str(j['imageAddr']),

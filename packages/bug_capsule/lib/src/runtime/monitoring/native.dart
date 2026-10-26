@@ -29,20 +29,17 @@ class NativeCrashSettings {
   final Duration? appHangTimeout;
 }
 
-/// What earlier runs left behind, returned by [NativeCrashReporter.start].
+/// What [NativeCrashReporter.start] found out right away.
 class NativeCrashStart {
   const NativeCrashStart({
     required this.lastRunCrashed,
-    required this.events,
     this.handlerInstalled = false,
   });
 
   /// The previous run ended in a native crash: its session is `crashed`.
+  /// True for the first start in a process only (a second `BugCapsule.init`,
+  /// another engine or a hot restart get false).
   final bool lastRunCrashed;
-
-  /// monitoring-v1 `event` JSON, one per failure of an earlier run, with
-  /// that run's release, environment and scope.
-  final List<String> events;
 
   /// The native signal / exception handler is installed.
   final bool handlerInstalled;
@@ -55,7 +52,8 @@ class NativeCrashEvent {
   final String json;
 
   /// Captured in this run (a hang): it counts in the current session.
-  /// False for a failure of an earlier run reported late (MetricKit).
+  /// False for a failure of an earlier run, with that run's release,
+  /// environment and scope.
   final bool live;
 }
 
@@ -65,8 +63,18 @@ abstract class NativeCrashReporter {
   /// it when `MonitoringOptions.enableNativeCrashHandling` is true.
   static NativeCrashReporter? instance;
 
-  /// Installs the native handlers once and returns what earlier runs left.
+  /// Installs the native handlers (once per process). Must answer quickly:
+  /// earlier runs' failures come through [collectPending].
   Future<NativeCrashStart> start(NativeCrashSettings settings);
+
+  /// Hands earlier runs' failures (and anything else the native SDK holds)
+  /// to [events]. Does nothing while no one listens to [events], so nothing
+  /// is taken from the native SDK and dropped.
+  Future<void> collectPending();
+
+  /// Stops handing on events (the hub is gone); the native handlers stay
+  /// installed and keep what they capture for the next start.
+  Future<void> stop();
 
   /// The current scope (redacted, event-shaped JSON: `level`, `fingerprint`,
   /// `tags`, `user`, `extra`, `contexts`, `breadcrumbs`) for the next crash
@@ -74,6 +82,7 @@ abstract class NativeCrashReporter {
   void updateScope(String scopeJson);
 
   /// Events after [start]: hangs as they happen, and earlier runs' failures
-  /// the system reports late (MetricKit). Each event once.
+  /// (from [collectPending], including what the system reports late, like
+  /// MetricKit). Each event once.
   Stream<NativeCrashEvent> get events;
 }

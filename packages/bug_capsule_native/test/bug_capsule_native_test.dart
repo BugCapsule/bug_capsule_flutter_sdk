@@ -24,11 +24,7 @@ void main() {
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       return switch (call.method) {
-        'start' => {
-          'lastRunCrashed': true,
-          'handlerInstalled': true,
-          'events': [event('a'), event('a'), 42],
-        },
+        'start' => {'lastRunCrashed': true, 'handlerInstalled': true},
         'takePending' => pending,
         _ => null,
       };
@@ -41,7 +37,14 @@ void main() {
     NativeCrashReporter.instance = null;
   });
 
-  test('registerWith makes it the hub\'s native crash reporter', () {
+  const settings = NativeCrashSettings(
+    release: 'com.shop@1+1',
+    environment: 'production',
+    inAppIncludes: ['com.shop'],
+    appHangTimeout: Duration(seconds: 3),
+  );
+
+  test("registerWith makes it the hub's native crash reporter", () {
     BugCapsuleNative.registerWith();
     expect(NativeCrashReporter.instance, isA<BugCapsuleNative>());
     final first = NativeCrashReporter.instance;
@@ -50,20 +53,13 @@ void main() {
   });
 
   test(
-    'start passes the settings and returns each earlier event once',
+    'start passes the settings and answers without earlier events',
     () async {
       final native = BugCapsuleNative();
-      final started = await native.start(
-        const NativeCrashSettings(
-          release: 'com.shop@1+1',
-          environment: 'production',
-          inAppIncludes: ['com.shop'],
-          appHangTimeout: Duration(seconds: 3),
-        ),
-      );
+      final started = await native.start(settings);
       expect(started.lastRunCrashed, isTrue);
       expect(started.handlerInstalled, isTrue);
-      expect(started.events, [event('a')]);
+      expect(calls.single.method, 'start');
       expect(calls.single.arguments, {
         'release': 'com.shop@1+1',
         'environment': 'production',
@@ -71,12 +67,35 @@ void main() {
         'appHangs': true,
         'appHangTimeoutMs': 3000,
       });
-      await native.dispose();
+      await native.stop();
     },
   );
 
   test(
-    'hangs arrive live; pending ones collected later are not repeated',
+    'pending events are not taken before start, without a listener or after stop',
+    () async {
+      final native = BugCapsuleNative();
+      pending = [event('a')];
+      await native.collectPending(); // not started
+      await native.start(settings);
+      await native.collectPending(); // nobody listens
+      expect(calls.where((c) => c.method == 'takePending'), isEmpty);
+
+      final received = <NativeCrashEvent>[];
+      final sub = native.events.listen(received.add);
+      await native.collectPending();
+      await pumpEventQueue();
+      expect(received.map((e) => e.live), [false]);
+
+      await native.stop();
+      await native.collectPending();
+      expect(calls.where((c) => c.method == 'takePending'), hasLength(1));
+      await sub.cancel();
+    },
+  );
+
+  test(
+    'hangs arrive live; pending copies collected later are not repeated',
     () async {
       messenger.setMockStreamHandler(
         liveChannel,
@@ -87,22 +106,25 @@ void main() {
       final native = BugCapsuleNative();
       final received = <NativeCrashEvent>[];
       native.events.listen(received.add);
-      await native.start(
-        const NativeCrashSettings(release: 'r', environment: 'production'),
-      );
+      await native.start(settings);
       await pumpEventQueue();
       expect(received.single.live, isTrue);
 
       // The native SDK keeps the hang pending too, and MetricKit adds a late crash.
-      pending = [event('hang', level: 'error'), event('late'), event('a')];
+      pending = [
+        event('hang', level: 'error'),
+        event('late'),
+        event('late'),
+        42,
+      ];
       await native.collectPending();
-    await pumpEventQueue();
+      await pumpEventQueue();
       expect(received.map((e) => (jsonDecode(e.json) as Map)['eventId']), [
         'hang',
         'late',
       ]);
       expect(received.last.live, isFalse);
-      await native.dispose();
+      await native.stop();
     },
   );
 

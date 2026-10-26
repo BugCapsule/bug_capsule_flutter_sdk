@@ -220,15 +220,10 @@ class MonitoringHub implements TransactionSink {
     final native = await _startNative();
     final previous = sessions.recover(
       _readSession(),
-      crashedAt: native == null || !native.lastRunCrashed
-          ? null
-          : _latestCrash(native.events),
+      crashed: native?.lastRunCrashed ?? false,
     );
     if (previous != null) {
       _enqueue([EnvelopeItem(EnvelopeItemType.session, previous)]);
-    }
-    for (final json in native?.events ?? const <String>[]) {
-      _submitNative(json, live: false);
     }
     _persistSession(null);
     if (_sessionTracking && _inForeground) sessions.start();
@@ -252,7 +247,9 @@ class MonitoringHub implements TransactionSink {
   // ------------------------------------------------------------ native
 
   /// Starts `bug_capsule_native` when it is installed and enabled; null
-  /// otherwise (or when it fails: native capture is best effort).
+  /// otherwise (or when it fails: native capture is best effort). Earlier
+  /// runs' failures follow through [NativeCrashReporter.collectPending],
+  /// asked for once this hub listens, so start-up never waits for them.
   Future<NativeCrashStart?> _startNative() async {
     final reporter = NativeCrashReporter.instance;
     if (reporter == null || !options.enableNativeCrashHandling) return null;
@@ -267,7 +264,11 @@ class MonitoringHub implements TransactionSink {
               appHangTimeout: options.appHangTimeout,
             ),
           )
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 2));
+      if (_disposed) {
+        await reporter.stop();
+        return null;
+      }
       _native = reporter;
       _nativeEvents = reporter.events.listen(
         (e) => _submitNative(e.json, live: e.live),
@@ -277,24 +278,13 @@ class MonitoringHub implements TransactionSink {
         const Duration(seconds: 2),
         (_) => _mirrorScope(),
       );
+      unawaited(reporter.collectPending());
       return started;
     } catch (e) {
       debugPrint('[bugcapsule] native crash reporting is off: $e');
+      unawaited(reporter.stop().catchError((Object _) {}));
       return null;
     }
-  }
-
-  /// When the previous run's native crash happened (its newest fatal event).
-  static DateTime _latestCrash(List<String> events) {
-    var latest = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
-    for (final json in events) {
-      try {
-        final e = (jsonDecode(json) as Map).cast<String, Object?>();
-        final t = DateTime.tryParse('${e['timestamp']}');
-        if (e['level'] == 'fatal' && t != null && t.isAfter(latest)) latest = t;
-      } catch (_) {}
-    }
-    return latest;
   }
 
   /// Queues a native event: crashes of an earlier run (fatal, never sampled
@@ -303,31 +293,32 @@ class MonitoringHub implements TransactionSink {
   /// `beforeSend` and redaction like a Dart error.
   void _submitNative(String json, {required bool live}) {
     if (_disposed) return;
-    final ErrorEvent? event;
     try {
-      event = ErrorEvent.fromJson((jsonDecode(json) as Map).cast());
+      final event = ErrorEvent.fromJson((jsonDecode(json) as Map).cast());
+      if (event == null) return;
+      // Device contexts are this launch's. `app` and the app's own contexts
+      // are the failed process's: an earlier run's event never gets this
+      // launch's `app` (it may be a newer version).
+      final launch = _contexts();
+      if (!live) launch.remove('app');
+      event.contexts = {...launch, ...event.contexts};
+      _markEngineFrames(event);
+      final fatal = event.level == EventLevel.fatal;
+      final prepared = PreparedEvent(
+        event,
+        EventHint(
+          mechanism: event.exceptions.isEmpty
+              ? null
+              : event.exceptions.last.mechanism,
+        ),
+        sampledOut: !fatal && _random.nextDouble() >= errorSampleRate,
+        sessionUpdate: live ? _sessions?.onError(crashed: fatal) : null,
+      );
+      if (!prepared.sampledOut) _lastEventId = event.eventId;
+      _finish(prepared, linked: false);
     } catch (e) {
       debugPrint('[bugcapsule] dropping a malformed native event: $e');
-      return;
     }
-    if (event == null) return;
-    // Device contexts are this launch's; `app` and the app's own contexts
-    // in the event are the process that failed.
-    event.contexts = {..._contexts(), ...event.contexts};
-    _markEngineFrames(event);
-    final fatal = event.level == EventLevel.fatal;
-    final prepared = PreparedEvent(
-      event,
-      EventHint(
-        mechanism: event.exceptions.isEmpty
-            ? null
-            : event.exceptions.last.mechanism,
-      ),
-      sampledOut: !fatal && _random.nextDouble() >= errorSampleRate,
-      sessionUpdate: live ? _sessions?.onError(crashed: fatal) : null,
-    );
-    if (!prepared.sampledOut) _lastEventId = event.eventId;
-    _finish(prepared, linked: false);
   }
 
   /// The Flutter engine is not app code, whatever the native SDK thought.
@@ -340,7 +331,10 @@ class MonitoringHub implements TransactionSink {
     void mark(Iterable<Object?> frames) {
       for (final f in frames) {
         if (f is EventFrame && engine(f.package)) f.inApp = false;
-        if (f is Map && engine(f['package'] as String?)) f['inApp'] = false;
+        if (f is Map) {
+          final p = f['package'];
+          if (p is String && engine(p)) f['inApp'] = false;
+        }
       }
     }
 
@@ -348,10 +342,22 @@ class MonitoringHub implements TransactionSink {
       mark(v.frames);
     }
     for (final t in event.threads ?? const <Map<String, Object?>>[]) {
-      final frames = (t['stacktrace'] as Map?)?['frames'];
+      final stack = t['stacktrace'];
+      final frames = stack is Map ? stack['frames'] : null;
       if (frames is List) mark(frames);
     }
   }
+
+  /// [value] with every leaf that is not JSON (an app object in extras or
+  /// contexts) replaced by its `toString()`.
+  static Object? _jsonSafe(Object? value) => switch (value) {
+    null || String() || num() || bool() => value,
+    Map() => <String, Object?>{
+      for (final e in value.entries) '${e.key}': _jsonSafe(e.value),
+    },
+    Iterable() => [for (final v in value) _jsonSafe(v)],
+    _ => _safeToString(value),
+  };
 
   void _scheduleScopeMirror() {
     if (_native == null || _scopeMirrorScheduled || _disposed) return;
@@ -371,17 +377,20 @@ class MonitoringHub implements TransactionSink {
       final scope = Scope.root;
       var crumbs = [for (final b in _breadcrumbs.snapshot()) b.toJson()];
       while (true) {
+        // Objects become strings before redaction, so their text is redacted too.
         final json = jsonEncode(
-          _redact({
-            'level': ?scope.level?.name,
-            'fingerprint': ?scope.fingerprint,
-            'tags': scope.tags,
-            'user': ?_user(scope)?.toJson(),
-            'extra': scope.extras,
-            'contexts': {'app': _contexts()['app'], ...scope.contexts},
-            'breadcrumbs': crumbs,
-          }),
-          toEncodable: (o) => '$o',
+          _redact(
+            _jsonSafe({
+                  'level': ?scope.level?.name,
+                  'fingerprint': ?scope.fingerprint,
+                  'tags': scope.tags,
+                  'user': ?_user(scope)?.toJson(),
+                  'extra': scope.extras,
+                  'contexts': {'app': _contexts()['app'], ...scope.contexts},
+                  'breadcrumbs': crumbs,
+                })
+                as Map<String, Object?>,
+          ),
         );
         if (utf8.encode(json).length <= 60 * 1024 || crumbs.isEmpty) {
           if (json != _lastScopeMirror) {
@@ -1260,7 +1269,13 @@ class MonitoringHub implements TransactionSink {
     _flushTimer?.cancel();
     _scopeMirrorTimer?.cancel();
     await _nativeEvents?.cancel();
+    final native = _native;
     _native = null;
+    if (native != null) {
+      try {
+        await native.stop();
+      } catch (_) {}
+    }
     for (final tx in List.of(_open)) {
       tx.abandon();
     }
