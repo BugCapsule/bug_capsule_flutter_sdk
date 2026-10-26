@@ -77,6 +77,11 @@ class HomeScreen extends StatelessWidget {
             }),
             child: const Text('Clear local cart cache'),
           ),
+          TextButton(
+            key: const Key('lab.quotes'),
+            onPressed: BugCapsule.action('lab.quotes', () => context.push('/quotes')),
+            child: const Text('Live quotes (WebSocket reconnect race)'),
+          ),
         ],
       ),
     );

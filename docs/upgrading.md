@@ -3,6 +3,17 @@
 Before any upgrade, read [Installation and upgrades](https://docs.bugcapsule.com/installation.html)
 for how to keep your regression suite green across versions.
 
+## To 0.5 (capsule spec v2)
+
+- Capsules that record WebSockets, platform channels or native adapters are
+  written as spec v2. Older CLIs and backends reject them (`specVersion 2 is
+  newer than this reader`); update the CLI everywhere it runs (CI included)
+  before you add these integrations. Capsules without them stay v1.
+- Replay of a v2 capsule needs the same adapters in the build. A missing one
+  ends the attempt `incompatible` with `dependency.unsupported`.
+- `bugcapsule verify` sends reason codes with each run; BugCapsule never
+  marks a capsule fixed by a run with interaction divergences.
+
 ## To 0.4 (one package)
 
 The twelve packages (`bug_capsule_core`, `bug_capsule_flutter`,

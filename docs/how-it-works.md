@@ -159,8 +159,19 @@ without people and roles still accept `--secret-key bcs_…`. CLI 0.4.0 has no
   on one.
 - `DateTime.now()`, `Timer`s and animations are not virtualized; only
   `clock.now()` and `BugCapsule.random` are deterministic.
-- Platform channels, native SDKs (Firebase, maps, payments) and WebSockets are
-  not captured. Bugs that depend on them are partial at best. HTTP is captured
+- WebSockets, platform channels and native SDKs are captured only through
+  `BugCapsuleWebSocket`, `BugCapsulePlatformChannels` and native adapters
+  (capsule spec v2). Not covered: sockets opened with other constructors,
+  Socket.IO and other protocols on top of WebSockets, ping/pong frames,
+  channels that are not listed, framework channels (`flutter/*`), background
+  isolates (`BackgroundIsolateBinaryMessenger`), additional engines, plugins
+  with their own messenger, Pigeon and other custom codecs (recorded as
+  metadata with a `codec.unsupported` gap), FFI, platform views, textures and
+  native work that never crosses a channel. A connection or subscription open
+  at a periodic checkpoint cannot be restored: such a capsule is ineligible
+  (`interactions.restore`) and replay reports `dependency.unrestorable`.
+  EventChannels need the binding BugCapsule creates (Flutter sends their
+  `listen` through the default messenger). HTTP is captured
   for Dio and `package:http` clients only (`dart:io` `HttpClient` used
   directly, `cupertino_http` / `cronet_http` without an `http.Client` wrapper,
   and GraphQL subscriptions are not).

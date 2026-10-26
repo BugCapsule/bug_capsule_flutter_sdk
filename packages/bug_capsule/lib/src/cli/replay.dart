@@ -56,6 +56,8 @@ class ReplaySummary {
     'gitSha': buildSha,
     'device': device,
     'durationMs': durationMs,
+    if (evaluation.reasonCodes.isNotEmpty)
+      'reasonCodes': evaluation.reasonCodes.take(50).toList(),
     'details': {
       'verdict': verdict.name,
       'reasons': evaluation.reasons.take(50).toList(),
@@ -247,6 +249,9 @@ List<String> summaryLines(ReplaySummary s) {
     lines.add(bold('Why:'));
     for (final r in e.reasons.take(10)) {
       lines.add('  ${yellow('•')} $r');
+    }
+    if (e.reasonCodes.isNotEmpty) {
+      lines.add('  ${dim('reason codes: ${e.reasonCodes.join(', ')}')}');
     }
   }
 

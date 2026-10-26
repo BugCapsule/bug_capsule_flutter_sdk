@@ -23,15 +23,22 @@ for t in $targets; do
   case "$t" in
     backend)
       copy "$root/bug_capsule_backend/test/fixtures" capsule-v1
+      copy "$root/bug_capsule_backend/test/fixtures" capsule-v2
+      if [ -d "$root/bug_capsule_backend/test/fixtures" ]; then
+        mkdir -p "$root/bug_capsule_backend/test/fixtures/conformance"
+        cp "$src/conformance/verdicts.json" "$root/bug_capsule_backend/test/fixtures/conformance/"
+        echo "synced $root/bug_capsule_backend/test/fixtures/conformance/verdicts.json"
+      fi
       if [ -d "$root/bug_capsule_backend/docs" ]; then
-        cp "$here/spec/capsule-v1.md" "$here/spec/runtimes-v1.md" "$root/bug_capsule_backend/docs/"
-        echo "synced $root/bug_capsule_backend/docs/{capsule-v1,runtimes-v1}.md"
+        cp "$here/spec/capsule-v1.md" "$here/spec/capsule-v2.md" "$here/spec/runtimes-v1.md" "$root/bug_capsule_backend/docs/"
+        echo "synced $root/bug_capsule_backend/docs/{capsule-v1,capsule-v2,runtimes-v1}.md"
       fi
       ;;
     android|ios|web)
       sdk="$root/bug_capsule_${t}_sdk"
       if [ -d "$sdk" ]; then
         copy "$sdk/spec-fixtures" capsule-v1
+        copy "$sdk/spec-fixtures" capsule-v2
         copy "$sdk/spec-fixtures" conformance
       fi
       ;;

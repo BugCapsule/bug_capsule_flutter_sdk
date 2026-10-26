@@ -1,4 +1,4 @@
-/// Structural validation of a decoded capsule document (spec v1).
+/// Structural validation of a decoded capsule document (spec v1 and v2).
 ///
 /// The backend (`src/capsule.ts`) applies the same rules, so whatever the
 /// backend accepts this SDK can decode, and the shared fixtures in
@@ -15,12 +15,15 @@ abstract final class CapsuleLimits {
   static const maxRedactionKeys = 500;
   static const maxCapabilities = 200;
   static const maxFrameworks = 20;
+  static const maxDependencies = 100;
+  static const maxDependencyItems = 100;
+  static const maxTested = 20;
 
   /// JSON values in the whole document, counted before parsing.
   static const maxJsonValues = 4000000;
 }
 
-/// Returns null when [doc] is a valid v1 document, otherwise
+/// Returns null when [doc] is a valid v1 or v2 document, otherwise
 /// `<json path> <reason>`. Does not check `specVersion` against the reader's
 /// version (the codec does that, with its own message).
 String? validateCapsuleDocument(Object? doc) {
@@ -184,7 +187,7 @@ void _validate(Object? root) {
   if (doc['format'] != 'bugcapsule.capsule') {
     _fail(r'$.format', 'must be "bugcapsule.capsule"');
   }
-  _int(doc, 'specVersion', r'$', min: 1);
+  final specVersion = _int(doc, 'specVersion', r'$', min: 1);
 
   final m = _object(doc['manifest'], r'$.manifest');
   const mp = r'$.manifest';
@@ -359,13 +362,21 @@ void _validate(Object? root) {
     _optString(monitoring, 'environment', '$mp.monitoring', max: 64);
   }
 
+  // capsule-v2 §2: required interaction dependencies.
+  final dependencies = specVersion >= 2
+      ? _validateDependencies(m['dependencies'], '$mp.dependencies')
+      : null;
+
   const cp = r'$.checkpoint';
   final checkpoint = _object(doc['checkpoint'], cp);
   _enum(checkpoint, 'kind', cp, const ['launch', 'periodic']);
   _int(checkpoint, 't', cp);
   _int(checkpoint, 'wallClockMs', cp);
   _optInt(checkpoint, 'afterSeq', cp, min: 0);
-  _optObject(checkpoint, 'data', cp);
+  final checkpointData = _optObject(checkpoint, 'data', cp);
+  if (dependencies != null && checkpointData != null) {
+    _validateOpenInteractions(checkpointData, '$cp.data');
+  }
 
   final events = _array(doc['events'], r'$.events', CapsuleLimits.maxEvents);
   int? lastSeq;
@@ -381,6 +392,9 @@ void _validate(Object? root) {
     final type = _string(e, 'type', path, max: 100);
     final data = _optObject(e, 'data', path) ?? const <String, Object?>{};
     _validateEventData(type, data, '$path.data');
+    if (dependencies != null) {
+      _validateInteraction(type, data, '$path.data', dependencies);
+    }
   }
 }
 
@@ -423,5 +437,161 @@ void _validateEventData(String type, Map<String, Object?> d, String path) {
       _optString(d, 'value', path, max: 100000);
     case 'lifecycle':
       _string(d, 'state', path, max: 20);
+  }
+}
+
+Set<String> _validateDependencies(Object? value, String path) {
+  final list = _array(value, path, CapsuleLimits.maxDependencies);
+  final ids = <String>{};
+  for (var i = 0; i < list.length; i++) {
+    final p = '$path[$i]';
+    final d = _object(list[i], p);
+    final id = _string(d, 'id', p, max: 100);
+    if (!ids.add(id)) _fail('$p.id', 'must be unique');
+    _string(d, 'kind', p, max: 50);
+    _string(d, 'adapter', p, max: 200);
+    _string(d, 'adapterVersion', p, max: 100);
+    _int(d, 'schema', p, min: 1);
+    if (d['required'] is! bool) _fail('$p.required', 'must be a boolean');
+    _enum(d, 'coverage', p, const ['complete', 'partial', 'diagnostic']);
+    if (d['operations'] != null) {
+      final ops = _array(
+        d['operations'],
+        '$p.operations',
+        CapsuleLimits.maxDependencyItems,
+      );
+      for (var j = 0; j < ops.length; j++) {
+        final v = ops[j];
+        if (v is! String || v.isEmpty || v.length > 200) {
+          _fail('$p.operations[$j]', 'must be a non-empty string');
+        }
+      }
+    }
+    if (d['tested'] != null) {
+      final tested = _array(d['tested'], '$p.tested', CapsuleLimits.maxTested);
+      for (var j = 0; j < tested.length; j++) {
+        final t = _object(tested[j], '$p.tested[$j]');
+        _string(t, 'package', '$p.tested[$j]', max: 200);
+        _string(t, 'version', '$p.tested[$j]', max: 100);
+      }
+    }
+    if (d['gaps'] != null) {
+      final gaps = _array(
+        d['gaps'],
+        '$p.gaps',
+        CapsuleLimits.maxDependencyItems,
+      );
+      for (var j = 0; j < gaps.length; j++) {
+        final g = _object(gaps[j], '$p.gaps[$j]');
+        _string(g, 'code', '$p.gaps[$j]', max: 100);
+        _optInt(g, 'count', '$p.gaps[$j]', min: 0);
+        _optString(g, 'detail', '$p.gaps[$j]', max: 2000);
+      }
+    }
+    final stats = _optObject(d, 'stats', p);
+    if (stats != null) {
+      for (final k in const [
+        'events',
+        'payloadBytes',
+        'dropped',
+        'truncated',
+      ]) {
+        _optInt(stats, k, '$p.stats', min: 0);
+      }
+    }
+  }
+  return ids;
+}
+
+void _validateOpenInteractions(Map<String, Object?> data, String path) {
+  final interactions = _optObject(data, 'interactions', path);
+  if (interactions == null || interactions['open'] == null) return;
+  final open = _array(
+    interactions['open'],
+    '$path.interactions.open',
+    CapsuleLimits.maxDependencyItems * 10,
+  );
+  for (var i = 0; i < open.length; i++) {
+    final p = '$path.interactions.open[$i]';
+    final o = _object(open[i], p);
+    _string(o, 'dep', p, max: 100);
+    _string(o, 'type', p, max: 50);
+    _string(o, 'id', p, max: 200);
+    _optBool(o, 'restorable', p);
+  }
+}
+
+const _payloadModes = ['full', 'redacted', 'metadata', 'omitted', 'truncated'];
+
+void _payload(Map<String, Object?> d, String key, String path) {
+  final v = d[key];
+  if (v == null) return;
+  final p = _object(v, '$path.$key');
+  _enum(p, 'mode', '$path.$key', _payloadModes);
+  if (p['replayable'] is! bool) {
+    _fail('$path.$key.replayable', 'must be a boolean');
+  }
+  _optInt(p, 'bytes', '$path.$key', min: 0);
+  _optString(p, 'kind', '$path.$key', max: 20);
+}
+
+/// capsule-v2 §9: fields replay reads from interaction events.
+void _validateInteraction(
+  String type,
+  Map<String, Object?> d,
+  String path,
+  Set<String> dependencies,
+) {
+  if (!type.startsWith('ws.') &&
+      !type.startsWith('platform.') &&
+      !type.startsWith('native.')) {
+    return;
+  }
+  final dep = _string(d, 'dep', path, max: 100);
+  if (!dependencies.contains(dep)) {
+    _fail('$path.dep', 'must name a declared dependency');
+  }
+  for (final field in const ['payload', 'args', 'value', 'details']) {
+    _payload(d, field, path);
+  }
+  void keyed() {
+    _string(d, 'key', path, max: 10000);
+    _int(d, 'occurrence', path, min: 0);
+  }
+
+  if (type.startsWith('ws.')) _string(d, 'conn', path, max: 200);
+  switch (type) {
+    case 'ws.connect':
+      keyed();
+    case 'ws.send' || 'ws.message':
+      _int(d, 'index', path, min: 0);
+    case 'ws.close':
+      _enum(d, 'initiator', path, const ['client', 'server', 'unknown']);
+      _optInt(d, 'code', path);
+    case 'platform.call':
+      _string(d, 'channel', path, max: 1000);
+      _string(d, 'call', path, max: 200);
+      _enum(d, 'dir', path, const ['dart', 'platform']);
+      keyed();
+    case 'platform.result' || 'platform.error':
+      _string(d, 'channel', path, max: 1000);
+      _string(d, 'call', path, max: 200);
+    case 'platform.listen':
+      _string(d, 'channel', path, max: 1000);
+      _string(d, 'sub', path, max: 200);
+      keyed();
+    case 'platform.event' || 'platform.cancel' || 'platform.done':
+      _string(d, 'channel', path, max: 1000);
+      _string(d, 'sub', path, max: 200);
+    case 'native.call':
+      _string(d, 'op', path, max: 200);
+      keyed();
+    case 'native.result':
+      _string(d, 'op', path, max: 200);
+    case 'native.subscribe':
+      _string(d, 'sub', path, max: 200);
+      keyed();
+    case 'native.event' || 'native.cancel' || 'native.done':
+      _string(d, 'sub', path, max: 200);
   }
 }

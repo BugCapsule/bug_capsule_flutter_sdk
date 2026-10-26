@@ -14,6 +14,8 @@ export 'src/integrations/getx.dart';
 export 'src/integrations/go_router.dart';
 export 'src/integrations/http.dart';
 export 'src/integrations/mobx.dart';
+export 'src/integrations/platform_channels.dart';
 export 'src/integrations/provider.dart';
 export 'src/integrations/riverpod.dart';
 export 'src/integrations/storage.dart';
+export 'src/integrations/web_socket.dart';
