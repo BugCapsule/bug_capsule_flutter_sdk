@@ -232,6 +232,7 @@ class RemoteConfigController {
   int _failures = 0;
   Timer? _timer;
   Future<void>? _inFlight;
+  Future<void>? _followUp;
   bool _paused = false;
   bool _disposed = false;
 
@@ -280,9 +281,23 @@ class RemoteConfigController {
   }
 
   /// Fetches now unless a fetch is already running (then waits for it).
-  Future<void> refresh() {
+  ///
+  /// With [current], the caller needs an answer sent after this call (an
+  /// explicit `BugCapsule.refreshRemoteConfig`): a fetch already running may
+  /// predate the change it wants to see (e.g. the startup fetch right after
+  /// `init`), so one more fetch follows it. Callers arriving meanwhile share
+  /// that follow-up.
+  Future<void> refresh({bool current = false}) {
     if (_disposed) return Future.value();
-    return _inFlight ??= _refresh().whenComplete(() => _inFlight = null);
+    final running = _inFlight;
+    if (running == null) {
+      return _inFlight = _refresh().whenComplete(() => _inFlight = null);
+    }
+    if (!current) return running;
+    return _followUp ??= running.then((_) {}, onError: (Object _) {}).then((_) {
+      _followUp = null;
+      return refresh();
+    });
   }
 
   /// Refreshes first when the config is missing or older than its TTL.
