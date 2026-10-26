@@ -181,6 +181,26 @@ void main() {
           .cast<String, Object?>();
 
   group('isolation', () {
+    test('screenshot survives runtime redaction and capsule encoding', () async {
+      final bytes = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAC0lEQVR4nGNgAAMAAAcAAbKGrPQAAAAASUVORK5CYII=',
+      );
+      final pictures = ScreenshotIntegration(
+        enabled: true,
+        captureRedactedPng: () => bytes,
+      );
+      await start(integrations: [pictures], backend: false);
+      expect(await pictures.capture(), true);
+      final result = (await BugCapsule.capture())!;
+      final capsule = CapsuleCodec.decode(await result.file.readAsBytes());
+      expect(
+        capsule.events
+            .singleWhere((e) => e.type == 'screenshot')
+            .data['base64'],
+        base64Encode(bytes),
+      );
+    });
+
     test('the app starts when storage cannot be opened', () async {
       final notADir = File('${dir.path}/file')..writeAsStringSync('x');
       expect(await start(storage: Directory(notADir.path)), isTrue);

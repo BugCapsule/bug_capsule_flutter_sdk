@@ -19,3 +19,5 @@ export 'src/integrations/provider.dart';
 export 'src/integrations/riverpod.dart';
 export 'src/integrations/storage.dart';
 export 'src/integrations/web_socket.dart';
+
+export 'src/integrations/screenshots.dart';

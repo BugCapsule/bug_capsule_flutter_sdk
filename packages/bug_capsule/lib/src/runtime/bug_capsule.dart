@@ -693,6 +693,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
             out['requestBody'] = data['requestBody'];
           }
         }
+        if (type == 'screenshot') out['base64'] = data['base64']; // Provider-masked binary pixels.
         if (type == EventTypes.failure && data['signature'] is String) {
           out['signature'] = data['signature'];
         }

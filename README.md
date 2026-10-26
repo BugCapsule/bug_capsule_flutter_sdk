@@ -510,3 +510,8 @@ Older upgrades: [docs/upgrading.md](https://github.com/BugCapsule/bug_capsule_fl
 Questions or access requests: [contact@bugcapsule.com](mailto:contact@bugcapsule.com).
 
 This SDK and its bundled CLI are available under the MIT License. See [LICENSE](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/LICENSE).
+
+## Optional capsule screenshots (unreleased)
+
+Opt-in PNG frames are stored inside capsules and displayed against event time.
+See [capture, privacy, limits and platform examples](spec/screenshots-v1.md).
