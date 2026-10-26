@@ -236,6 +236,38 @@ final client = bugCapsuleHttp.client();                 // or bugCapsuleHttp.cli
 // Then list them: integrations: [bugCapsuleRiverpod, bugCapsuleHttp, ...]
 ```
 
+### WebSockets, platform channels and native SDKs
+
+These integrations make the capsule spec v2: replay needs the same adapters
+in the build, and the CLI checks that before the app starts. Each recorded
+interaction is replayed offline. Replay never reaches the real socket,
+plugin or SDK, also when a fixture is missing. A verify with missing, extra
+or mismatched interactions is never reported as fixed.
+
+| Dependency | Integration | Setup |
+|---|---|---|
+| WebSockets (`web_socket_channel` 3, `dart:io` `WebSocket`) | `BugCapsuleWebSocket` | Open sockets with `connect(uri)` (a `WebSocketChannel`) or `connectIo(url)`. Binary frames are kept as sizes only unless `captureBinary: true`. |
+| Platform channels (MethodChannel, EventChannel, BasicMessageChannel) | `BugCapsulePlatformChannels` | List the channels and their codecs. Plugins on the default messenger are covered because `BugCapsule.init` creates the binding. |
+| Firebase Auth and Firestore, geolocator, Google Maps, Stripe | `bug_capsule_firebase`, `bug_capsule_geolocator`, `bug_capsule_google_maps`, `bug_capsule_stripe` | Separate packages; see each README for the tested versions and operations. |
+| Any other SDK | `NativeAdapter` | Wrap the operations your app uses with `call(...)` and `subscribe(...)`; check it with `AdapterConformance` from `package:bug_capsule/testing.dart`. |
+
+```dart
+final sockets = BugCapsuleWebSocket();
+final channels = BugCapsulePlatformChannels(channels: [
+  PlatformChannel.method('plugins.example.com/battery'),
+  PlatformChannel.event('plugins.example.com/charging'),
+]);
+// integrations: [sockets, channels, ...]
+
+final quotes = sockets.connect(Uri.parse('wss://quotes.example.com/v1'));
+```
+
+Native adapters replay what the app saw (a Firestore snapshot, a location
+fix, the outcome of a payment sheet). They do not reproduce native
+rendering, map tiles or provider behaviour, and never make a real charge.
+The remote config can turn off one adapter (`disabledAdapters`) without
+touching HTTP capture.
+
 ### Hooks that make more bugs reproducible
 
 | Add this | Why |
@@ -408,8 +440,10 @@ details: [docs/how-it-works.md](https://github.com/BugCapsule/bug_capsule_flutte
 
 - `DateTime.now()`, `Timer`s and animations are not virtualized; only
   `clock.now()` and `BugCapsule.random` are deterministic.
-- Platform channels, native SDKs (Firebase, maps, payments) and WebSockets are
-  not captured. HTTP is captured for Dio and `package:http` clients only.
+- WebSockets, platform channels and native SDKs are captured only through
+  their integrations: sockets opened another way, channels that are not
+  listed, background isolates, extra engines, FFI and platform views are not.
+  HTTP is captured for Dio and `package:http` clients only.
 - Redux has no integration yet.
 - Pointer replay assumes the same logical screen size; otherwise the CLI scales
   coordinates and falls back to semantic actions where they exist.
