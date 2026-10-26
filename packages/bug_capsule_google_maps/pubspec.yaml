@@ -1,0 +1,23 @@
+name: bug_capsule_google_maps
+description: BugCapsule native SDK adapter for google_maps_flutter. Records camera commands, coordinate queries and map events at the platform interface and replays them as events; the map itself still renders natively.
+version: 0.1.0-dev.1
+homepage: https://bugcapsule.com
+documentation: https://docs.bugcapsule.com
+repository: https://github.com/BugCapsule/bug_capsule_flutter_sdk
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.10.0
+  flutter: ">=3.38.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  bug_capsule:
+    path: ../bug_capsule
+  google_maps_flutter_platform_interface: ^2.17.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
