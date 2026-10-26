@@ -61,6 +61,35 @@ void printInspect(Capsule c, {int timeline = 40, bool json = false}) {
     );
   }
 
+  if (m.dependencies.isNotEmpty) {
+    stdout
+      ..writeln()
+      ..writeln(
+        '${bold('Dependencies')}  ${dim('spec v2: replay needs these adapters in the build')}',
+      );
+    for (final d in m.dependencies) {
+      final coverage = switch (d.coverage) {
+        DependencyCoverage.complete => green('complete'),
+        DependencyCoverage.partial => yellow('partial'),
+        DependencyCoverage.diagnostic => dim('diagnostic (capture only)'),
+      };
+      final tested = d.tested.entries
+          .map((e) => '${e.key} ${e.value}')
+          .join(', ');
+      stdout.writeln(
+        '  ${d.required ? '•' : dim('·')} ${d.id.padRight(12)} ${d.kind.padRight(16)} '
+        '${d.adapter} ${d.adapterVersion} schema ${d.schema}  $coverage'
+        '${tested.isEmpty ? '' : dim('  tested: $tested')}',
+      );
+      for (final g in d.gaps) {
+        stdout.writeln(
+          '      ${yellow('gap')} ${g.code}${g.count == null ? '' : ' ×${g.count}'}'
+          '${g.detail == null ? '' : dim('  ${g.detail}')}',
+        );
+      }
+    }
+  }
+
   stdout.writeln();
   final f = m.failure;
   if (f == null) {
@@ -133,7 +162,7 @@ void printInspect(Capsule c, {int timeline = 40, bool json = false}) {
       shown.length > timeline ? shown.length - timeline : 0,
     )) {
       stdout.writeln(
-        '  ${_t(ev.t).padLeft(8)}  ${ev.type.padRight(11)} ${_describe(ev)}',
+        '  ${_t(ev.t).padLeft(8)}  ${ev.type.padRight(16)} ${_describe(ev)}',
       );
     }
   }
@@ -176,6 +205,47 @@ String _describe(BugCapsuleEvent e) {
     EventTypes.riverpodError => '${d['key']}: ${d['error']}',
     EventTypes.failure => red('${d['signature']}'),
     EventTypes.log => '${d['message']}',
+    _ when InteractionTypes.isInteraction(e.type) => _interaction(e),
     _ => jsonEncode(d),
+  };
+}
+
+/// One line per interaction event: its scope, then what the app saw
+/// (payload values are shown only by mode and size).
+String _interaction(BugCapsuleEvent e) {
+  final d = e.data;
+  String payload(String field) {
+    final p = InteractionPayload.tryParse(d[field]);
+    if (p == null) return '';
+    final size = p.bytes == null ? '' : ' ${p.bytes}B';
+    final mode = p.mode == PayloadMode.full ? '' : ' ${p.mode.name}';
+    return dim(
+      '[${p.kind ?? 'value'}$size$mode${p.replayable ? '' : ', not replayable'}]',
+    );
+  }
+
+  return switch (e.type) {
+    InteractionTypes.wsConnect =>
+      '${d['conn']} ${d['url']}${(d['attempt'] as int? ?? 0) > 0 ? dim(' attempt ${d['attempt']}') : ''}',
+    InteractionTypes.wsSend || InteractionTypes.wsMessage =>
+      '${d['conn']} #${d['index']} ${payload('payload')}',
+    InteractionTypes.wsClose =>
+      '${d['conn']} by ${d['initiator']}${d['code'] == null ? '' : ' ${d['code']}'}',
+    InteractionTypes.wsError => red(
+      '${d['conn']} ${d['phase']}: ${(d['error'] as Map?)?['message']}',
+    ),
+    InteractionTypes.platformCall =>
+      '${d['channel']} ${d['method'] ?? 'message'} ${d['dir'] == 'platform' ? '← platform' : '→ platform'} ${payload('args')}',
+    InteractionTypes.platformError => red(
+      '${d['channel']} ${d['call']} ${d['kind']}${d['code'] == null ? '' : ' ${d['code']}'}',
+    ),
+    InteractionTypes.nativeCall || InteractionTypes.nativeSubscribe =>
+      '${d['dep']} ${d['operation']} ${payload('args')}',
+    InteractionTypes.nativeError => red(
+      '${d['dep']} ${d['op'] ?? d['sub']} ${d['code']}',
+    ),
+    _ =>
+      '${d['dep']} ${d['conn'] ?? d['call'] ?? d['sub'] ?? d['op'] ?? ''} '
+          '${payload('value')}${payload('payload')}',
   };
 }

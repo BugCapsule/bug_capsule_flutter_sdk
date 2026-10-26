@@ -148,30 +148,37 @@ class RequestKeyBuilder {
     return value;
   }
 
-  static String _canonicalJson(Object? value) {
-    if (value is Map) {
-      final keys = value.keys.map((k) => '$k').toList()..sort();
-      return '{${keys.map((k) => '${jsonEncode(k)}:${_canonicalJson(value[k])}').join(',')}}';
+  static String _canonicalJson(Object? value) => canonicalJson(value);
+
+  static String _hash(String input) => stableHash(input);
+}
+
+/// JSON with object keys sorted at every level; the input of [stableHash]
+/// for request and interaction keys.
+String canonicalJson(Object? value) {
+  if (value is Map) {
+    final keys = value.keys.map((k) => '$k').toList()..sort();
+    return '{${keys.map((k) => '${jsonEncode(k)}:${canonicalJson(value[k])}').join(',')}}';
+  }
+  if (value is List) return '[${value.map(canonicalJson).join(',')}]';
+  return jsonEncode(value);
+}
+
+/// Two 32-bit FNV-1a passes with different offsets; 16 hex chars. Every SDK
+/// computes the same value (32-bit arithmetic keeps it portable to JS).
+String stableHash(String input) {
+  final bytes = utf8.encode(input);
+  int fnv(int offset) {
+    var h = offset;
+    for (final b in bytes) {
+      h ^= b;
+      h = (h * 0x01000193) & 0xFFFFFFFF;
     }
-    if (value is List) return '[${value.map(_canonicalJson).join(',')}]';
-    return jsonEncode(value);
+    return h;
   }
 
-  /// Two 32-bit FNV-1a passes with different offsets; 16 hex chars.
-  static String _hash(String input) {
-    final bytes = utf8.encode(input);
-    int fnv(int offset) {
-      var h = offset;
-      for (final b in bytes) {
-        h ^= b;
-        h = (h * 0x01000193) & 0xFFFFFFFF;
-      }
-      return h;
-    }
-
-    String hex(int v) => v.toRadixString(16).padLeft(8, '0');
-    return '${hex(fnv(0x811C9DC5))}${hex(fnv(0x050C5D1F))}';
-  }
+  String hex(int v) => v.toRadixString(16).padLeft(8, '0');
+  return '${hex(fnv(0x811C9DC5))}${hex(fnv(0x050C5D1F))}';
 }
 
 /// One recorded HTTP exchange, as stored in an `http` event.

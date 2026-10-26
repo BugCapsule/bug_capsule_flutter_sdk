@@ -17,6 +17,8 @@ export 'monitoring/stack_trace.dart';
 export 'monitoring/trace_headers.dart';
 export 'ids.dart';
 export 'network.dart';
+export 'interactions.dart';
 export 'redaction.dart';
 export 'replay_protocol.dart';
+export 'typed_value.dart';
 export 'verdict.dart';

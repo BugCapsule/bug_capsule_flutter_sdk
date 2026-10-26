@@ -13,10 +13,13 @@ class CapsuleFormatException implements Exception {
   String toString() => 'CapsuleFormatException: $message';
 }
 
-/// Reads and writes `.bugcapsule` files (gzip-compressed JSON, spec v1).
+/// Reads and writes `.bugcapsule` files (gzip-compressed JSON). Reads spec
+/// v1 and v2; writes v2 only for capsules with interaction dependencies.
 abstract final class CapsuleCodec {
   static const format = 'bugcapsule.capsule';
-  static const specVersion = 1;
+
+  /// Newest spec version this reader implements.
+  static const specVersion = 2;
 
   /// Bounds what a hostile file or share link can make the reader allocate.
   /// Higher than the backend's upload ceiling (64 MB) so capsules stored by
@@ -25,7 +28,7 @@ abstract final class CapsuleCodec {
 
   static Map<String, Object?> toJson(Capsule capsule) => {
     'format': format,
-    'specVersion': specVersion,
+    'specVersion': capsule.specVersion,
     'manifest': capsule.manifest.toJson(),
     'checkpoint': capsule.checkpoint.toJson(),
     'events': [for (final e in capsule.events) e.toJson()],
@@ -99,10 +102,13 @@ abstract final class CapsuleCodec {
       throw CapsuleFormatException('malformed capsule: $problem');
     }
     try {
+      final manifest = Map<String, Object?>.of(
+        (json['manifest'] as Map).cast<String, Object?>(),
+      );
+      // capsule-v2 §1: dependencies have no effect on a v1 capsule.
+      if (version < 2) manifest.remove('dependencies');
       return Capsule(
-        manifest: CapsuleManifest.fromJson(
-          (json['manifest'] as Map).cast<String, Object?>(),
-        ),
+        manifest: CapsuleManifest.fromJson(manifest),
         checkpoint: Checkpoint.fromJson(
           (json['checkpoint'] as Map).cast<String, Object?>(),
         ),

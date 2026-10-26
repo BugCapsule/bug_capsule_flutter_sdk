@@ -1,5 +1,6 @@
 import 'event.dart';
 import 'failure.dart';
+import 'interactions.dart';
 
 enum CaptureMode { debug, qa, production }
 
@@ -313,6 +314,7 @@ class CapsuleManifest {
     this.runtime,
     this.capabilities = const {},
     this.monitoring,
+    this.dependencies = const [],
   });
 
   factory CapsuleManifest.fromJson(Map<String, Object?> j) {
@@ -376,6 +378,10 @@ class CapsuleManifest {
       monitoring: monitoring == null
           ? null
           : CapsuleMonitoring.fromJson(monitoring.cast<String, Object?>()),
+      dependencies: [
+        for (final d in (j['dependencies'] as List?) ?? const [])
+          CapsuleDependency.fromJson((d as Map).cast<String, Object?>()),
+      ],
     );
   }
 
@@ -416,6 +422,14 @@ class CapsuleManifest {
   /// §4.3), linking the capsule to an issue. Null when monitoring was off.
   final CapsuleMonitoring? monitoring;
 
+  /// Interaction dependencies (capsule-v2 §2). A capsule with any is
+  /// written as spec v2.
+  final List<CapsuleDependency> dependencies;
+
+  /// Dependencies replay must serve; preflight blocks when one is missing.
+  Iterable<CapsuleDependency> get requiredDependencies =>
+      dependencies.where((d) => d.required);
+
   /// The capturing runtime, inferred for capsules without `runtime`.
   String get runtimeName => runtime?.name ?? RuntimeInfo.infer(sdkName);
 
@@ -446,6 +460,8 @@ class CapsuleManifest {
     if (runtime != null) 'runtime': runtime!.toJson(),
     if (capabilities.isNotEmpty) 'capabilities': capabilities,
     if (monitoring != null) 'monitoring': monitoring!.toJson(),
+    if (dependencies.isNotEmpty)
+      'dependencies': [for (final d in dependencies) d.toJson()],
   };
 }
 
@@ -489,6 +505,10 @@ class Capsule {
   final CapsuleManifest manifest;
   final Checkpoint checkpoint;
   final List<BugCapsuleEvent> events;
+
+  /// 2 when the capsule has interaction dependencies, else 1: sessions that
+  /// use only v1 features stay readable by v1 tools.
+  int get specVersion => manifest.dependencies.isEmpty ? 1 : 2;
 
   Iterable<BugCapsuleEvent> eventsOfType(String type) =>
       events.where((e) => e.type == type);

@@ -52,6 +52,7 @@ Map<String, Object?> buildConformanceFixtures() => {
   'signatures.json': _signatures(),
   'redaction.json': _redaction(),
   'verdicts.json': _verdicts(),
+  'interactions.json': _interactions(),
 };
 
 Map<String, Object?> _header(String what) => {
@@ -252,6 +253,7 @@ Map<String, Object?> _verdicts() {
       'exitCode': e.exitCode,
       'validAttempts': e.validAttempts,
       'attemptStatuses': [for (final a in e.attempts) a.status.name],
+      'reasonCodes': e.reasonCodes,
     });
   }
   return {
@@ -261,5 +263,135 @@ Map<String, Object?> _verdicts() {
     ),
     'expectedDivergences': DivergencePolicy.expected.toList()..sort(),
     'cases': cases,
+  };
+}
+
+Map<String, Object?> _interactions() {
+  final redactor = Redactor();
+  return {
+    ..._header(
+      'Interaction dependencies (spec capsule-v2): typed values (§3.1), '
+      'interaction keys (§5), payload encoding with the default redactor '
+      '(§3, §7) and delivery scheduling (§5, lib/src/core/interactions.dart).',
+    ),
+    'typedValues': [
+      for (final c in typedValueCases)
+        {
+          ...c,
+          'reencoded': TypedValue.encode(TypedValue.decode(c['encoded'])),
+          'canonical': canonicalJson(c['encoded']),
+          'hash': stableHash(canonicalJson(c['encoded'])),
+        },
+    ],
+    'keys': [
+      for (final c in interactionKeyCases)
+        {
+          ...c,
+          'key': interactionKey(
+            c['scope'] as String,
+            c['method'] as String?,
+            c['args'],
+          ),
+        },
+    ],
+    'payloads': [
+      for (final c in payloadCases)
+        {
+          ...c,
+          'payload': () {
+            final kind = c['kind'] as String?;
+            final value = TypedValue.decode(c['value']);
+            final encoder = PayloadEncoder(
+              redactor: () => redactor,
+              budget: PayloadBudget(
+                InteractionLimits(
+                  maxPayloadBytes: c['maxPayloadBytes'] as int? ?? 64 * 1024,
+                ),
+              ),
+              stats: DependencyStats(),
+              now: () => 0,
+              captureBinary: c['captureBinary'] as bool? ?? false,
+              redactedReplayable: c['redactedReplayable'] as bool? ?? false,
+            );
+            return encoder.encode(value, kind: kind).toJson();
+          }(),
+        },
+    ],
+    'schedules': [for (final c in scheduleCases) _schedule(c)],
+  };
+}
+
+Map<String, Object?> _schedule(Map<String, Object?> c) {
+  var seq = 0;
+  final events = [
+    for (final e in (c['events'] as List).cast<Map<String, Object?>>())
+      BugCapsuleEvent(
+        seq: ++seq,
+        t: e['t'] as int,
+        type: e['type'] as String,
+        data: (e['data'] as Map).cast<String, Object?>(),
+      ),
+  ];
+  var now = 0;
+  final deliveries = <Map<String, Object?>>[];
+  final script = InteractionScript(
+    events,
+    dependencies: {...(c['deps'] as List).cast<String>()},
+    clock: () => now,
+    base: c['base'] as int,
+  );
+  final handled = <String>{};
+  void deliver(RecordedInteraction r) =>
+      deliveries.add({'seq': r.event.seq, 'at': now});
+  void advanceTo(int target) {
+    while (true) {
+      final next = script.nextDueAt;
+      if (next == null || next > target) break;
+      if (next > now) now = next;
+      script.pump();
+    }
+    now = target;
+    script.pump();
+  }
+
+  final matched = <Map<String, Object?>>[];
+  for (final step in (c['steps'] as List).cast<Map<String, Object?>>()) {
+    advanceTo(step['at'] as int);
+    switch (step['op']) {
+      case 'runStarted':
+        script.runStarted(now);
+      case 'bind':
+        handled.add(step['scope'] as String);
+        script.bind(step['scope'] as String, deliver);
+      case 'unbind':
+        script.unbind(step['scope'] as String);
+      case 'take':
+        final r = script.take(
+          step['dep'] as String,
+          step['type'] as String,
+          step['key'] as String,
+        );
+        matched.add({'step': step, 'seq': r?.event.seq});
+      case 'takeNext':
+        final r = script.takeNext(step['scope'] as String, {
+          ...(step['types'] as List).cast<String>(),
+        });
+        matched.add({'step': step, 'seq': r?.event.seq});
+    }
+    script.pump();
+  }
+  // Drain: deliver everything still scheduled for a bound scope.
+  while (script.nextDueAt != null) {
+    advanceTo(script.nextDueAt!);
+  }
+  final unused = script.unused(c['failureT'] as int?);
+  return {
+    ...c,
+    'events': [for (final e in events) e.toJson()],
+    'matched': [for (final m in matched) m['seq']],
+    'deliveries': deliveries,
+    'unused': [
+      for (final (type, detail) in unused) {'type': type, 'detail': detail},
+    ],
   };
 }

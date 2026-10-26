@@ -1,3 +1,13 @@
+## Unreleased
+
+- Capsule spec v2 (`spec/capsule-v2.md`): required replay dependencies, payload recording modes, lossless typed values and reason codes for verification. The codec reads v1 and v2 and writes v2 only for capsules with interaction dependencies.
+- `BugCapsuleWebSocket`: record and replay `web_socket_channel` and `dart:io` WebSockets offline, with recorded ordering and timing, send checks and reconnect attempts.
+- `BugCapsulePlatformChannels`: record and replay allowlisted MethodChannel, EventChannel and BasicMessageChannel traffic in both directions. `BugCapsule.init` creates a binding that wraps the default messenger; a late setup is reported as `channel.late` / `dependency.late`.
+- `NativeAdapter` for third-party SDKs, and `package:bug_capsule/testing.dart` with `InteractionHarness` and `AdapterConformance`.
+- Replay preflight blocks capsules whose required adapters are missing (`dependency.unsupported`) or cannot be restored (`dependency.unrestorable`). Idle compression never skips past a due delivery.
+- `bugcapsule inspect` lists dependencies, adapter versions, coverage and gaps; `verify` reports and uploads reason codes.
+- Project capture settings can turn off one adapter's capture and lower the interaction payload limit.
+
 ## 0.4.1-beta.6 — 2026-10-25
 
 - `bugcapsule login` signs in through the browser, like `firebase login`: it shows a code, opens the dashboard to approve it for one project, and saves a personal token. `--no-browser` prints the address to open on another device (SSH). `--url` defaults to the saved login, then `https://api.bugcapsule.com`. A BugCapsule server without browser sign-in gets a message to use `--token` instead.

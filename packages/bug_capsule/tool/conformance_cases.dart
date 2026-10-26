@@ -649,4 +649,352 @@ final verdictCases = <Map<String, Object?>>[
     'requested': 1,
     'reports': [_ok(), _ok()],
   },
+  {
+    'name': 'interactions recorded after the failure may go unused',
+    'kind': 'verify',
+    'requested': 1,
+    'reports': [
+      _ok(
+        divergences: [
+          'ws.unusedAfterFailure',
+          'platform.unusedAfterFailure',
+          'native.unusedAfterFailure',
+        ],
+      ),
+    ],
+  },
+  {
+    'name': 'a missing interaction prevents fixed',
+    'kind': 'verify',
+    'requested': 1,
+    'reports': [
+      _ok(divergences: ['ws.unused']),
+    ],
+  },
+  {
+    'name': 'unexpected, mismatched and incomplete interactions are material',
+    'kind': 'verify',
+    'requested': 3,
+    'reports': [
+      _ok(divergences: ['platform.unrecorded']),
+      _ok(divergences: ['native.mismatch']),
+      _ok(divergences: ['ws.noPayload']),
+    ],
+  },
+  {
+    'name': 'a live dependency contact prevents fixed',
+    'kind': 'verify',
+    'requested': 1,
+    'reports': [
+      _ok(divergences: ['dependency.live']),
+    ],
+  },
+  {
+    'name': 'an unsupported required dependency is incompatible',
+    'kind': 'verify',
+    'requested': 1,
+    'reports': [
+      {
+        'outcome': 'incompatible',
+        'expectedSignature': _sig,
+        'message':
+            'dependency.unsupported: bug_capsule.web_socket_channel schema 1',
+      },
+    ],
+  },
 ];
+
+// ------------------------------------------------------------ interactions
+
+/// Typed values (capsule-v2 §3.1), given as their encoded JSON; readers
+/// decode then re-encode them and must get the same JSON back.
+const typedValueCases = <Map<String, Object?>>[
+  {'name': 'null', 'encoded': null},
+  {'name': 'string', 'encoded': 'héllo'},
+  {'name': 'small int', 'encoded': 42},
+  {
+    'name': 'int beyond 2^53',
+    'encoded': {r'$t': 'int', 'v': '9007199254740993'},
+  },
+  {'name': 'fractional double', 'encoded': 12.5},
+  {
+    'name': 'integral double',
+    'encoded': {r'$t': 'double', 'v': '80.0'},
+  },
+  {
+    'name': 'NaN',
+    'encoded': {r'$t': 'double', 'v': 'NaN'},
+  },
+  {
+    'name': 'negative zero',
+    'encoded': {r'$t': 'double', 'v': '-0.0'},
+  },
+  {
+    'name': 'bytes',
+    'encoded': {r'$t': 'bytes', 'b64': 'AAEC/w=='},
+  },
+  {
+    'name': 'int32 array',
+    'encoded': {
+      r'$t': 'i32',
+      'v': [1, -2, 3],
+    },
+  },
+  {
+    'name': 'int64 array',
+    'encoded': {
+      r'$t': 'i64',
+      'v': ['1', '-9223372036854775808'],
+    },
+  },
+  {
+    'name': 'float64 array with infinity',
+    'encoded': {
+      r'$t': 'f64',
+      'v': [1.5, 'Infinity'],
+    },
+  },
+  {
+    'name': 'map with int keys',
+    'encoded': {
+      r'$t': 'map',
+      'e': [
+        [1, 'one'],
+        ['two', 2],
+      ],
+    },
+  },
+  {
+    'name': 'map with a \$t key',
+    'encoded': {
+      r'$t': 'map',
+      'e': [
+        [r'$t', 'x'],
+      ],
+    },
+  },
+  {
+    'name': 'nested plain map',
+    'encoded': {
+      'b': [
+        true,
+        {r'$t': 'double', 'v': '2.0'},
+      ],
+      'a': {'c': null},
+    },
+  },
+];
+
+/// Interaction keys (capsule-v2 §5): scope, method and typed args.
+const interactionKeyCases = <Map<String, Object?>>[
+  {'scope': 'plugins.example.com/battery', 'method': 'getLevel', 'args': null},
+  {
+    'scope': 'plugins.example.com/battery',
+    'method': 'getLevel',
+    'args': <String, Object?>{},
+  },
+  {
+    'scope': 'doc.get',
+    'method': null,
+    'args': {'path': 'carts/user-1'},
+  },
+  {
+    'scope': 'doc.get',
+    'method': null,
+    'args': {
+      'z': 1,
+      'a': [
+        {'y': 2, 'x': 1},
+      ],
+    },
+  },
+  {
+    'scope': 'plugins.example.com/nfc',
+    'method': 'start',
+    'args': {
+      r'$t': 'map',
+      'e': [
+        [
+          1,
+          {r'$t': 'bytes', 'b64': 'AAEC'},
+        ],
+      ],
+    },
+  },
+  {
+    'scope': 'wss://quotes.example.com/v1/stream?token=[REDACTED]',
+    'method': null,
+    'args': null,
+  },
+];
+
+/// Payload encoding (capsule-v2 §3, §7) with the default redactor. `value`
+/// is typed JSON; `kind` marks WebSocket frames.
+const payloadCases = <Map<String, Object?>>[
+  {'name': 'text frame', 'kind': 'text', 'value': '{"op":"subscribe"}'},
+  {
+    'name': 'text frame with a token',
+    'kind': 'text',
+    'value': '{"op":"auth","token":"abc123"}',
+  },
+  {
+    'name': 'binary frame without a serializer',
+    'kind': 'binary',
+    'value': {r'$t': 'bytes', 'b64': 'AAECAwQ='},
+  },
+  {
+    'name': 'binary frame with captureBinary',
+    'kind': 'binary',
+    'value': {r'$t': 'bytes', 'b64': 'AAECAwQ='},
+    'captureBinary': true,
+  },
+  {
+    'name': 'value with a sensitive key',
+    'value': {'uid': 'u1', 'password': 'hunter2'},
+  },
+  {
+    'name': 'redacted value declared replayable',
+    'value': {'uid': 'u1', 'password': 'hunter2'},
+    'redactedReplayable': true,
+  },
+  {
+    'name': 'value over the payload limit',
+    'value': {'blob': 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'},
+    'maxPayloadBytes': 32,
+  },
+];
+
+/// Delivery scheduling (capsule-v2 §5). The driver advances a replay clock
+/// to each step's `at`, delivering due events on the way (bound scopes
+/// only), then performs the step. Steps: `take` (dep, type, key),
+/// `takeNext` (scope, types), `bind` (scope), `unbind` (scope), `runStarted`.
+final scheduleCases = <Map<String, Object?>>[
+  {
+    'name': 'responses keep their recorded latency after a late connect',
+    'deps': ['ws'],
+    'base': 0,
+    'events': [
+      _ix(100, 'ws.connect', {'conn': 'ws1', 'key': 'K', 'occurrence': 0}),
+      _ix(180, 'ws.open', {'conn': 'ws1'}),
+      _ix(200, 'ws.send', {'conn': 'ws1', 'index': 0}),
+      _ix(260, 'ws.message', {'conn': 'ws1', 'index': 0}),
+      _ix(260, 'ws.message', {'conn': 'ws1', 'index': 1}),
+      _ix(900, 'ws.message', {'conn': 'ws1', 'index': 2}),
+    ],
+    'steps': [
+      {'at': 0, 'op': 'runStarted'},
+      {'at': 1000, 'op': 'take', 'dep': 'ws', 'type': 'ws.connect', 'key': 'K'},
+      {'at': 1000, 'op': 'bind', 'scope': 'ws:ws1'},
+      {
+        'at': 1500,
+        'op': 'takeNext',
+        'scope': 'ws:ws1',
+        'types': ['ws.send'],
+      },
+    ],
+  },
+  {
+    'name': 'concurrent identical connections are matched by order',
+    'deps': ['ws'],
+    'base': 0,
+    'events': [
+      _ix(100, 'ws.connect', {'conn': 'a', 'key': 'K', 'occurrence': 0}),
+      _ix(100, 'ws.connect', {'conn': 'b', 'key': 'K', 'occurrence': 1}),
+      _ix(150, 'ws.message', {'conn': 'b', 'index': 0}),
+      _ix(170, 'ws.message', {'conn': 'a', 'index': 0}),
+    ],
+    'steps': [
+      {'at': 0, 'op': 'runStarted'},
+      {'at': 100, 'op': 'take', 'dep': 'ws', 'type': 'ws.connect', 'key': 'K'},
+      {'at': 100, 'op': 'bind', 'scope': 'ws:a'},
+      {'at': 100, 'op': 'take', 'dep': 'ws', 'type': 'ws.connect', 'key': 'K'},
+      {'at': 100, 'op': 'bind', 'scope': 'ws:b'},
+    ],
+  },
+  {
+    'name': 'events wait for their subscription and are never early',
+    'deps': ['ch'],
+    'base': 0,
+    'events': [
+      _ix(30, 'platform.listen', {
+        'channel': 'c',
+        'sub': 's1',
+        'key': 'L',
+        'occurrence': 0,
+      }),
+      _ix(35, 'platform.event', {'channel': 'c', 'sub': 's1', 'index': 0}),
+      _ix(36, 'platform.event', {'channel': 'c', 'sub': 's1', 'index': 1}),
+      _ix(600, 'platform.cancel', {'channel': 'c', 'sub': 's1'}),
+      _ix(700, 'platform.done', {'channel': 'c', 'sub': 's1'}),
+    ],
+    'steps': [
+      {'at': 0, 'op': 'runStarted'},
+      {
+        'at': 400,
+        'op': 'take',
+        'dep': 'ch',
+        'type': 'platform.listen',
+        'key': 'L',
+      },
+      {'at': 402, 'op': 'bind', 'scope': 'platform.sub:s1'},
+    ],
+  },
+  {
+    'name': 'platform-to-app calls follow the replay clock once handled',
+    'deps': ['ch'],
+    'base': 0,
+    'events': [
+      _ix(-20, 'platform.call', {
+        'channel': 'push',
+        'call': 'c0',
+        'dir': 'platform',
+        'key': 'P',
+        'occurrence': 0,
+      }),
+      _ix(500, 'platform.call', {
+        'channel': 'push',
+        'call': 'c1',
+        'dir': 'platform',
+        'key': 'P',
+        'occurrence': 1,
+      }),
+      _ix(501, 'platform.result', {'channel': 'push', 'call': 'c1'}),
+    ],
+    'steps': [
+      {'at': 10, 'op': 'bind', 'scope': 'platform.in:push'},
+      {'at': 50, 'op': 'runStarted'},
+      {
+        'at': 560,
+        'op': 'takeNext',
+        'scope': 'platform.call:c1',
+        'types': ['platform.result', 'platform.error'],
+      },
+    ],
+  },
+  {
+    'name': 'unmatched interactions before and after the failure',
+    'deps': ['ws'],
+    'base': 0,
+    'failureT': 500,
+    'events': [
+      _ix(100, 'ws.connect', {'conn': 'ws1', 'key': 'K', 'occurrence': 0}),
+      _ix(150, 'ws.message', {'conn': 'ws1', 'index': 0}),
+      _ix(400, 'ws.send', {'conn': 'ws1', 'index': 0}),
+      _ix(900, 'ws.send', {'conn': 'ws1', 'index': 1}),
+    ],
+    'steps': [
+      {'at': 0, 'op': 'runStarted'},
+      {'at': 100, 'op': 'take', 'dep': 'ws', 'type': 'ws.connect', 'key': 'K'},
+      {'at': 100, 'op': 'bind', 'scope': 'ws:ws1'},
+    ],
+  },
+];
+
+Map<String, Object?> _ix(int t, String type, Map<String, Object?> data) {
+  final dep = type.startsWith('ws.') ? 'ws' : 'ch';
+  return {
+    't': t,
+    'type': type,
+    'data': {'dep': dep, ...data},
+  };
+}

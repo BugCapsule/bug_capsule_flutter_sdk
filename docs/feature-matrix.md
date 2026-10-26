@@ -1,4 +1,4 @@
-# BugCapsule feature matrix (October 2026, SDK 0.3 / Flutter package 0.4)
+# BugCapsule feature matrix (October 2026, SDK 0.3 / Flutter package 0.4; interaction rows: unreleased)
 
 Legend: **T** implemented and tested (automated tests and/or the recorded
 end-to-end run) · **I** implemented, not tested here · **P** partial (works
@@ -35,6 +35,11 @@ unit suites (257 tests) were re-run this session, its device E2E was not.
 | Rejected ingest key (401/403 on config) | stops capture, purges queue | stops capture, **keeps** queue | stops capture | stops capture, purges queue |
 | Offline outbox (10 / 10 MiB / 7 days, backoff, Retry-After) | T | T | T | T (IndexedDB, cross-tab safe) |
 | Runtime + capability metadata in capsules | T | T | T | T |
+| Capsule spec v2 reader (v1 + v2), v2 written only with interaction dependencies | T | T | T | T |
+| WebSockets (capsule v2) | T (`BugCapsuleWebSocket`: web_socket_channel, `dart:io`) | T (OkHttp `WebSocket.Factory` wrapper) | T (`BugCapsuleWebSocket` URLSessionWebSocketTask wrapper) | T (browser `WebSocket`, page realm) |
+| Platform channels (Method, Event, BasicMessage; standard/JSON codecs) | T (allowlisted; binding wraps the default messenger) | n/a | n/a | n/a |
+| Native SDK adapters (`NativeAdapter` + conformance kit) | T (API); pilots Firebase Auth/Firestore, geolocator, Google Maps, Stripe tested against fakes only | T (API + example adapter) | T (API + example adapter) | — |
+| Replay preflight for required dependencies, offline-only interaction replay | T | T | T | T |
 
 ## Monitoring (monitoring-v1, Flutter)
 

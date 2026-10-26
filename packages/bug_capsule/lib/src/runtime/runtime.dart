@@ -11,9 +11,11 @@ export 'backend.dart'
         EnvelopeTransport,
         UploadResult,
         UploadStatus;
+export 'binding.dart';
 export 'config.dart';
 export 'connection_token.dart';
 export 'integration.dart';
+export 'interactions.dart';
 export 'overlay.dart';
 export 'state_tracker.dart';
 export 'status.dart';
