@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:bug_capsule/bug_capsule.dart';
 
 import 'fake_server.dart';
+import 'quotes.dart';
 import 'screens.dart';
 import 'shop.dart';
 
@@ -20,6 +21,7 @@ final bugCapsuleDio = BugCapsuleDio(rules: [
   EndpointRule('POST', '/api/checkout', ignoreBodyFields: {'timestamp', 'nonce'}),
 ]);
 final bugCapsuleRouter = BugCapsuleGoRouter();
+final bugCapsuleSockets = BugCapsuleWebSocket();
 
 void main() => BugCapsule.init(
       config: BugCapsuleConfig(
@@ -40,6 +42,7 @@ void main() => BugCapsule.init(
         ]),
         bugCapsuleDio,
         bugCapsuleRouter,
+        bugCapsuleSockets,
         BugCapsuleSharedPreferences(),
       ],
       appRunner: () => runApp(const ShopApp()),
@@ -80,6 +83,10 @@ class _ShopAppState extends State<ShopApp> {
             create: (_) => OrdersCubit(_api)..load(),
             child: const OrdersScreen(),
           ),
+        ),
+        GoRoute(
+          path: '/quotes',
+          builder: (_, _) => QuotesScreen(sockets: bugCapsuleSockets),
         ),
       ],
     );
