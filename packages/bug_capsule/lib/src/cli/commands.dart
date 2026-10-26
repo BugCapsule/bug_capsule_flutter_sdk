@@ -590,9 +590,19 @@ class GateCommand extends Command<int> {
       for (final i in (plan['items'] as List?) ?? const [])
         GateItem.fromJson((i as Map).cast<String, Object?>()),
     ];
+    // The backend sends at most 10 capsules per issue and 200 in all.
+    final truncated = plan['truncated'] == true;
     stdout.writeln(
       '${bold('Gate')} $release  ${dim('$platform, scope $scope, ${items.length} capsule${items.length == 1 ? '' : 's'}')}',
     );
+    if (truncated) {
+      stderr.writeln(
+        yellow(
+          '! the plan left some capsules out (at most 10 per issue and 200 '
+          'in all); narrow it with --scope or --issue to check the rest',
+        ),
+      );
+    }
 
     final project = args['project'] as String;
     final git = await gitInfo(project);
@@ -654,6 +664,7 @@ class GateCommand extends Command<int> {
             failOn: failOn,
             startedAt: startedAt,
             finishedAt: finishedAt,
+            truncated: truncated,
           ),
         );
       stdout.writeln(dim('JUnit: $junit'));
@@ -678,6 +689,7 @@ class GateCommand extends Command<int> {
         passed: passed,
         exitCode: code,
         reportId: reportId,
+        truncated: truncated,
         errors: errors,
       ),
     );

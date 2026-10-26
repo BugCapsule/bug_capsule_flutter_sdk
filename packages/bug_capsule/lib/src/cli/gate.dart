@@ -209,6 +209,7 @@ String gateJunit({
   required DateTime startedAt,
   required DateTime finishedAt,
   String? gitSha,
+  bool truncated = false,
 }) {
   final failures = results
       .where((r) => GateOutcomes.fails(r.outcome, failOn))
@@ -235,6 +236,9 @@ String gateJunit({
     ..writeln('      <property name="platform" value="${_xml(platform)}"/>');
   if (gitSha != null) {
     out.writeln('      <property name="gitSha" value="${_xml(gitSha)}"/>');
+  }
+  if (truncated) {
+    out.writeln('      <property name="truncated" value="true"/>');
   }
   out.writeln('    </properties>');
   for (final r in results) {
@@ -299,6 +303,7 @@ String gateJson({
   required int exitCode,
   String? gitSha,
   String? reportId,
+  bool truncated = false,
   List<String> errors = const [],
 }) => const JsonEncoder.withIndent('  ').convert({
   'release': release,
@@ -306,6 +311,8 @@ String gateJson({
   'scope': scope,
   'gitSha': gitSha,
   'passed': passed,
+  // The plan left capsules out (10 per issue, 200 in all): not all were checked.
+  'truncated': truncated,
   'exitCode': exitCode,
   'reportId': reportId,
   'total': results.length,

@@ -39,6 +39,7 @@ List<int> _capsule(String id) {
 class FakeGateBackend {
   late HttpServer _server;
   List<Map<String, Object?>> plan = [];
+  bool truncated = false;
   int planStatus = 200;
   int runStatus = 201;
   final List<(String, Map<String, Object?>)> runs = [];
@@ -75,6 +76,7 @@ class FakeGateBackend {
       }
       return json(200, {
         'release': req.uri.queryParameters['release'],
+        'truncated': truncated,
         'items': plan,
       });
     }
@@ -369,6 +371,19 @@ void main() {
     },
   );
 
+  test('a truncated plan still gates what it got, and says so', () async {
+    backend
+      ..plan = [_item('cap-1', 'Cart total is negative')]
+      ..truncated = true;
+    final junit = '${project.path}/gate.xml';
+    expect(await gate(['--junit', junit]), 0);
+    expect(backend.runs, hasLength(1));
+    expect(
+      File(junit).readAsStringSync(),
+      contains('<property name="truncated" value="true"/>'),
+    );
+  });
+
   test('usage errors', () async {
     expect(
       () => gate(['--fail-on', 'reproduced,sometimes']),
@@ -441,10 +456,12 @@ void main() {
                   passed: false,
                   exitCode: 1,
                   reportId: 'report-1',
+                  truncated: true,
                 ),
               )
               as Map;
       expect(doc['passed'], isFalse);
+      expect(doc['truncated'], isTrue);
       expect(doc['exitCode'], 1);
       expect(doc['failed'], 1);
       expect((doc['results'] as List).single, containsPair('runId', 'run-1'));

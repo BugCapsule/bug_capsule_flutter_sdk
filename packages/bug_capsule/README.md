@@ -368,7 +368,8 @@ BUGCAPSULE_TOKEN=bcv_… bugcapsule gate --release com.shop.app@1.5.0+60 \
 
 Exit codes: 0 passed, 1 a capsule reproduced, 2 flaky (`--fail-on`, default
 `reproduced,flaky`), 3 a capsule could not run (only with `error` in
-`--fail-on`), 64 usage. `--json` prints the result as JSON. A GitHub Actions
+`--fail-on`), 64 usage. `--json` prints the result as JSON. The service
+token needs the `capsules.read` and `replay.submit` scopes. A GitHub Actions
 example is in [docs/cli-runtimes.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/cli-runtimes.md#release-gate).
 
 ## Monitoring

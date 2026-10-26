@@ -143,8 +143,11 @@ bugcapsule gate --release com.shop.app@1.5.0+60 --platform android \
   [--fail-on reproduced,flaky] [--junit build/bugcapsule-gate.xml] [--json]
 ```
 
-1. Fetches the capsules the release must not reproduce. With none, the gate
-   passes and says so.
+1. Fetches the capsules the release must not reproduce: fixes the release
+   claims and bugs fixed in it or earlier (`--platform` is the capsules'
+   runtime). With none, the gate passes and says so. The plan holds at most
+   10 capsules per issue and 200 in all; when it left some out, the gate
+   warns and `--json` / JUnit say `truncated`.
 2. Builds the app once, as `verify` does (the working tree, or `--apk` /
    `--xctestrun` / `--app-url`), then downloads and verifies each capsule
    with `--attempts`, recording every run with the release and the commit.
@@ -162,7 +165,8 @@ bugcapsule gate --release com.shop.app@1.5.0+60 --platform android \
 | 64 | Usage |
 
 Credentials: a service token (`bcv_…`) from **Project settings → Keys & CLI
-access** in `BUGCAPSULE_TOKEN` (or `--token`), and the backend in
+access** with the `capsules.read` and `replay.submit` scopes, in
+`BUGCAPSULE_TOKEN` (or `--token`), and the backend in
 `BUGCAPSULE_URL` (or `--url`) unless you use BugCapsule's hosted backend
 after `bugcapsule login`.
 
