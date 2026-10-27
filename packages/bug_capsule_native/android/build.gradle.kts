@@ -1,5 +1,5 @@
 group = "dev.bugcapsule.bug_capsule_native"
-version = "0.1.0-dev.1"
+version = "0.1.0-beta.1"
 
 // The BugCapsule Android SDK release with dev.bugcapsule.android.embedding.CrashBridge.
 val bugCapsuleAndroidVersion = "0.4.1-beta.5"

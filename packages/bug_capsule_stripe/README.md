@@ -17,7 +17,7 @@ sheet or a declined card comes back as it happened.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.6
+  bug_capsule: ^0.4.1-beta.7
   bug_capsule_stripe: ^0.1.0-dev.1
   flutter_stripe: ^14.2.0
 ```

@@ -16,7 +16,7 @@ how the platform computes locations.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.6
+  bug_capsule: ^0.4.1-beta.7
   bug_capsule_geolocator: ^0.1.0-dev.1
   geolocator: ^14.1.0
 ```

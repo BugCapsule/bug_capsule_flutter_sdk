@@ -1,0 +1,63 @@
+name: Standalone CLI
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'packages/bug_capsule/lib/src/cli/**'
+      - 'packages/bug_capsule/lib/src/core/**'
+      - 'tool/build_cli.py'
+      - '.github/workflows/standalone-cli.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.7'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: python tool/build_cli.py
+      - name: Test without Dart or Flutter on PATH
+        shell: python
+        run: |
+          import os, pathlib, subprocess, tempfile
+          binary = next(p.resolve() for p in pathlib.Path('dist/cli').iterdir() if p.suffix != '.sha256')
+          with tempfile.TemporaryDirectory() as empty:
+              env = {**os.environ, 'PATH': empty}
+              subprocess.run([str(binary), '--version'], env=env, check=True)
+              for command in ['login', 'inspect', 'run', 'verify', 'regress', 'gate', 'symbols']:
+                  subprocess.run([str(binary), command, '--help'], env=env, check=True)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.os }}
+          path: dist/cli/*
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          merge-multiple: true
+          path: binaries
+      - name: Attach standalone executables
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$RELEASE_TAG" || gh release create "$RELEASE_TAG" --prerelease --title "BugCapsule $RELEASE_TAG" --generate-notes
+          gh release upload "$RELEASE_TAG" binaries/*

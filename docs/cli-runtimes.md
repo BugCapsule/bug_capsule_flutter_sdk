@@ -195,7 +195,7 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - run: dart pub global activate bug_capsule
+      - run: npm install -g @bugcapsule/cli@0.4.0-beta.3
       - name: Verify the release does not bring fixed bugs back
         uses: reactivecircus/android-emulator-runner@v2
         env:
