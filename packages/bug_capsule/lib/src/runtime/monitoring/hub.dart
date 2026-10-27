@@ -56,6 +56,8 @@ class MonitoringHost {
     required this.refreshConfig,
     required this.writeCapsule,
     required this.isRecording,
+    this.crashCapsule,
+    this.journalId,
   });
 
   final BugCapsuleConfig config;
@@ -69,6 +71,20 @@ class MonitoringHost {
   final Future<String?> Function(String note, CapsuleMonitoring? monitoring)
   writeCapsule;
   final bool Function() isRecording;
+
+  /// Builds the crash capsule for a fatal event of an earlier process from
+  /// that process's crash journal (crash-capsules §2); completes with its
+  /// id once it is queued, or null. Returns null when no capsule is tried.
+  final Future<String?>? Function(
+    ErrorEvent event, {
+    String? journalId,
+    required bool lastRunCrashed,
+  })?
+  crashCapsule;
+
+  /// This process's crash journal, mirrored into the native crash scope so
+  /// that a crash event names the journal of its process.
+  final String? Function()? journalId;
 }
 
 /// Monitoring state of one SDK instance (monitoring-v1): builds events,
@@ -132,6 +148,12 @@ class MonitoringHub implements TransactionSink {
   Timer? _scopeMirrorTimer;
   bool _scopeMirrorScheduled = false;
   String? _lastScopeMirror;
+  bool _lastRunCrashed = false;
+  Future<void>? _pendingHandled;
+  final List<Future<void>> _crashCapsules = [];
+
+  /// The mirrored-scope context naming the crash journal of the process.
+  static const journalContext = 'bugcapsule_journal';
 
   RemoteCaptureConfig? get _remote => host.remote();
   BugCapsuleConfig get _config => host.config;
@@ -270,6 +292,7 @@ class MonitoringHub implements TransactionSink {
         return null;
       }
       _native = reporter;
+      _lastRunCrashed = started.lastRunCrashed;
       _nativeEvents = reporter.events.listen(
         (e) => _submitNative(e.json, live: e.live),
       );
@@ -278,7 +301,12 @@ class MonitoringHub implements TransactionSink {
         const Duration(seconds: 2),
         (_) => _mirrorScope(),
       );
-      unawaited(reporter.collectPending());
+      _pendingHandled = reporter
+          .collectPending()
+          // Events reach the listener a microtask after they are added.
+          .then((_) => Future<void>.delayed(Duration.zero))
+          .then((_) => Future.wait(List.of(_crashCapsules)))
+          .then((_) {}, onError: (Object _) {});
       return started;
     } catch (e) {
       debugPrint('[bugcapsule] native crash reporting is off: $e');
@@ -287,15 +315,25 @@ class MonitoringHub implements TransactionSink {
     }
   }
 
+  /// Completes once the native SDK's pending events of earlier runs were
+  /// handed on and their crash capsules written (or given up): the moment
+  /// journals no event claimed can go.
+  Future<void> get nativePendingHandled => _pendingHandled ?? Future.value();
+
   /// Queues a native event: crashes of an earlier run (fatal, never sampled
   /// out, their session was recovered separately) or a hang now ([live]:
   /// counted in this session, sampled like other errors). It goes through
-  /// `beforeSend` and redaction like a Dart error.
+  /// `beforeSend` and redaction like a Dart error. A fatal event of an
+  /// earlier run first gets the crash capsule built from its process's
+  /// journal, and carries its `capsuleId`.
   void _submitNative(String json, {required bool live}) {
     if (_disposed) return;
     try {
       final event = ErrorEvent.fromJson((jsonDecode(json) as Map).cast());
       if (event == null) return;
+      // Our own marker, from the mirrored scope: never sent.
+      final journal = event.contexts.remove(journalContext);
+      final journalId = journal is Map ? journal['id'] as String? : null;
       // Device contexts are this launch's. `app` and the app's own contexts
       // are the failed process's: an earlier run's event never gets this
       // launch's `app` (it may be a newer version).
@@ -315,7 +353,16 @@ class MonitoringHub implements TransactionSink {
         sessionUpdate: live ? _sessions?.onError(crashed: fatal) : null,
       );
       if (!prepared.sampledOut) _lastEventId = event.eventId;
-      _finish(prepared, linked: false);
+      final build = fatal && !live
+          ? host.crashCapsule?.call(
+              event,
+              journalId: journalId,
+              lastRunCrashed: _lastRunCrashed,
+            )
+          : null;
+      if (build == null) return _finish(prepared, linked: false);
+      _crashCapsules.add(build.then((_) {}, onError: (Object _) {}));
+      submit(prepared, capsule: build);
     } catch (e) {
       debugPrint('[bugcapsule] dropping a malformed native event: $e');
     }
@@ -359,6 +406,9 @@ class MonitoringHub implements TransactionSink {
     _ => _safeToString(value),
   };
 
+  /// The crash journal started (or stopped): mirror the scope again.
+  void onJournalChanged() => _scheduleScopeMirror();
+
   void _scheduleScopeMirror() {
     if (_native == null || _scopeMirrorScheduled || _disposed) return;
     _scopeMirrorScheduled = true;
@@ -386,7 +436,12 @@ class MonitoringHub implements TransactionSink {
                   'tags': scope.tags,
                   'user': ?_user(scope)?.toJson(),
                   'extra': scope.extras,
-                  'contexts': {'app': _contexts()['app'], ...scope.contexts},
+                  'contexts': {
+                    'app': _contexts()['app'],
+                    ...scope.contexts,
+                    if (host.journalId?.call() case final id?)
+                      journalContext: {'id': id},
+                  },
                   'breadcrumbs': crumbs,
                 })
                 as Map<String, Object?>,

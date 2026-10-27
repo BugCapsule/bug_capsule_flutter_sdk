@@ -1,3 +1,4 @@
+import 'failure.dart';
 import 'replay_protocol.dart';
 
 /// `replay` expects the original failure; `verify` expects it gone.
@@ -125,7 +126,12 @@ AttemptAssessment assessAttempt(ReplayReport r) {
         reasons.add('reported a reproduction without an expected failure');
         return AttemptAssessment(r, AttemptStatus.invalid, reasons);
       }
-      return AttemptAssessment(r, AttemptStatus.reproduced, const []);
+      // crash-capsules §4: the same crash in another in-app frame still
+      // reproduces, and says so.
+      return AttemptAssessment(r, AttemptStatus.reproduced, const [], [
+        if (r.divergences.any((d) => d.type == 'failure.different_frame'))
+          'failure.different_frame',
+      ]);
     case ReplayOutcome.incompatible:
       reasons.add(
         'incompatible: ${r.message ?? 'capsule cannot run against this build'}',
@@ -149,6 +155,13 @@ AttemptAssessment assessAttempt(ReplayReport r) {
       }
       for (final f in r.otherFailures) {
         reasons.add('unexpected failure: ${f.signature}');
+      }
+      // crash-capsules §4: the app died of another crash than the one
+      // recorded, or a crash replaced the recorded failure.
+      if (r.otherFailures.any((f) => f.kind == FailureKind.crash) ||
+          (r.otherFailures.isNotEmpty &&
+              (r.expectedSignature?.startsWith('crash:') ?? false))) {
+        codes.add('failure.different');
       }
       final material = <String>{
         for (final d in r.divergences)

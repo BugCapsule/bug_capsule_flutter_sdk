@@ -6,6 +6,7 @@ library;
 export 'capsule.dart';
 export 'capsule_validator.dart';
 export 'codec.dart';
+export 'crash_journal.dart';
 export 'event.dart';
 export 'failure.dart';
 export 'flight_recorder.dart';

@@ -610,6 +610,30 @@ final verdictCases = <Map<String, Object?>>[
     ],
   },
   {
+    'name': 'crash capsule: the same crash in another in-app frame reproduces',
+    'kind': 'replay',
+    'requested': 1,
+    'reports': [
+      {
+        'outcome': 'reproduced',
+        'expectedSignature': 'crash:SIGSEGV',
+        'divergences': ['failure.different_frame'],
+      },
+    ],
+  },
+  {
+    'name': 'crash capsule: another crash type is inconclusive',
+    'kind': 'verify',
+    'requested': 1,
+    'reports': [
+      {
+        'outcome': 'not_reproduced',
+        'expectedSignature': 'crash:SIGSEGV',
+        'otherFailures': ['crash:SIGABRT'],
+      },
+    ],
+  },
+  {
     'name': 'redacted text replay is material',
     'kind': 'verify',
     'requested': 1,

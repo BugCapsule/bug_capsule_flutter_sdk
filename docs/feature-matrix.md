@@ -93,6 +93,9 @@ The native and web columns are tracked in their own repositories.
 | Timeouts, Ctrl-C cleanup | T | T | T | T |
 | Backend upload, runs, triage, sharing | T | T | T | T (CORS) |
 | Backend runtime index / filter | T | T | T | T |
+| App death during an attempt → crash verdict (`failure.different`, `failure.different_frame`) | I (process exit, simulator crash report) | T (`am instrument`, exit-info, crash log; fake adb) | I (XCTest output, simulator crash report) | — (runner `crash` field only) |
+| Release of the build under test on runs | T (pubspec + app id) | T (installed APK; fake adb) | I (built app `Info.plist`) | I (`package.json`) |
+| `gate` (plan, one build, verify runs with release, report, JUnit / JSON, `--fail-on`) | I | T (fake backend and launcher) | I | I |
 
 ## Recorded end-to-end results (this session)
 

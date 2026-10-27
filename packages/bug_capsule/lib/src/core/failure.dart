@@ -1,4 +1,32 @@
-enum FailureKind { exception, assertion, manual }
+/// `crash` (capsule format v2 only): the process died — a native signal or
+/// Mach exception, an ANR, a low-memory kill. Built on the next launch from
+/// the crash journal (see `CrashJournal`).
+enum FailureKind { exception, assertion, manual, crash }
+
+/// `failure.crash` of a crash capsule.
+class CrashInfo {
+  const CrashInfo({required this.mechanism, this.signal, this.inAppFrame});
+
+  factory CrashInfo.fromJson(Map<String, Object?> json) => CrashInfo(
+    mechanism: json['mechanism'] as String? ?? 'signal',
+    signal: json['signal'] as int?,
+    inAppFrame: json['inAppFrame'] as String?,
+  );
+
+  /// `signal`, `mach_exception`, `anr`, `oom`, `metrickit`.
+  final String mechanism;
+  final int? signal;
+
+  /// Function of the in-app frame closest to the crash, when the frames were
+  /// symbolicated on device. Replay compares it when it can see the frames.
+  final String? inAppFrame;
+
+  Map<String, Object?> toJson() => {
+    'mechanism': mechanism,
+    'signal': ?signal,
+    'inAppFrame': ?inAppFrame,
+  };
+}
 
 /// A machine-checkable failure: the assertion replay and verify compare
 /// against.
@@ -11,6 +39,7 @@ class FailureRecord {
     required this.t,
     this.stack,
     this.assertionId,
+    this.crash,
   });
 
   /// [scrub] removes credentials from the message and stack before anything
@@ -34,6 +63,26 @@ class FailureRecord {
       t: t,
     );
   }
+
+  /// The process died ([FailureKind.crash]). [type] is the signal name
+  /// (`SIGSEGV`), the Mach exception (`EXC_BAD_ACCESS`),
+  /// `ApplicationNotResponding` or `OutOfMemory`; line numbers and addresses
+  /// never enter the signature, replay runs another build.
+  factory FailureRecord.crash({
+    required String type,
+    required String message,
+    required int t,
+    required CrashInfo crash,
+    String? stack,
+  }) => FailureRecord(
+    kind: FailureKind.crash,
+    signature: 'crash:$type',
+    type: _truncate(type, 1000),
+    message: _truncate(message, 2000),
+    stack: stack == null ? null : _truncate(stack, 8000),
+    crash: crash,
+    t: t,
+  );
 
   /// A failure raised by the app through a registered assertion
   /// (`BugCapsule.fail('checkout_stuck', ...)`). The id, not the message, is the
@@ -68,6 +117,9 @@ class FailureRecord {
     message: json['message'] as String? ?? '',
     stack: json['stack'] as String?,
     assertionId: json['assertionId'] as String?,
+    crash: json['crash'] is Map
+        ? CrashInfo.fromJson((json['crash'] as Map).cast<String, Object?>())
+        : null,
     t: json['t'] as int? ?? 0,
   );
 
@@ -77,6 +129,9 @@ class FailureRecord {
   final String message;
   final String? stack;
   final String? assertionId;
+
+  /// Set for [FailureKind.crash] only.
+  final CrashInfo? crash;
   final int t;
 
   FailureRecord shift(int offsetMs) => FailureRecord(
@@ -86,6 +141,7 @@ class FailureRecord {
     message: message,
     stack: stack,
     assertionId: assertionId,
+    crash: crash,
     t: t - offsetMs,
   );
 
@@ -96,6 +152,7 @@ class FailureRecord {
     'message': message,
     'stack': stack,
     'assertionId': assertionId,
+    if (crash != null) 'crash': crash!.toJson(),
     't': t,
   };
 
