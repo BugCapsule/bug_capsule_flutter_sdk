@@ -14,7 +14,7 @@ own app; the differences are listed at the end.
 ## 2. CLI
 
 ```bash
-dart pub global activate bug_capsule 0.4.1-beta.6
+dart pub global activate bug_capsule 0.4.1-beta.7
 bugcapsule login   # opens your browser: check the code, pick the project, approve
 ```
 

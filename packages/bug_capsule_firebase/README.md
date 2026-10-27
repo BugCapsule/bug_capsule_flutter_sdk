@@ -15,7 +15,7 @@ resolution are not simulated.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.6
+  bug_capsule: ^0.4.1-beta.7
   bug_capsule_firebase: ^0.1.0-dev.1
 ```
 
