@@ -67,6 +67,9 @@ class MonitoringOptions {
     this.sendDefaultPii = false,
     this.crashOnUnhandled = true,
     this.captureIsolateErrors = true,
+    this.enableNativeCrashHandling = true,
+    this.enableAppHangTracking = true,
+    this.appHangTimeout,
     this.enableAppStartTracking = true,
     this.enableFramesTracking = true,
     this.enableUserInteractionTracing = false,
@@ -135,6 +138,19 @@ class MonitoringOptions {
   /// Listens for uncaught errors of the main isolate (and of isolates passed
   /// to `BugCapsule.addIsolateErrorListener`).
   final bool captureIsolateErrors;
+
+  /// Native crashes (signals, NDK and Mach crashes, OS exit records) of the
+  /// app and its plugins, reported on the next launch. Needs the
+  /// `bug_capsule_native` package; without it this does nothing.
+  final bool enableNativeCrashHandling;
+
+  /// Main-thread hangs (ANRs on Android, app hangs on iOS) with
+  /// `bug_capsule_native`.
+  final bool enableAppHangTracking;
+
+  /// How long the main thread must be blocked to count as a hang. Null: 5 s
+  /// on Android, 2 s on iOS.
+  final Duration? appHangTimeout;
 
   /// An `app.start.cold` transaction from `BugCapsule.init` to the first
   /// rasterized frame.

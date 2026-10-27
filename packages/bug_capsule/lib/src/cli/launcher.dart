@@ -4,6 +4,7 @@ import 'dart:io';
 
 import '../core/core.dart';
 
+import 'crash_detection.dart';
 import 'launchers/android.dart';
 import 'launchers/ios.dart';
 import 'launchers/web.dart';
@@ -159,6 +160,98 @@ class LaunchOptions {
   ];
 }
 
+/// The build under test (verification.md §1): `<appId>@<version>+<build>`,
+/// the form SDKs send in events, so a run says which release stopped (or
+/// kept) reproducing.
+class AppRelease {
+  const AppRelease({required this.version, this.appId, this.build});
+
+  final String? appId;
+  final String version;
+  final String? build;
+
+  @override
+  String toString() {
+    final v = build == null || build!.isEmpty ? version : '$version+$build';
+    final r = appId == null ? v : '$appId@$v';
+    return r.length > 200 ? r.substring(0, 200) : r;
+  }
+
+  static final _pubspecVersion = RegExp(
+    r'''^version:\s*['"]?([^\s'"#]+)''',
+    multiLine: true,
+  );
+
+  /// The Flutter app's pubspec `version` (`1.5.0+60`), with [appId].
+  static AppRelease? fromPubspec(String projectDir, {String? appId}) {
+    final file = File('$projectDir/pubspec.yaml');
+    if (!file.existsSync()) return null;
+    final m = _pubspecVersion.firstMatch(file.readAsStringSync());
+    if (m == null) return null;
+    final parts = m[1]!.split('+');
+    return AppRelease(
+      appId: appId,
+      version: parts.first,
+      build: parts.length > 1 ? parts.sublist(1).join('+') : null,
+    );
+  }
+
+  static final _gradleAppId = RegExp(
+    r'''applicationId\s*=?\s*["']([^"']+)["']''',
+  );
+  static final _bundleId = RegExp(
+    r'PRODUCT_BUNDLE_IDENTIFIER\s*=\s*"?([^";\s]+)"?;',
+  );
+
+  /// The Flutter app's Android application id or iOS bundle id, from its
+  /// `android/` or `ios/` project; null when not found.
+  static String? flutterAppId(String projectDir, {required bool android}) {
+    try {
+      if (android) {
+        for (final name in ['build.gradle.kts', 'build.gradle']) {
+          final f = File('$projectDir/android/app/$name');
+          if (!f.existsSync()) continue;
+          final m = _gradleAppId.firstMatch(f.readAsStringSync());
+          if (m != null) return m[1];
+        }
+        return null;
+      }
+      final f = File('$projectDir/ios/Runner.xcodeproj/project.pbxproj');
+      if (!f.existsSync()) return null;
+      return _bundleId
+          .allMatches(f.readAsStringSync())
+          .map((m) => m[1]!)
+          .where((id) => !id.endsWith('Tests') && !id.contains(r'$'))
+          .firstOrNull;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// `CFBundleShortVersionString`, `CFBundleVersion` and the bundle id of
+  /// a built `.app`.
+  static Future<AppRelease?> fromIosApp(String appPath) async {
+    Future<String?> read(String key) async {
+      final res = await Process.run('plutil', [
+        '-extract',
+        key,
+        'raw',
+        '$appPath/Info.plist',
+      ]);
+      final v = '${res.stdout}'.trim();
+      return res.exitCode == 0 && v.isNotEmpty ? v : null;
+    }
+
+    final version = await read('CFBundleShortVersionString');
+    if (version == null) return null;
+    return AppRelease(
+      appId: await read('CFBundleIdentifier'),
+      version: version,
+      build: await read('CFBundleVersion'),
+    );
+  }
+}
+
 /// Starts the app in replay mode once per attempt.
 ///
 /// Every attempt arms the [ReplayServer] ([ReplayServer.arm]), hands the
@@ -180,6 +273,9 @@ abstract class AppLauncher {
 
   /// Human-readable target (device, simulator, browser) once prepared.
   String get target => options.device?.toString() ?? options.runtime;
+
+  /// The build under test, once prepared; null when it cannot be read.
+  AppRelease? get release;
 
   /// Builds and installs once.
   Future<void> prepare(ReplayServer server);
@@ -254,6 +350,9 @@ class IosSimulatorLauncher implements AppLauncher {
   final LaunchOptions options;
   late String _bundleId;
 
+  @override
+  AppRelease? release;
+
   String get _udid => options.device!.id;
 
   @override
@@ -297,6 +396,7 @@ class IosSimulatorLauncher implements AppLauncher {
       '${app.path}/Info.plist',
     ]);
     _bundleId = '${plist.stdout}'.trim();
+    release = AppRelease.fromPubspec(options.projectDir, appId: _bundleId);
     await _run(
       'xcrun',
       ['simctl', 'install', _udid, app.path],
@@ -313,9 +413,11 @@ class IosSimulatorLauncher implements AppLauncher {
     Duration timeout,
   ) async {
     final armed = server.arm(capsule, settings);
+    var finished = false;
     try {
       await Process.run('xcrun', ['simctl', 'terminate', _udid, _bundleId]);
       await _writeReplayRequest(armed.url);
+      final started = DateTime.now();
       final launch = await Process.run('xcrun', [
         'simctl',
         'launch',
@@ -325,7 +427,18 @@ class IosSimulatorLauncher implements AppLauncher {
       if (launch.exitCode != 0) {
         throw StateError('simctl launch failed: ${launch.stderr}');
       }
-      return await armed.report.timeout(
+      // `<bundle id>: <pid>`; simulator apps are host processes.
+      final pid = int.tryParse(
+        RegExp(r':\s*(\d+)\s*$').firstMatch('${launch.stdout}'.trim())?[1] ??
+            '',
+      );
+      final died = pid == null
+          ? Completer<ReplayReport>().future
+          : _whenDead(
+              pid,
+              () => finished,
+            ).then((_) => _deathReport(armed, started));
+      return await Future.any([armed.report, died]).timeout(
         timeout,
         onTimeout: () => _timeoutReport(
           armed.settings,
@@ -333,9 +446,37 @@ class IosSimulatorLauncher implements AppLauncher {
         ),
       );
     } finally {
+      finished = true;
       armed.close();
       await Process.run('xcrun', ['simctl', 'terminate', _udid, _bundleId]);
     }
+  }
+
+  /// Completes when process [pid] is gone (polled), or never once [stop].
+  static Future<void> _whenDead(int pid, bool Function() stop) async {
+    while (!stop()) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (stop()) break;
+      final alive = await Process.run('kill', ['-0', '$pid']);
+      if (alive.exitCode != 0) return;
+    }
+    await Completer<void>().future;
+  }
+
+  /// The app died before reporting: the crash report says how (it lands a
+  /// moment after the death).
+  Future<ReplayReport> _deathReport(ArmedAttempt armed, DateTime since) async {
+    // A report sent just before the exit wins.
+    await Future<void>.delayed(const Duration(seconds: 1));
+    ObservedCrash? crash;
+    for (var i = 0; i < 10 && crash == null; i++) {
+      crash = CrashDetection.findIosCrashReport(_bundleId, since: since);
+      if (crash == null) await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    return errorReport(
+      armed.settings,
+      'the app exited before reporting',
+    ).copyWith(crash: crash ?? const ObservedCrash(source: 'process_exit'));
   }
 
   /// Drops `replay_request.json` into the app's data container; the SDK
@@ -370,6 +511,15 @@ class FlutterRunLauncher implements AppLauncher {
 
   @override
   final LaunchOptions options;
+
+  @override
+  AppRelease? get release => AppRelease.fromPubspec(
+    options.projectDir,
+    appId: AppRelease.flutterAppId(
+      options.projectDir,
+      android: options.device?.isAndroid ?? true,
+    ),
+  );
 
   @override
   String get target => options.device.toString();
@@ -445,12 +595,16 @@ class FlutterRunLauncher implements AppLauncher {
           .transform(const LineSplitter())
           .listen(onLine),
     ];
-    final exited = process.exitCode.then(
-      (code) => _timeoutReport(
+    final exited = process.exitCode.then((code) async {
+      // A report sent just before the exit wins.
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      final report = _timeoutReport(
         settings,
         'flutter run exited ($code) before reporting:\n${_tail(log.toString())}',
-      ),
-    );
+      );
+      final crash = CrashDetection.fromFlutterRun(log.toString());
+      return crash == null ? report : report.copyWith(crash: crash);
+    });
     try {
       // Build time counts against the timeout here.
       return await Future.any([result, exited]).timeout(

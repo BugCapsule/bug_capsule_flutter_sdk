@@ -49,6 +49,24 @@ class WebLauncher implements AppLauncher {
   @override
   String get target => '$_browser (Playwright) → $_appUrl';
 
+  /// `package.json` `version` (and `web.appId`, else the package name).
+  @override
+  AppRelease? get release {
+    try {
+      final file = File('${options.projectDir}/package.json');
+      if (!file.existsSync()) return null;
+      final json = jsonDecode(file.readAsStringSync()) as Map;
+      final version = json['version'];
+      if (version is! String) return null;
+      return AppRelease(
+        appId: _s('appId') ?? json['name'] as String?,
+        version: version,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Map<String, String> get _env => {
     ...Platform.environment,
     for (final e in ((_web['env'] as Map?) ?? const {}).entries)

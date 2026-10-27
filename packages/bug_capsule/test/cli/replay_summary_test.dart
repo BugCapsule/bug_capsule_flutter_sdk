@@ -41,6 +41,8 @@ class ScriptedLauncher implements AppLauncher {
   @override
   String get target => 'scripted';
   @override
+  AppRelease? get release => null;
+  @override
   Future<void> prepare(ReplayServer server) async {}
   @override
   Future<ReplayReport> attempt(

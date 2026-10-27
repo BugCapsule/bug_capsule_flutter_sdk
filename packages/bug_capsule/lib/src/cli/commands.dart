@@ -10,6 +10,8 @@ import '../core/core.dart';
 import 'backend_client.dart';
 import 'browser_login.dart';
 import 'capsule_source.dart';
+import 'gate.dart';
+import 'git.dart';
 import 'inspect.dart';
 import 'launcher.dart';
 import 'processes.dart';
@@ -32,6 +34,7 @@ CommandRunner<int> buildRunner() =>
       ..addCommand(ReplayCommand(ReplayKind.replay))
       ..addCommand(ReplayCommand(ReplayKind.verify))
       ..addCommand(RegressCommand())
+      ..addCommand(GateCommand())
       ..addCommand(LoginCommand())
       ..addCommand(LogoutCommand())
       ..addCommand(ListCommand())
@@ -123,7 +126,7 @@ class InspectCommand extends Command<int> {
 
 // ------------------------------------------------------------- run / verify
 
-void _addLaunchOptions(ArgParser p) {
+void _addLaunchOptions(ArgParser p, {bool release = true}) {
   p
     ..addOption(
       'runtime',
@@ -205,6 +208,19 @@ void _addLaunchOptions(ArgParser p) {
       negatable: false,
       help: 'Show build and device output.',
     );
+  if (release) {
+    p
+      ..addOption(
+        'release',
+        help:
+            'Release of the build under test, <appId>@<version>+<build> '
+            '(default: read from the build).',
+      )
+      ..addOption(
+        'environment',
+        help: 'Environment the run is recorded for (e.g. staging).',
+      );
+  }
 }
 
 Map<String, String> _artifacts(ArgResults args) => {
@@ -326,7 +342,7 @@ class ReplayCommand extends Command<int> {
         runtime: runtime,
       );
       printSummary(summary, loaded.capsule);
-      await _report(loaded, summary, runtime);
+      await _report(loaded, summary, runtime, null);
       return exitCodeFor(summary);
     }
 
@@ -386,7 +402,7 @@ class ReplayCommand extends Command<int> {
         attemptTimeout: _attemptTimeout(args, config),
       );
       printSummary(summary, loaded.capsule);
-      await _report(loaded, summary, launcher.target);
+      await _report(loaded, summary, launcher.target, launcher.release);
       return exitCodeFor(summary);
     } finally {
       await interrupt.cancel();
@@ -400,15 +416,421 @@ class ReplayCommand extends Command<int> {
     LoadedCapsule loaded,
     ReplaySummary s,
     String device,
+    AppRelease? built,
   ) async {
     final id = loaded.serverId;
     final creds = Credentials.load();
     if (id == null || creds?.projectCredential == null) return;
+    final release = argResults!['release'] as String? ?? built?.toString();
     try {
-      await BackendClient(creds!).createRun(id, s.runPayload(device: device));
-      stdout.writeln(dim('Recorded on backend capsule $id (${s.wireOutcome})'));
+      await BackendClient(creds!).createRun(
+        id,
+        s.runPayload(
+          device: device,
+          release: release,
+          environment: argResults!['environment'] as String?,
+        ),
+      );
+      stdout.writeln(
+        dim(
+          'Recorded on backend capsule $id (${s.wireOutcome}'
+          '${release == null ? '' : ', $release'})',
+        ),
+      );
     } catch (e) {
       stdout.writeln(yellow('! could not record result on backend: $e'));
+    }
+  }
+}
+
+// --------------------------------------------------------------------- gate
+
+/// Builds the launcher for a gate (tests replace it).
+typedef LauncherFactory = AppLauncher Function(LaunchOptions options);
+
+/// `bugcapsule gate` (verification.md §3.3): verifies every capsule a
+/// release must not reproduce against one build, records the runs with the
+/// release, posts the gate report and fails CI by `--fail-on`.
+class GateCommand extends Command<int> {
+  GateCommand({LauncherFactory? launcherFactory})
+    : _launcher = launcherFactory {
+    _addLaunchOptions(argParser, release: false);
+    argParser
+      ..addOption(
+        'release',
+        help:
+            'The release this build is, <appId>@<version>+<build> (required).',
+      )
+      ..addOption(
+        'platform',
+        allowed: ProjectConfig.runtimes,
+        help: 'Which capsules to verify, by runtime (required).',
+      )
+      ..addOption(
+        'scope',
+        allowed: ['all', 'fixes', 'regressions'],
+        defaultsTo: 'all',
+        help:
+            'fixes: capsules of issues resolved in this release or earlier; '
+            'regressions: capsules already fixed that must stay fixed.',
+      )
+      ..addOption('issue', help: 'Only the capsules of this issue id.')
+      ..addOption('attempts', defaultsTo: '3', help: 'Attempts per capsule.')
+      ..addOption(
+        'fail-on',
+        defaultsTo: GateOutcomes.defaultFailOn.join(','),
+        help:
+            'Outcomes that fail the gate: reproduced, flaky, error '
+            '(error: a capsule could not run).',
+      )
+      ..addOption('junit', help: 'Write JUnit XML to this file.')
+      ..addFlag(
+        'json',
+        negatable: false,
+        help: 'Print the result as JSON on stdout (progress goes to stderr).',
+      )
+      ..addOption(
+        'environment',
+        help: 'Environment the runs are recorded for (e.g. staging).',
+      )
+      ..addOption(
+        'token',
+        help: 'Service token (bcv_…); default: \$BUGCAPSULE_TOKEN or login.',
+      )
+      ..addOption(
+        'url',
+        help: 'Backend URL; default: \$BUGCAPSULE_URL or login.',
+      );
+  }
+
+  final LauncherFactory? _launcher;
+
+  @override
+  String get name => 'gate';
+  @override
+  String get description =>
+      'Release gate for CI: verify that a build does not reproduce the bugs '
+      'fixed in its release (or earlier), and report it.';
+  @override
+  String get invocation =>
+      'bugcapsule gate --release <appId>@<version>+<build> --platform <runtime> [options]';
+
+  @override
+  Future<int> run() async {
+    final args = argResults!;
+    final release = args['release'] as String?;
+    final platform = args['platform'] as String?;
+    if (release == null || release.isEmpty || release.length > 200) {
+      throw UsageException(
+        '--release is required (at most 200 characters)',
+        usage,
+      );
+    }
+    if (platform == null) throw UsageException('--platform is required', usage);
+    final attempts = int.tryParse(args['attempts'] as String) ?? 0;
+    if (attempts < 1 || attempts > 100) {
+      throw UsageException('--attempts must be 1-100', usage);
+    }
+    final failOn = {
+      for (final v in (args['fail-on'] as String).split(','))
+        if (v.trim().isNotEmpty) v.trim(),
+    };
+    final unknown = failOn.difference(GateOutcomes.failOnValues.toSet());
+    if (unknown.isNotEmpty) {
+      throw UsageException(
+        '--fail-on takes ${GateOutcomes.failOnValues.join(', ')} (got ${unknown.join(', ')})',
+        usage,
+      );
+    }
+    final json = args['json'] as bool;
+    final realStdout = stdout;
+    // With --json, stdout carries only the JSON document.
+    final (code, document) = await IOOverrides.runZoned(
+      () => _gate(args, release, platform, attempts, failOn),
+      stdout: json ? () => stderr : null,
+    );
+    if (json) realStdout.writeln(document);
+    return code;
+  }
+
+  Credentials _credentials(ArgResults args) {
+    final saved = Credentials.load();
+    final url = args['url'] as String? ?? saved?.url;
+    if (url == null) {
+      throw StateError(
+        'no backend: pass --url or set BUGCAPSULE_URL (and BUGCAPSULE_TOKEN)',
+      );
+    }
+    final token = args['token'] as String?;
+    return Credentials(
+      url: url,
+      token: token ?? saved?.token,
+      secretKey: token == null ? saved?.secretKey : null,
+      ingestKey: saved?.ingestKey,
+    );
+  }
+
+  Future<(int, String)> _gate(
+    ArgResults args,
+    String release,
+    String platform,
+    int attempts,
+    Set<String> failOn,
+  ) async {
+    final scope = args['scope'] as String;
+    final client = BackendClient(_credentials(args));
+    final startedAt = DateTime.now();
+    final plan = await client.verificationPlan(
+      release: release,
+      platform: platform,
+      scope: scope,
+      issue: args['issue'] as String?,
+    );
+    final items = [
+      for (final i in (plan['items'] as List?) ?? const [])
+        GateItem.fromJson((i as Map).cast<String, Object?>()),
+    ];
+    // The backend sends at most 10 capsules per issue and 200 in all.
+    final truncated = plan['truncated'] == true;
+    stdout.writeln(
+      '${bold('Gate')} $release  ${dim('$platform, scope $scope, ${items.length} capsule${items.length == 1 ? '' : 's'}')}',
+    );
+    if (truncated) {
+      stderr.writeln(
+        yellow(
+          '! the plan left some capsules out (at most 10 per issue and 200 '
+          'in all); narrow it with --scope or --issue to check the rest',
+        ),
+      );
+    }
+
+    final project = args['project'] as String;
+    final git = await gitInfo(project);
+    final gitSha = git?.head;
+    final results = <GateResult>[];
+    final errors = <String>[];
+    if (items.isEmpty) {
+      stdout.writeln(
+        green('✓ nothing to verify for $release ($platform): the gate passes'),
+      );
+    } else {
+      await _verifyAll(
+        args,
+        client,
+        items,
+        results,
+        errors,
+        release: release,
+        attempts: attempts,
+        git: git,
+      );
+    }
+    final finishedAt = DateTime.now();
+    var code = gateExitCode(results, failOn);
+    final passed = code == 0;
+    String? reportId;
+    try {
+      final report = await client.createGateReport(
+        gateReport(
+          release: release,
+          platform: platform,
+          gitSha: gitSha,
+          results: results,
+          passed: passed,
+          startedAt: startedAt,
+          finishedAt: finishedAt,
+        ),
+      );
+      reportId = report['id'] as String?;
+    } on Object catch (e) {
+      errors.add('could not post the gate report: $e');
+    }
+
+    if (results.isNotEmpty) {
+      stdout
+        ..writeln('')
+        ..writeln(gateTable(results, failOn).join('\n'));
+    }
+    final junit = args['junit'] as String?;
+    if (junit != null) {
+      File(junit)
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync(
+          gateJunit(
+            release: release,
+            platform: platform,
+            gitSha: gitSha,
+            results: results,
+            failOn: failOn,
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            truncated: truncated,
+          ),
+        );
+      stdout.writeln(dim('JUnit: $junit'));
+    }
+    for (final e in errors) {
+      stderr.writeln(red('backend: $e'));
+    }
+    // A gate that could not record its result fails (backend errors exit 1).
+    if (errors.isNotEmpty) code = 1;
+    stdout.writeln(
+      '${bold('Result:')} ${code == 0 ? green('PASSED') : red('FAILED')}'
+      '${reportId == null ? '' : dim('  report $reportId')}',
+    );
+    return (
+      code,
+      gateJson(
+        release: release,
+        platform: platform,
+        scope: scope,
+        gitSha: gitSha,
+        results: results,
+        passed: passed,
+        exitCode: code,
+        reportId: reportId,
+        truncated: truncated,
+        errors: errors,
+      ),
+    );
+  }
+
+  /// Builds once, then verifies each item and records its run.
+  Future<void> _verifyAll(
+    ArgResults args,
+    BackendClient client,
+    List<GateItem> items,
+    List<GateResult> results,
+    List<String> errors, {
+    required String release,
+    required int attempts,
+    required GitInfo? git,
+  }) async {
+    final project = args['project'] as String;
+    final (config, runtime) = _runtimeFor(args, project);
+    final artifacts = _artifacts(args);
+    final buildSha = artifacts.isEmpty ? git?.head : null;
+    final dirty = artifacts.isEmpty && (git?.dirty ?? false);
+    final device = runtime == 'flutter' && _launcher == null
+        ? await pickDevice(args['device'] as String?)
+        : null;
+    final options = LaunchOptions(
+      runtime: runtime,
+      config: config,
+      projectDir: project,
+      target: args['target'] as String,
+      device: device,
+      deviceQuery: args['device'] as String?,
+      dartDefines: _defines(args, buildSha, dirty),
+      flavor: args['flavor'] as String?,
+      verbose: args['verbose'] as bool,
+      buildSha: buildSha,
+      dirty: dirty,
+      artifacts: artifacts,
+    );
+    final launcher = (_launcher ?? AppLauncher.forOptions)(options);
+    final server = await ReplayServer.start(lan: args['lan'] as bool);
+    final interrupt = _onInterrupt(() async {
+      await launcher.dispose();
+      await server.close();
+    });
+    try {
+      try {
+        await launcher.prepare(server);
+      } catch (e) {
+        final why = 'build failed: ${e is StateError ? e.message : e}';
+        stderr.writeln(red(why));
+        results.addAll([
+          for (final item in items)
+            GateResult(item, GateOutcomes.error, error: why),
+        ]);
+        return;
+      }
+      stdout.writeln('${bold('Target')} ${launcher.target}');
+      final built = launcher.release?.toString();
+      if (built != null && built != release) {
+        stdout.writeln(
+          yellow('! the build says $built; runs are recorded for $release'),
+        );
+      }
+      for (final item in items) {
+        stdout.writeln(
+          '\n${bold(item.reason == 'fix' ? 'Fix' : 'Regression')} '
+          '${shortId(item.capsuleId)}  ${item.issueTitle ?? item.issueId ?? ''}',
+        );
+        final started = DateTime.now();
+        final LoadedCapsule loaded;
+        try {
+          final bytes = await client.downloadCapsule(item.capsuleId);
+          loaded = LoadedCapsule(
+            bytes,
+            CapsuleCodec.decode(bytes),
+            serverId: item.capsuleId,
+            origin: 'backend',
+          );
+        } on ApiException catch (e) {
+          errors.add('could not download capsule ${item.capsuleId}: $e');
+          results.add(GateResult(item, GateOutcomes.error, error: '$e'));
+          continue;
+        } on CapsuleFormatException catch (e) {
+          results.add(GateResult(item, 'incompatible', error: e.message));
+          continue;
+        }
+        final mismatch = runtimeMismatch(loaded.capsule, runtime);
+        final ReplaySummary summary;
+        if (mismatch != null) {
+          summary = incompatibleSummary(
+            ReplayKind.verify,
+            attempts,
+            mismatch,
+            runtime: runtime,
+          );
+        } else {
+          summary = await replayCapsule(
+            loaded: loaded,
+            launcher: launcher,
+            server: server,
+            kind: ReplayKind.verify,
+            attempts: attempts,
+            strategy: ReplayStrategy.values.byName(args['strategy'] as String),
+            settleTimeoutMs: (double.parse(args['settle'] as String) * 1000)
+                .round(),
+            strictNetwork: !(args['lenient-network'] as bool),
+            idleCompression: args['compress-idle'] as bool,
+            buildSha: buildSha,
+            runtime: runtime,
+            attemptTimeout: _attemptTimeout(args, config),
+          );
+        }
+        String? runId;
+        try {
+          final run = await client.createRun(
+            item.capsuleId,
+            summary.runPayload(
+              device: launcher.target,
+              release: release,
+              environment: args['environment'] as String?,
+            ),
+          );
+          runId = run['id'] as String?;
+        } on Object catch (e) {
+          errors.add('could not record the run of ${item.capsuleId}: $e');
+        }
+        results.add(
+          GateResult(
+            item,
+            summary.wireOutcome,
+            runId: runId,
+            summary: summary,
+            durationMs: DateTime.now().difference(started).inMilliseconds,
+          ),
+        );
+      }
+    } finally {
+      await interrupt.cancel();
+      await launcher.dispose();
+      await server.close();
+      await Processes.stopAll();
     }
   }
 }

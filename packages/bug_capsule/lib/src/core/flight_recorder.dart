@@ -23,6 +23,17 @@ class RecordedWindow {
   final bool hasGap;
 }
 
+/// Told about what a [FlightRecorder] keeps, so a crash journal can mirror
+/// it on disk. Called synchronously from the recording path: implementations
+/// only hand the data on.
+abstract interface class FlightRecorderListener {
+  void onEvent(BugCapsuleEvent event);
+  void onCheckpoint(Checkpoint checkpoint);
+
+  /// Retained events or checkpoints were rewritten ([FlightRecorder.rewrite]).
+  void onRewrite(FlightRecorder recorder);
+}
+
 /// Bounded event buffer with checkpoints.
 ///
 /// While nothing has been evicted, the window is the launch checkpoint plus
@@ -52,7 +63,13 @@ class FlightRecorder {
   /// Events removed by [rewrite] over the session.
   int rewriteDropped = 0;
 
+  /// Mirrors what the recorder keeps (the crash journal).
+  FlightRecorderListener? listener;
+
   int get lastSeq => _seq;
+  Checkpoint get launch => _launch;
+  List<Checkpoint> get periodicCheckpoints => List.unmodifiable(_periodic);
+  Iterable<BugCapsuleEvent> get events => _events;
   int get eventCount => _events.length;
   int get droppedEvents => _dropped;
   bool get launchCoversWindow => _dropped == 0;
@@ -65,6 +82,7 @@ class FlightRecorder {
     final event = BugCapsuleEvent(seq: ++_seq, t: t, type: type, data: data);
     _events.addLast(event);
     _evict(t);
+    listener?.onEvent(event);
     return event;
   }
 
@@ -72,6 +90,7 @@ class FlightRecorder {
     assert(checkpoint.kind == CheckpointKind.periodic);
     _periodic.add(checkpoint);
     _prune();
+    listener?.onCheckpoint(checkpoint);
   }
 
   /// Rewrites every retained event and checkpoint in place, e.g. to apply
@@ -102,6 +121,7 @@ class FlightRecorder {
         _periodic[i] = checkpoint(_periodic[i]);
       }
     }
+    listener?.onRewrite(this);
   }
 
   /// Builds a checkpoint stamped with the current sequence number.

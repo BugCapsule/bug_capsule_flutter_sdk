@@ -9,7 +9,9 @@ import '../../core/core.dart';
 ///   ends it `crashed`, and the next foreground starts a new one;
 /// * every update is persisted, so a session still `ok` at the next launch
 ///   is reported `abnormal` if the app was in the foreground (killed: OOM,
-///   watchdog, force quit) or `exited` if it was in the background.
+///   watchdog, force quit), `crashed` if a native crash ended it, or
+///   `exited` if it was in the background; always with the release and
+///   environment it ran with (the app may have been updated since).
 class SessionTracker {
   SessionTracker({
     required this.release,
@@ -39,12 +41,21 @@ class SessionTracker {
   String? get sessionId => _current?.sid;
 
   /// The update for a session left open by the previous process, or null.
-  Map<String, Object?>? recover(Map<String, Object?>? state) {
+  /// [crashed]: the previous process ended in a native crash.
+  Map<String, Object?>? recover(
+    Map<String, Object?>? state, {
+    bool crashed = false,
+  }) {
     if (state == null || state['status'] != 'ok') return null;
     try {
       final s = _Session.fromJson(state);
       final foreground = state['foreground'] != false;
       final backgroundAt = DateTime.tryParse('${state['backgroundAt']}');
+      if (crashed) {
+        s.status = 'crashed';
+        s.errors++;
+        return s.payload(this, at: s.lastUpdate);
+      }
       s.status = foreground ? 'abnormal' : 'exited';
       return s.payload(
         this,
@@ -57,7 +68,9 @@ class SessionTracker {
 
   void start() {
     if (_current != null) end();
-    final s = _current = _Session(uuidV4(), _now());
+    final s = _current = _Session(uuidV4(), _now())
+      ..release = release
+      ..environment = environment;
     _emit(s);
   }
 
@@ -125,6 +138,9 @@ class _Session {
         ..seq = j['seq'] as int? ?? 0
         ..errors = j['errors'] as int? ?? 0
         ..did = j['did'] as String?
+        // Files written before these were persisted: the current ones.
+        ..release = j['release'] as String?
+        ..environment = j['environment'] as String?
         ..lastUpdate =
             DateTime.tryParse('${j['lastUpdate']}') ??
             DateTime.parse(j['started'] as String);
@@ -132,6 +148,10 @@ class _Session {
   final String sid;
   final DateTime started;
   String? did;
+
+  /// The release / environment this session ran with (null: not known).
+  String? release;
+  String? environment;
   int seq = 0;
   int errors = 0;
   String status = 'ok';
@@ -155,8 +175,8 @@ class _Session {
       'status': status,
       'errors': errors,
       'duration': seconds < 0 ? 0 : seconds,
-      'release': ?t.release,
-      'environment': t.environment,
+      'release': ?(release ?? t.release),
+      'environment': environment ?? t.environment,
       'runtime': 'flutter',
     };
   }
@@ -165,6 +185,8 @@ class _Session {
     'sid': sid,
     'did': did,
     'seq': seq,
+    'release': ?release,
+    'environment': ?environment,
     'started': started.toUtc().toIso8601String(),
     'errors': errors,
     'status': status,

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import '../../core/core.dart';
 
+import '../crash_detection.dart';
 import '../launcher.dart';
 import '../processes.dart';
 import '../replay_server.dart';
@@ -69,6 +70,9 @@ class AndroidLauncher implements AppLauncher {
 
   @override
   String get target => _target;
+
+  @override
+  AppRelease? release;
 
   String? _string(String key) => options.projectConfig.string('android', key);
 
@@ -463,6 +467,7 @@ class AndroidLauncher implements AppLauncher {
       progress.fail();
       rethrow;
     }
+    release = await _installedRelease();
     final port = server.port;
     final reverse = await _adbRun([
       'reverse',
@@ -482,6 +487,46 @@ class AndroidLauncher implements AppLauncher {
         'tcp:$port',
       ]);
     });
+  }
+
+  static final _versionName = RegExp(r'versionName=(\S+)');
+  static final _versionCode = RegExp(r'versionCode=(\d+)');
+
+  /// `versionName` / `versionCode` of the installed app.
+  Future<AppRelease?> _installedRelease() async {
+    final out = await _shell(_serial, ['dumpsys', 'package', _appId]);
+    final name = _versionName.firstMatch(out)?[1];
+    if (name == null) return null;
+    return AppRelease(
+      appId: _appId,
+      version: name,
+      build: _versionCode.firstMatch(out)?[1],
+    );
+  }
+
+  Future<String> _exitInfo() =>
+      _shell(_serial, ['dumpsys', 'activity', 'exit-info', _appId]);
+
+  /// Why the app's process died during the attempt, if it did: the runner's
+  /// own crash status, else the exit record the attempt added (Android 11+)
+  /// refined by the crash log buffer.
+  Future<ObservedCrash?> _crashOf(String log, String exitBefore) async {
+    final reported = CrashDetection.fromInstrumentationStatus(log);
+    if (reported != null) return reported;
+    final crashLog =
+        '${(await _adbRun(['logcat', '-b', 'crash', '-d'], serial: _serial)).stdout}';
+    final crash = CrashDetection.fromExitInfo(
+      exitBefore,
+      await _exitInfo(),
+      log: crashLog,
+    );
+    if (crash != null) return crash;
+    return CrashDetection.instrumentationCrashed(log)
+        ? const ObservedCrash(
+            source: 'instrumentation',
+            message: 'am instrument: Process crashed',
+          )
+        : null;
   }
 
   // -------------------------------------------------------------- attempt
@@ -512,6 +557,9 @@ class AndroidLauncher implements AppLauncher {
           'pm clear $_appId failed: ${clear.stdout}${clear.stderr}',
         );
       }
+      // What the attempt adds to the crash buffer and exit records is its own.
+      await _adbRun(['logcat', '-b', 'crash', '-c'], serial: _serial);
+      final exitBefore = await _exitInfo();
       final p = process = await Processes.start(_adb, [
         '-s',
         _serial,
@@ -556,10 +604,12 @@ class AndroidLauncher implements AppLauncher {
           Future<void>.delayed(const Duration(seconds: 3)),
         ]);
         if (reported) return armed.report;
-        return errorReport(
+        final report = errorReport(
           armed.settings,
           'instrumentation ended (exit $code) without a BugCapsule result:\n${tail(log.toString(), 20)}',
         );
+        final crash = await _crashOf(log.toString(), exitBefore);
+        return crash == null ? report : report.copyWith(crash: crash);
       });
       return await Future.any([armed.report, exited]).timeout(
         timeout,
