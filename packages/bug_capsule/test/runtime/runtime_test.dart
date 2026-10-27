@@ -133,7 +133,7 @@ void main() {
     await BugCapsule.resetForTest();
     BugCapsule.debugOverrides = null;
     debugPrint = originalDebugPrint;
-    if (await dir.exists()) await dir.delete(recursive: true);
+    await _deleteDir(dir);
   });
 
   Future<bool> start({
@@ -571,3 +571,18 @@ void main() {
 }
 
 Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 50));
+
+/// A setup abandoned after its timeout keeps running in the background and
+/// can still write into [dir] (store, outbox, config cache) while it is
+/// deleted; retry instead of failing the test on that race.
+Future<void> _deleteDir(Directory dir) async {
+  for (var attempt = 0; ; attempt++) {
+    try {
+      if (await dir.exists()) await dir.delete(recursive: true);
+      return;
+    } on FileSystemException {
+      if (attempt >= 10) rethrow;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+  }
+}
