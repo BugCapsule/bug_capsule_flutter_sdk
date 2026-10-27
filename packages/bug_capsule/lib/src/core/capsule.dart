@@ -315,6 +315,7 @@ class CapsuleManifest {
     this.capabilities = const {},
     this.monitoring,
     this.dependencies = const [],
+    this.journalGapMs,
   });
 
   factory CapsuleManifest.fromJson(Map<String, Object?> j) {
@@ -382,6 +383,7 @@ class CapsuleManifest {
         for (final d in (j['dependencies'] as List?) ?? const [])
           CapsuleDependency.fromJson((d as Map).cast<String, Object?>()),
       ],
+      journalGapMs: stats['journalGapMs'] as int?,
     );
   }
 
@@ -426,6 +428,10 @@ class CapsuleManifest {
   /// written as spec v2.
   final List<CapsuleDependency> dependencies;
 
+  /// Crash capsules: the crash time minus the time of the last event the
+  /// journal flushed, when the crash time is known (`stats.journalGapMs`).
+  final int? journalGapMs;
+
   /// Dependencies replay must serve; preflight blocks when one is missing.
   Iterable<CapsuleDependency> get requiredDependencies =>
       dependencies.where((d) => d.required);
@@ -450,6 +456,7 @@ class CapsuleManifest {
       'eventCount': eventCount,
       'droppedEvents': droppedEvents,
       'checkpointKind': checkpointKind.name,
+      'journalGapMs': ?journalGapMs,
     },
     'labels': labels,
     if (redactionKeys.isNotEmpty || redactionHeaders.isNotEmpty)
@@ -460,7 +467,8 @@ class CapsuleManifest {
     if (runtime != null) 'runtime': runtime!.toJson(),
     if (capabilities.isNotEmpty) 'capabilities': capabilities,
     if (monitoring != null) 'monitoring': monitoring!.toJson(),
-    if (dependencies.isNotEmpty)
+    // Spec v2 requires the field (a crash capsule is v2 without any).
+    if (dependencies.isNotEmpty || failure?.kind == FailureKind.crash)
       'dependencies': [for (final d in dependencies) d.toJson()],
   };
 }
@@ -506,9 +514,14 @@ class Capsule {
   final Checkpoint checkpoint;
   final List<BugCapsuleEvent> events;
 
-  /// 2 when the capsule has interaction dependencies, else 1: sessions that
-  /// use only v1 features stay readable by v1 tools.
-  int get specVersion => manifest.dependencies.isEmpty ? 1 : 2;
+  /// 2 when the capsule has interaction dependencies or is a crash capsule
+  /// (failure kind `crash` exists in v2 only), else 1: sessions that use
+  /// only v1 features stay readable by v1 tools.
+  int get specVersion =>
+      manifest.dependencies.isEmpty &&
+          manifest.failure?.kind != FailureKind.crash
+      ? 1
+      : 2;
 
   Iterable<BugCapsuleEvent> eventsOfType(String type) =>
       events.where((e) => e.type == type);

@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:bug_capsule/bug_capsule.dart';
+import 'package:bug_capsule/src/runtime/monitoring/hub.dart' show MonitoringHub;
 import 'package:bug_capsule/src/version.dart';
 
 /// Backend fake for capsules, remote config and envelopes (monitoring-v1).
@@ -84,6 +85,47 @@ class EchoServer implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+/// Stands in for `bug_capsule_native`.
+class FakeNativeReporter implements NativeCrashReporter {
+  FakeNativeReporter({this.lastRunCrashed = false, this.previous = const []});
+
+  final bool lastRunCrashed;
+  List<String> previous;
+  final List<String> scopes = [];
+  final StreamController<NativeCrashEvent> live =
+      StreamController<NativeCrashEvent>.broadcast();
+  NativeCrashSettings? settings;
+  int stops = 0;
+
+  @override
+  Future<NativeCrashStart> start(NativeCrashSettings settings) async {
+    this.settings = settings;
+    return NativeCrashStart(
+      lastRunCrashed: lastRunCrashed,
+      handlerInstalled: true,
+    );
+  }
+
+  @override
+  Future<void> collectPending() async {
+    if (!live.hasListener) return;
+    final taken = previous;
+    previous = const [];
+    for (final json in taken) {
+      live.add(NativeCrashEvent(json, live: false));
+    }
+  }
+
+  @override
+  Future<void> stop() async => stops++;
+
+  @override
+  void updateScope(String scopeJson) => scopes.add(scopeJson);
+
+  @override
+  Stream<NativeCrashEvent> get events => live.stream;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -100,6 +142,7 @@ void main() {
   });
 
   tearDown(() async {
+    NativeCrashReporter.instance = null;
     await BugCapsule.resetForTest();
     BugCapsule.debugOverrides = null;
     debugPrint = originalDebugPrint;
@@ -447,6 +490,447 @@ void main() {
         expect(previous['timestamp'], '2026-10-21T14:00:00.000Z');
       },
     );
+  });
+
+  group('native crashes', () {
+    String nativeCrash({
+      String release = 'com.shop.app@0.9.0+8',
+      String timestamp = '2026-10-21T14:00:05.000Z',
+      Map<String, Object?> contexts = const {},
+    }) => jsonEncode({
+      'eventId': '22222222-2222-4222-8222-222222222222',
+      'timestamp': timestamp,
+      'level': 'fatal',
+      'runtime': 'android',
+      'release': release,
+      'environment': 'qa',
+      'exception': {
+        'values': [
+          {
+            'type': 'SIGSEGV',
+            'value': 'Segmentation violation (code 1) at 0x0',
+            'mechanism': {'type': 'signal', 'handled': false},
+            'stacktrace': {
+              'frames': [
+                {
+                  'instructionAddr': '0x7a00002000',
+                  'imageAddr': '0x7a00000000',
+                  'package': '/data/app/x/lib/arm64/libflutter.so',
+                  'inApp': true,
+                },
+                {
+                  'instructionAddr': '0x7b00001000',
+                  'imageAddr': '0x7b00000000',
+                  'package': '/data/app/x/lib/arm64/libcamera_plugin.so',
+                  'function': 'take_picture',
+                  'inApp': true,
+                },
+              ],
+            },
+          },
+        ],
+      },
+      'user': {'id': 'u_crashed'},
+      'tags': {'screen': 'camera'},
+      'contexts': {
+        'app': {'appVersion': '0.9.0'},
+        ...contexts,
+      },
+      'breadcrumbs': [
+        {
+          'timestamp': '2026-10-21T14:00:04.000Z',
+          'type': 'navigation',
+          'message': '/camera',
+          'level': 'info',
+        },
+      ],
+      'threads': [
+        {'id': 1, 'name': 'main', 'crashed': true, 'current': true},
+      ],
+      'debugImages': [
+        {
+          'type': 'elf',
+          'codeFile': 'libcamera_plugin.so',
+          'debugId': 'abc',
+          'imageAddr': '0x7b00000000',
+        },
+      ],
+    });
+
+    test(
+      'a native crash of the last run crashes its session and is sent through beforeSend',
+      () async {
+        File('${dir.path}/session.json').writeAsStringSync(
+          jsonEncode({
+            'sid': '11111111-1111-4111-8111-111111111111',
+            'did': 'install',
+            'seq': 1,
+            'release': 'com.shop.app@0.9.0+8',
+            'environment': 'qa',
+            'started': '2026-10-21T13:58:00.000Z',
+            'errors': 0,
+            'status': 'ok',
+            'foreground': true,
+            'lastUpdate': '2026-10-21T14:00:00.000Z',
+          }),
+        );
+        final native = NativeCrashReporter.instance = FakeNativeReporter(
+          lastRunCrashed: true,
+          previous: [nativeCrash()],
+        );
+        await start(
+          monitoring: MonitoringOptions(
+            beforeSend: (event, hint) {
+              event.tags['seen'] = hint.mechanism?.type ?? '-';
+              return event;
+            },
+          ),
+        );
+        await flush();
+        expect(native.settings!.release, 'com.shop.app@1.0.0+1');
+        expect(native.settings!.inAppIncludes, ['com.shop.app']);
+
+        final previous = backend
+            .items('session')
+            .firstWhere(
+              (s) => s['sid'] == '11111111-1111-4111-8111-111111111111',
+            );
+        expect(previous['status'], 'crashed');
+        expect(previous['errors'], 1);
+        expect(previous['release'], 'com.shop.app@0.9.0+8');
+        expect(previous['timestamp'], '2026-10-21T14:00:00.000Z');
+
+        final event = backend.items('event').single;
+        expect(event['eventId'], '22222222-2222-4222-8222-222222222222');
+        expect(event['runtime'], 'flutter');
+        expect(event['level'], 'fatal');
+        expect(event['release'], 'com.shop.app@0.9.0+8');
+        expect(event['user'], {'id': 'u_crashed'});
+        expect(event['tags'], {'screen': 'camera', 'seen': 'signal'});
+        final contexts = event['contexts']! as Map;
+        expect((contexts['app'] as Map)['appVersion'], '0.9.0');
+        expect(
+          contexts['os'],
+          isNotNull,
+          reason: 'device contexts of this launch',
+        );
+        final frames =
+            ((((event['exception']! as Map)['values'] as List).single
+                        as Map)['stacktrace']
+                    as Map)['frames']
+                as List;
+        expect((frames[0] as Map)['inApp'], isFalse, reason: 'the engine');
+        expect((frames[1] as Map)['inApp'], isTrue, reason: 'a plugin');
+        expect((frames[1] as Map)['imageAddr'], '0x7b00000000');
+        expect((event['threads'] as List).single, containsPair('name', 'main'));
+        expect(
+          (event['debugImages'] as List).single,
+          containsPair('debugId', 'abc'),
+        );
+      },
+    );
+
+    test(
+      'a hang while running counts in the session and can be sampled',
+      () async {
+        final native = NativeCrashReporter.instance = FakeNativeReporter();
+        await start();
+        native.live.add(
+          NativeCrashEvent(
+            jsonEncode({
+              'eventId': '33333333-3333-4333-8333-333333333333',
+              'timestamp': '2026-10-21T14:00:05.000Z',
+              'level': 'error',
+              'exception': {
+                'values': [
+                  {
+                    'type': 'ApplicationNotResponding',
+                    'mechanism': {'type': 'anr', 'handled': false},
+                  },
+                ],
+              },
+            }),
+            live: true,
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await flush();
+        final event = backend.items('event').single;
+        expect(event['level'], 'error');
+        expect(
+          BugCapsule.lastEventId(),
+          '33333333-3333-4333-8333-333333333333',
+        );
+        expect(backend.items('session').map((s) => s['errors']), contains(1));
+      },
+    );
+
+    test('the scope reaches the native handler redacted', () async {
+      final native = NativeCrashReporter.instance = FakeNativeReporter();
+      await start();
+      BugCapsule.setUser(const MonitoringUser(id: 'u_7'));
+      BugCapsule.setTag('screen', 'checkout');
+      BugCapsule.addBreadcrumb(
+        Breadcrumb(message: 'pay', data: {'password': 'hunter2'}),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      final scope = (jsonDecode(native.scopes.last) as Map)
+          .cast<String, Object?>();
+      expect(scope['user'], {'id': 'u_7'});
+      expect(scope['tags'], containsPair('screen', 'checkout'));
+      expect(((scope['contexts'] as Map)['app'] as Map)['appVersion'], '1.0.0');
+      expect(jsonEncode(scope['breadcrumbs']), contains('pay'));
+      expect(native.scopes.last, isNot(contains('hunter2')));
+    });
+
+    test(
+      "an earlier run's event never gets this launch's app context",
+      () async {
+        final event = (jsonDecode(nativeCrash()) as Map)..remove('contexts');
+        NativeCrashReporter.instance = FakeNativeReporter(
+          previous: [jsonEncode(event)],
+        );
+        await start();
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await flush();
+        final contexts = backend.items('event').single['contexts']! as Map;
+        expect(contexts.containsKey('app'), isFalse);
+        expect(contexts['os'], isNotNull);
+      },
+    );
+
+    test(
+      'malformed native events are dropped, the hub keeps running',
+      () async {
+        NativeCrashReporter.instance = FakeNativeReporter(
+          previous: [
+            'not json',
+            jsonEncode({
+              'eventId': 'x',
+              'threads': [
+                {'stacktrace': 'oops'},
+              ],
+              'exception': {
+                'values': [
+                  {
+                    'type': 'E',
+                    'stacktrace': {
+                      'frames': [
+                        {'package': 7, 'lineno': '12'},
+                      ],
+                    },
+                  },
+                ],
+              },
+            }),
+          ],
+        );
+        await start();
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await flush();
+        final event = backend.items('event').single;
+        expect(event['eventId'], 'x');
+        BugCapsule.captureException(StateError('still works'));
+        await flush();
+        expect(backend.items('event'), hasLength(2));
+      },
+    );
+
+    /// Runs a recording session that leaves its crash journal behind, as a
+    /// process that dies does.
+    Future<void> crashedSession() async {
+      await start();
+      BugCapsule.log('opened checkout');
+      BugCapsule.log('tapped pay');
+      await BugCapsule.resetForTest();
+      expect(
+        Directory('${dir.path}/journal/$pid/events').listSync(),
+        isNotEmpty,
+      );
+    }
+
+    Future<Map<String, Object?>> linkedEvent() async {
+      for (var i = 0; i < 100; i++) {
+        await BugCapsule.flush();
+        final events = backend.items('event');
+        if (events.isNotEmpty) return events.single;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      fail('no event was sent');
+    }
+
+    test(
+      'a native crash of the last run gives a crash capsule from its journal, linked to the event',
+      () async {
+        await crashedSession();
+        NativeCrashReporter.instance = FakeNativeReporter(
+          lastRunCrashed: true,
+          previous: [
+            nativeCrash(
+              release: 'com.shop.app@1.0.0+1',
+              timestamp: DateTime.now().toUtc().toIso8601String(),
+            ),
+          ],
+        );
+        await start();
+        final event = await linkedEvent();
+        await BugCapsule.flushUploads();
+
+        final capsule = CapsuleCodec.decode(backend.capsules.single);
+        final m = capsule.manifest;
+        expect(event['capsuleId'], m.capsuleId);
+        expect(m.failure!.kind, FailureKind.crash);
+        expect(m.failure!.signature, 'crash:SIGSEGV');
+        expect(m.failure!.crash!.inAppFrame, 'take_picture');
+        expect(m.monitoring!.eventId, event['eventId']);
+        expect(m.monitoring!.release, 'com.shop.app@1.0.0+1');
+        expect(m.labels['source'], 'crash_journal');
+        expect(m.labels['crash.mechanism'], 'signal');
+        expect(
+          m.eligibility.missing.map((g) => g.dependency),
+          contains('crash.native'),
+        );
+        expect(
+          [
+            for (final e in capsule.eventsOfType(EventTypes.log))
+              e.data['message'],
+          ],
+          ['opened checkout', 'tapped pay'],
+        );
+        expect(
+          CapsuleCodec.toJson(capsule)['specVersion'],
+          2,
+          reason: 'crash capsules are format v2',
+        );
+        // The claimed journal is gone; this process keeps its own.
+        final journals = Directory('${dir.path}/journal').listSync().map(
+          (d) => d.uri.pathSegments.where((s) => s.isNotEmpty).last,
+        );
+        expect(journals, ['$pid']);
+      },
+    );
+
+    test(
+      'the journal named in the crashed scope is used, and the marker is never sent',
+      () async {
+        await crashedSession();
+        final native = NativeCrashReporter.instance = FakeNativeReporter(
+          previous: [
+            nativeCrash(
+              timestamp: DateTime.now().toUtc().toIso8601String(),
+              contexts: {
+                MonitoringHub.journalContext: {'id': '$pid'},
+              },
+            ),
+          ],
+        );
+        await start();
+        final event = await linkedEvent();
+        expect(event['capsuleId'], isNotNull);
+        expect(
+          (event['contexts']! as Map).keys,
+          isNot(contains(MonitoringHub.journalContext)),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        expect(
+          native.scopes.last,
+          contains('"${MonitoringHub.journalContext}":{"id":"$pid"}'),
+          reason: 'this process names its journal for its own crashes',
+        );
+      },
+    );
+
+    test(
+      'without a journal (or a crashed last run) the event comes alone; stale journals go',
+      () async {
+        await crashedSession();
+        NativeCrashReporter.instance = FakeNativeReporter(
+          previous: [
+            nativeCrash(timestamp: DateTime.now().toUtc().toIso8601String()),
+          ],
+        );
+        await start();
+        final event = await linkedEvent();
+        expect(event.containsKey('capsuleId'), isFalse);
+        expect(backend.capsules, isEmpty);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        final journals = Directory('${dir.path}/journal').listSync().map(
+          (d) => d.uri.pathSegments.where((s) => s.isNotEmpty).last,
+        );
+        expect(journals, ['$pid'], reason: 'no event claimed the old journal');
+      },
+    );
+
+    test('crash capsules do not count against maxCapsulesPerSession', () async {
+      await crashedSession();
+      NativeCrashReporter.instance = FakeNativeReporter(
+        lastRunCrashed: true,
+        previous: [
+          nativeCrash(timestamp: DateTime.now().toUtc().toIso8601String()),
+        ],
+      );
+      await start(autoCapture: true);
+      await linkedEvent();
+      BugCapsule.fail('checkout_stuck', 'spinner never stopped');
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      await BugCapsule.flushUploads();
+      expect(backend.capsules, hasLength(2));
+    });
+
+    test('closing BugCapsule stops the native reporter', () async {
+      final native = NativeCrashReporter.instance = FakeNativeReporter();
+      await start();
+      expect(native.stops, 0);
+      await BugCapsule.resetForTest();
+      expect(native.stops, 1);
+    });
+
+    test(
+      'enableNativeCrashHandling: false leaves the native SDK alone',
+      () async {
+        final native = NativeCrashReporter.instance = FakeNativeReporter(
+          lastRunCrashed: true,
+          previous: [nativeCrash()],
+        );
+        await start(
+          monitoring: const MonitoringOptions(enableNativeCrashHandling: false),
+        );
+        await flush();
+        expect(native.settings, isNull);
+        expect(backend.items('event'), isEmpty);
+      },
+    );
+  });
+
+  group('sessions after an update', () {
+    test('a recovered session keeps the release it ran with', () async {
+      File('${dir.path}/session.json').writeAsStringSync(
+        jsonEncode({
+          'sid': '44444444-4444-4444-8444-444444444444',
+          'did': 'install',
+          'seq': 1,
+          'release': 'com.shop.app@0.9.0+8',
+          'environment': 'production',
+          'started': '2026-10-21T13:58:00.000Z',
+          'errors': 0,
+          'status': 'ok',
+          'foreground': true,
+          'lastUpdate': '2026-10-21T14:00:00.000Z',
+        }),
+      );
+      await start();
+      await flush();
+      final previous = backend
+          .items('session')
+          .firstWhere(
+            (s) => s['sid'] == '44444444-4444-4444-8444-444444444444',
+          );
+      expect(previous['status'], 'abnormal');
+      expect(previous['release'], 'com.shop.app@0.9.0+8');
+      expect(previous['environment'], 'production');
+      final current = backend.items('session').last;
+      expect(current['release'], 'com.shop.app@1.0.0+1');
+    });
   });
 
   group('tracing', () {

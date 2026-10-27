@@ -88,6 +88,64 @@ class ReplaySettings {
   };
 }
 
+/// The attempt result for an app death (crash-capsules §4), given the
+/// capsule's [expected] failure. Reports without [ReplayReport.crash], and
+/// reports where the expected failure had already fired, are unchanged.
+///
+/// * A crash capsule, the same type → `reproduced`; a different in-app
+///   frame (when both are known) is divergence `failure.different_frame`.
+/// * Another type, or any capsule whose failure is not a crash → the
+///   death is another failure: the attempt proves nothing (reason code
+///   `failure.different`).
+/// * The cause is unknown → a replay error.
+ReplayReport resolveCrash(ReplayReport report, FailureRecord? expected) {
+  final crash = report.crash;
+  if (crash == null || report.outcome == ReplayOutcome.reproduced) {
+    return report;
+  }
+  final what = crash.name;
+  if (what == null) {
+    return report.copyWith(
+      outcome: ReplayOutcome.error,
+      message:
+          'the app process died during the attempt and the cause is unknown'
+          '${report.message == null ? '' : ': ${report.message}'}',
+    );
+  }
+  final observed = crash.toFailure();
+  if (expected != null &&
+      expected.kind == FailureKind.crash &&
+      crash.sameTypeAs(expected)) {
+    final wantFrame = expected.crash?.inAppFrame;
+    final differentFrame =
+        wantFrame != null &&
+        crash.inAppFrame != null &&
+        crash.inAppFrame != wantFrame;
+    return report.copyWith(
+      outcome: ReplayOutcome.reproduced,
+      expectedSignature: expected.signature,
+      observed: observed,
+      divergences: [
+        ...report.divergences,
+        if (differentFrame)
+          Divergence(
+            'failure.different_frame',
+            'crashed in ${crash.inAppFrame}, recorded in $wantFrame',
+          ),
+      ],
+      message: 'the app died with $what as recorded',
+    );
+  }
+  return report.copyWith(
+    outcome: ReplayOutcome.notReproduced,
+    expectedSignature: expected?.signature,
+    otherFailures: [...report.otherFailures, observed],
+    message: expected?.kind == FailureKind.crash
+        ? 'the app died with $what; the capsule recorded ${expected!.type}'
+        : 'the app died with $what',
+  );
+}
+
 enum ReplayOutcome {
   /// The original failure assertion fired again.
   reproduced('reproduced'),
@@ -135,6 +193,105 @@ class Divergence {
   String toString() => '$type: $detail';
 }
 
+/// The app under test died during an attempt (crash-capsules §4), as a
+/// runner or the CLI saw it.
+class ObservedCrash {
+  const ObservedCrash({
+    this.type,
+    this.mechanism,
+    this.signal,
+    this.inAppFrame,
+    this.source,
+    this.message,
+  });
+
+  factory ObservedCrash.fromJson(Map<String, Object?> j) => ObservedCrash(
+    type: j['type'] as String?,
+    mechanism: j['mechanism'] as String?,
+    signal: (j['signal'] as num?)?.toInt(),
+    inAppFrame: j['inAppFrame'] as String?,
+    source: j['source'] as String?,
+    message: j['message'] as String?,
+  );
+
+  /// Same vocabulary as `failure.type` of a crash capsule: the signal name
+  /// (`SIGSEGV`), the Mach exception (`EXC_BAD_ACCESS`),
+  /// `ApplicationNotResponding`, `OutOfMemory`, or an exception class for
+  /// a managed crash. Null: the process died and why is unknown.
+  final String? type;
+
+  /// `signal`, `mach_exception`, `anr`, `oom`, `exception`.
+  final String? mechanism;
+  final int? signal;
+
+  /// Function of the in-app frame closest to the crash, when the frames
+  /// were visible.
+  final String? inAppFrame;
+
+  /// How the death was seen: `xctest`, `instrumentation`, `exit_info`,
+  /// `tombstone`, `logcat`, `crash_report`, `process_exit`.
+  final String? source;
+  final String? message;
+
+  /// [type], or the signal's name when only the number is known.
+  String? get name => type ?? (signal == null ? null : signalName(signal!));
+
+  /// Whether this is the death a crash capsule recorded as [expected]
+  /// (`failure.type`): the same type, or the same signal (an iOS crash
+  /// report names both the Mach exception and the signal).
+  bool sameTypeAs(FailureRecord expected) {
+    final expectedSignal = expected.crash?.signal;
+    final mine = {?type, if (signal != null) signalName(signal!)};
+    final theirs = {
+      expected.type,
+      if (expectedSignal != null) signalName(expectedSignal),
+    };
+    return mine.any(theirs.contains);
+  }
+
+  /// The death as a failure record (`crash:<type>`).
+  FailureRecord toFailure() => FailureRecord.crash(
+    type: name ?? 'ProcessDied',
+    message: message ?? 'the app process died',
+    t: 0,
+    crash: CrashInfo(
+      mechanism: mechanism ?? 'signal',
+      signal: signal,
+      inAppFrame: inAppFrame,
+    ),
+  );
+
+  Map<String, Object?> toJson() => {
+    'type': ?type,
+    'mechanism': ?mechanism,
+    'signal': ?signal,
+    'inAppFrame': ?inAppFrame,
+    'source': ?source,
+    'message': ?message,
+  };
+
+  static const _signals = {
+    1: 'SIGHUP',
+    2: 'SIGINT',
+    3: 'SIGQUIT',
+    4: 'SIGILL',
+    5: 'SIGTRAP',
+    6: 'SIGABRT',
+    7: 'SIGBUS',
+    8: 'SIGFPE',
+    9: 'SIGKILL',
+    10: 'SIGBUS',
+    11: 'SIGSEGV',
+    12: 'SIGSYS',
+    13: 'SIGPIPE',
+    15: 'SIGTERM',
+  };
+
+  /// POSIX names of the common fatal signals (Linux numbering, and SIGBUS
+  /// is 10 on Darwin).
+  static String signalName(int signal) => _signals[signal] ?? 'SIG$signal';
+}
+
 class ReplayReport {
   const ReplayReport({
     required this.outcome,
@@ -154,6 +311,7 @@ class ReplayReport {
     this.message,
     this.attemptId,
     this.runtime,
+    this.crash,
   });
 
   factory ReplayReport.fromJson(Map<String, Object?> j) => ReplayReport(
@@ -184,6 +342,9 @@ class ReplayReport {
     message: j['message'] as String?,
     attemptId: j['attemptId'] as String?,
     runtime: j['runtime'] as String?,
+    crash: j['crash'] is Map
+        ? ObservedCrash.fromJson((j['crash'] as Map).cast<String, Object?>())
+        : null,
   );
 
   final ReplayOutcome outcome;
@@ -215,27 +376,44 @@ class ReplayReport {
   /// Runtime that ran the attempt.
   final String? runtime;
 
-  /// Same report with [divergences] appended (e.g. by a runner that saw
-  /// requests escape the app's network hooks).
-  ReplayReport withDivergences(List<Divergence> extra) => ReplayReport(
-    outcome: outcome,
+  /// The app process died during the attempt. The CLI turns it into the
+  /// attempt's outcome ([resolveCrash]).
+  final ObservedCrash? crash;
+
+  /// A copy with the given fields replaced.
+  ReplayReport copyWith({
+    ReplayOutcome? outcome,
+    String? expectedSignature,
+    FailureRecord? observed,
+    List<FailureRecord>? otherFailures,
+    List<Divergence>? divergences,
+    String? message,
+    ObservedCrash? crash,
+  }) => ReplayReport(
+    outcome: outcome ?? this.outcome,
     attempt: attempt,
     durationMs: durationMs,
     strategy: strategy,
-    expectedSignature: expectedSignature,
-    observed: observed,
-    otherFailures: otherFailures,
-    divergences: [...divergences, ...extra],
+    expectedSignature: expectedSignature ?? this.expectedSignature,
+    observed: observed ?? this.observed,
+    otherFailures: otherFailures ?? this.otherFailures,
+    divergences: divergences ?? this.divergences,
     eventsDispatched: eventsDispatched,
     eventsExpected: eventsExpected,
     fixturesServed: fixturesServed,
     compressedMs: compressedMs,
     gapsCompressed: gapsCompressed,
     buildGitSha: buildGitSha,
-    message: message,
+    message: message ?? this.message,
     attemptId: attemptId,
     runtime: runtime,
+    crash: crash ?? this.crash,
   );
+
+  /// Same report with [divergences] appended (e.g. by a runner that saw
+  /// requests escape the app's network hooks).
+  ReplayReport withDivergences(List<Divergence> extra) =>
+      copyWith(divergences: [...divergences, ...extra]);
 
   Map<String, Object?> toJson() => {
     'outcome': outcome.wire,
@@ -255,5 +433,6 @@ class ReplayReport {
     'message': message,
     if (attemptId != null) 'attemptId': attemptId,
     if (runtime != null) 'runtime': runtime,
+    if (crash != null) 'crash': crash!.toJson(),
   };
 }

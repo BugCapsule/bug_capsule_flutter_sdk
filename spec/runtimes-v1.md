@@ -363,6 +363,16 @@ Per runtime transport of the base URL and **production protection**:
 | ios | `XCUIApplication.launchEnvironment["BUGCAPSULE_REPLAY_URL"]` | read only in `DEBUG` builds (`#if DEBUG`) and only when `XCTestConfigurationFilePath` / the replay launch argument from the UI test is present |
 | web | Playwright init script + bindings (`__bugcapsuleReplay`) | only when the app passes `allowReplay: true` (wire it to a dev/test build flag); never from URL, storage or messages |
 
+**App deaths.** A report may carry `crash` when the runner saw the app under
+test die during the attempt: `{type, mechanism, signal, inAppFrame, source,
+message}` (all optional; `type` uses the vocabulary of a crash capsule's
+`failure.type`). When no report arrives the CLI looks for the death itself:
+the process exit (Flutter), `am instrument`'s `Process crashed` plus the
+exit record the attempt added and `logcat -b crash` (Android, or the
+instrumentation status `bugcapsule_crash=<json>`), the XCTest output and the
+simulator's crash report (iOS). The CLI then decides the attempt (capsule-v2
+§8.1).
+
 Attempt isolation: Android `pm clear` before each attempt, iOS uninstall /
 fresh install of the test host app's data container, web a fresh browser
 context per attempt. The CLI enforces a per-attempt timeout, kills the

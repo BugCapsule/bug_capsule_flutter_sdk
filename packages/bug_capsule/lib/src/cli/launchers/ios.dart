@@ -4,6 +4,7 @@ import 'dart:io';
 
 import '../../core/core.dart';
 
+import '../crash_detection.dart';
 import '../launcher.dart';
 import '../processes.dart';
 import '../replay_server.dart';
@@ -51,6 +52,9 @@ class IosNativeLauncher implements AppLauncher {
   late String _xctestrun;
   late String _bundleId;
   late String _replayTest;
+
+  @override
+  AppRelease? release;
 
   String? _str(String key) => options.projectConfig.string('ios', key);
   Map<String, Object?> get _section => options.projectConfig.section('ios');
@@ -103,6 +107,8 @@ class IosNativeLauncher implements AppLauncher {
     } else {
       await _build(sim);
     }
+    final app = _findApp(File(_xctestrun).parent);
+    release = app == null ? null : await AppRelease.fromIosApp(app.path);
     Processes.onCleanup(() async {
       await Process.run('xcrun', ['simctl', 'terminate', sim.udid, _bundleId]);
     });
@@ -199,6 +205,33 @@ class IosNativeLauncher implements AppLauncher {
         );
   }
 
+  /// The app under test among the build products next to the `.xctestrun`.
+  static Directory? _findApp(Directory products) {
+    if (!products.existsSync()) return null;
+    for (final d in products.listSync().whereType<Directory>()) {
+      if (!d.path.endsWith('-iphonesimulator')) continue;
+      for (final app in d.listSync().whereType<Directory>()) {
+        if (app.path.endsWith('.app') && !app.path.endsWith('-Runner.app')) {
+          return app;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// The app died during the attempt: XCTest said so, or a crash report
+  /// of the app was written since [since].
+  Future<ObservedCrash?> _crashOf(String log, DateTime since) async {
+    for (var i = 0; i < 5; i++) {
+      final report = CrashDetection.findIosCrashReport(_bundleId, since: since);
+      if (report != null) return report;
+      if (CrashDetection.fromXctestLog(log) == null) break;
+      // ReportCrash writes the report a moment after the death.
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    return CrashDetection.fromXctestLog(log);
+  }
+
   static Future<String> _bundleIdFromProducts(Directory dir) async {
     final apps = dir.existsSync()
         ? dir.listSync().whereType<Directory>().where(
@@ -240,6 +273,7 @@ class IosNativeLauncher implements AppLauncher {
       // reinstalls the app from the build products).
       await Process.run('xcrun', ['simctl', 'terminate', sim.udid, _bundleId]);
       await Process.run('xcrun', ['simctl', 'uninstall', sim.udid, _bundleId]);
+      final started = DateTime.now();
 
       xcodebuild = await Processes.start(
         'xcrun',
@@ -281,10 +315,12 @@ class IosNativeLauncher implements AppLauncher {
       final exited = xcodebuild.exitCode.then((code) async {
         // Give a report posted just before the exit time to arrive.
         await Future<void>.delayed(const Duration(seconds: 3));
-        return errorReport(
+        final report = errorReport(
           armed.settings,
           'xcodebuild exited ($code) before the app reported:\n${tail(log.toString(), 25)}',
         );
+        final crash = await _crashOf(log.toString(), started);
+        return crash == null ? report : report.copyWith(crash: crash);
       });
       // Install + launch of the test runner count against the budget too.
       final startup = Duration(seconds: _intSetting('startupSeconds') ?? 120);

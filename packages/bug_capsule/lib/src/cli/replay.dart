@@ -47,7 +47,12 @@ class ReplaySummary {
 
   /// Body of `POST /v1/capsules/{id}/runs`. `attempts` is the number
   /// requested, so attempts that never ran cannot make a run look complete.
-  Map<String, Object?> runPayload({String? device}) => {
+  /// [release] is the build under test (verification.md §1).
+  Map<String, Object?> runPayload({
+    String? device,
+    String? release,
+    String? environment,
+  }) => {
     'kind': kind.name,
     'outcome': wireOutcome,
     'attempts': requestedAttempts < 1 ? 1 : requestedAttempts,
@@ -58,6 +63,12 @@ class ReplaySummary {
     'durationMs': durationMs,
     if (evaluation.reasonCodes.isNotEmpty)
       'reasonCodes': evaluation.reasonCodes.take(50).toList(),
+    if (release != null && release.isNotEmpty)
+      'release': release.length > 200 ? release.substring(0, 200) : release,
+    if (environment != null && environment.isNotEmpty)
+      'environment': environment.length > 64
+          ? environment.substring(0, 64)
+          : environment,
     'details': {
       'verdict': verdict.name,
       'reasons': evaluation.reasons.take(50).toList(),
@@ -157,6 +168,8 @@ Future<ReplaySummary> replayCapsule({
     ReplayReport report;
     try {
       report = await launcher.attempt(server, loaded.bytes, settings, budget);
+      // An app death becomes the attempt's result (crash-capsules §4).
+      report = resolveCrash(report, m.failure);
     } catch (e) {
       // A launch failure is an attempt that proves nothing, never a pass.
       report = errorReport(

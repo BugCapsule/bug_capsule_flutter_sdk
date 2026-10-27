@@ -9,6 +9,7 @@ workspace:
   - packages/bug_capsule
   - packages/bug_capsule_firebase
   - packages/bug_capsule_geolocator
+  - packages/bug_capsule_native
   - packages/bug_capsule_google_maps
   - packages/bug_capsule_stripe
   - example/bug_capsule_demo

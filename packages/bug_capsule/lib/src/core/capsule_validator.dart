@@ -234,7 +234,7 @@ void _validate(Object? root) {
   _int(session, 'durationMs', '$mp.session');
 
   final failure = _optObject(m, 'failure', mp);
-  if (failure != null) _validateFailure(failure, '$mp.failure');
+  if (failure != null) _validateFailure(failure, '$mp.failure', specVersion);
 
   final eligibility = _object(m['eligibility'], '$mp.eligibility');
   _enum(eligibility, 'status', '$mp.eligibility', const [
@@ -398,14 +398,26 @@ void _validate(Object? root) {
   }
 }
 
-void _validateFailure(Map<String, Object?> f, String path) {
-  _enum(f, 'kind', path, const ['exception', 'assertion', 'manual']);
+void _validateFailure(Map<String, Object?> f, String path, int specVersion) {
+  // `crash` is v2 only (crash capsules are always written as v2).
+  _enum(f, 'kind', path, [
+    'exception',
+    'assertion',
+    'manual',
+    if (specVersion >= 2) 'crash',
+  ]);
   _string(f, 'signature', path, max: 1000);
   _string(f, 'type', path, max: 1000, min: 0);
   _optString(f, 'message', path, max: 10000);
   _optString(f, 'stack', path, max: 20000);
   _optString(f, 'assertionId', path, max: 200);
   _optInt(f, 't', path);
+  final crash = _optObject(f, 'crash', path);
+  if (crash != null) {
+    _optString(crash, 'mechanism', '$path.crash', max: 50);
+    _optInt(crash, 'signal', '$path.crash');
+    _optString(crash, 'inAppFrame', '$path.crash', max: 1000);
+  }
 }
 
 /// Fields the replay engine and fixture store read from known event types.

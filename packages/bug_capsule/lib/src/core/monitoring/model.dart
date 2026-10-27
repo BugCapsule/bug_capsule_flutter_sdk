@@ -3,7 +3,33 @@
 /// event in place; [ErrorEvent.toJson] applies the contract's size bounds.
 library;
 
-enum EventLevel { fatal, error, warning, info, debug }
+enum EventLevel {
+  fatal,
+  error,
+  warning,
+  info,
+  debug;
+
+  static EventLevel? parse(Object? wire) {
+    for (final l in values) {
+      if (l.name == wire) return l;
+    }
+    return null;
+  }
+}
+
+Map<String, Object?>? _map(Object? v) =>
+    v is Map ? v.cast<String, Object?>() : null;
+
+List<Map<String, Object?>> _maps(Object? v) => [
+  if (v is List)
+    for (final e in v)
+      if (e is Map) e.cast<String, Object?>(),
+];
+
+String? _str(Object? v) => v is String ? v : null;
+
+int? _int(Object? v) => v is num ? v.toInt() : int.tryParse('${v ?? ''}');
 
 /// How an error was caught (`mechanism` in monitoring-v1 §2).
 class Mechanism {
@@ -22,6 +48,12 @@ class Mechanism {
   static const manual = Mechanism('manual', handled: true);
   static const assertion = Mechanism('assertion', handled: true);
   static const logging = Mechanism('logging', handled: true);
+
+  factory Mechanism.fromJson(Map<String, Object?> j) => Mechanism(
+    _str(j['type']) ?? 'generic',
+    handled: j['handled'] != false,
+    data: _map(j['data']),
+  );
 
   Map<String, Object?> toJson() => {
     'type': type,
@@ -56,6 +88,19 @@ class EventFrame {
   String? imageAddr;
   String? package;
 
+  factory EventFrame.fromJson(Map<String, Object?> j) => EventFrame(
+    function: _str(j['function']),
+    module: _str(j['module']),
+    filename: _str(j['filename']),
+    absPath: _str(j['absPath']),
+    lineno: _int(j['lineno']),
+    colno: _int(j['colno']),
+    inApp: j['inApp'] is bool ? j['inApp'] as bool : null,
+    instructionAddr: _str(j['instructionAddr']),
+    imageAddr: _str(j['imageAddr']),
+    package: _str(j['package']),
+  );
+
   Map<String, Object?> toJson() => {
     'function': ?function,
     'module': ?module,
@@ -84,6 +129,19 @@ class ExceptionValue {
   String? module;
   Mechanism? mechanism;
   List<EventFrame> frames;
+
+  factory ExceptionValue.fromJson(Map<String, Object?> j) => ExceptionValue(
+    type: _str(j['type']) ?? 'Error',
+    value: _str(j['value']),
+    module: _str(j['module']),
+    mechanism: _map(j['mechanism']) == null
+        ? null
+        : Mechanism.fromJson(_map(j['mechanism'])!),
+    frames: [
+      for (final f in _maps(_map(j['stacktrace'])?['frames']))
+        EventFrame.fromJson(f),
+    ],
+  );
 
   Map<String, Object?> toJson() => {
     'type': cut(type, 200),
@@ -135,6 +193,15 @@ class Breadcrumb {
   EventLevel level;
   Map<String, Object?>? data;
 
+  factory Breadcrumb.fromJson(Map<String, Object?> j) => Breadcrumb(
+    timestamp: DateTime.tryParse('${j['timestamp']}'),
+    type: _str(j['type']) ?? BreadcrumbType.defaultType,
+    category: _str(j['category']),
+    message: _str(j['message']),
+    level: EventLevel.parse(j['level']) ?? EventLevel.info,
+    data: _map(j['data']),
+  );
+
   Map<String, Object?> toJson() => {
     'timestamp': isoTimestamp(timestamp),
     'type': type,
@@ -164,6 +231,15 @@ class MonitoringUser {
   final String? ipAddress;
   final String? segment;
   final Map<String, Object?>? data;
+
+  factory MonitoringUser.fromJson(Map<String, Object?> j) => MonitoringUser(
+    id: _str(j['id']),
+    email: _str(j['email']),
+    username: _str(j['username']),
+    ipAddress: _str(j['ipAddress']),
+    segment: _str(j['segment']),
+    data: _map(j['data']),
+  );
 
   Map<String, Object?> toJson() => {
     'id': ?id,
@@ -224,6 +300,46 @@ class ErrorEvent {
   /// `[{id, name, crashed, current, stacktrace}]`: the current stack of a
   /// `captureMessage` event (`attachStacktrace`), or a hang's threads.
   List<Map<String, Object?>>? threads;
+
+  /// An event built elsewhere (a native SDK's crash report): every field
+  /// [toJson] writes, so it goes through `beforeSend` like any other event.
+  /// Null without an `eventId`.
+  static ErrorEvent? fromJson(Map<String, Object?> j) {
+    final id = _str(j['eventId']);
+    if (id == null || id.isEmpty) return null;
+    final message = j['message'];
+    return ErrorEvent(
+      eventId: id,
+      timestamp: DateTime.tryParse('${j['timestamp']}') ?? DateTime.now(),
+      level: EventLevel.parse(j['level']) ?? EventLevel.error,
+      exceptions: [
+        for (final v in _maps(_map(j['exception'])?['values']))
+          ExceptionValue.fromJson(v),
+      ],
+      message: message is Map ? _str(message['formatted']) : _str(message),
+      fingerprint: j['fingerprint'] is List
+          ? [for (final f in j['fingerprint'] as List) '$f']
+          : null,
+      tags: {
+        for (final e in (_map(j['tags']) ?? const {}).entries)
+          if (e.value != null) e.key: '${e.value}',
+      },
+      user: _map(j['user']) == null
+          ? null
+          : MonitoringUser.fromJson(_map(j['user'])!),
+      contexts: _map(j['contexts']),
+      breadcrumbs: [
+        for (final b in _maps(j['breadcrumbs'])) Breadcrumb.fromJson(b),
+      ],
+      debugImages: _maps(j['debugImages']),
+      request: _map(j['request']),
+      extra: _map(j['extra']),
+      capsuleId: _str(j['capsuleId']),
+      release: _str(j['release']),
+      environment: _str(j['environment']),
+      threads: j['threads'] is List ? _maps(j['threads']) : null,
+    );
+  }
 
   /// True when no exception value was caught by the app.
   bool get unhandled => exceptions.any((e) => e.mechanism?.handled == false);

@@ -48,6 +48,7 @@ class BugCapsuleConfig {
     this.productionSampleRate = 0.1,
     this.autoCaptureOnFailure = true,
     this.maxCapsulesPerSession = 3,
+    this.crashJournal = true,
     this.captureNetworkBodies = true,
     this.maxBodyBytes = 256 * 1024,
     this.redactKeys = const [],
@@ -130,6 +131,12 @@ class BugCapsuleConfig {
   final double productionSampleRate;
   final bool autoCaptureOnFailure;
   final int maxCapsulesPerSession;
+
+  /// Keep a crash journal while recording, so that a crash that ends the
+  /// process (a native crash, an ANR or low-memory kill, with
+  /// `bug_capsule_native`) still gives a capsule, built on the next launch.
+  /// Crash capsules do not count against [maxCapsulesPerSession].
+  final bool crashJournal;
   final bool captureNetworkBodies;
   final int maxBodyBytes;
   final List<String> redactKeys;

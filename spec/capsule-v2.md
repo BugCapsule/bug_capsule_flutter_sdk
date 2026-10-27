@@ -318,6 +318,41 @@ reports add reason codes derived from divergence types:
 | `interaction.incomplete` | `*.noPayload` |
 | `interaction.live` | `dependency.live`, `dependency.late` |
 | `interaction.unrestored` | `*.unrestored` |
+| `failure.different` | a crash capsule's replay where the app died of another crash type, or a crash replaced the recorded failure (attempt invalid) |
+| `failure.different_frame` | a crash capsule's replay where the same crash happened in another in-app frame (still `reproduced`) |
+
+### 8.1 Crash capsules
+
+`manifest.failure.kind` may be `crash` (format v2 only; a v1 capsule with it
+is invalid). A crash capsule is built on the next launch from the crash
+journal of the process that died:
+
+```json
+{
+  "kind": "crash",
+  "signature": "crash:SIGSEGV",
+  "type": "SIGSEGV",
+  "message": "Segmentation violation (code 1) at 0x0",
+  "stack": "#0 memcpy (libc.so)\n#1 checkout_native (libshop.so)",
+  "crash": { "mechanism": "signal", "signal": 11, "inAppFrame": "checkout_native" },
+  "t": 18234
+}
+```
+
+* `signature` = `crash:<type>`; `type` is the signal name (`SIGSEGV`), the
+  Mach exception (`EXC_BAD_ACCESS`), `ApplicationNotResponding` or
+  `OutOfMemory`. Line numbers and addresses never enter it.
+* `crash` (optional): `mechanism` (`signal`, `mach_exception`, `anr`, `oom`,
+  `metrickit`; ≤ 50 chars), integer `signal`, `inAppFrame` (≤ 1000 chars,
+  the function of the in-app frame closest to the crash).
+* The manifest carries the non-blocking gap `crash.native`,
+  `labels.source = "crash_journal"`, `labels["crash.mechanism"]`, and
+  `stats.journalGapMs` (crash time minus the last journaled event's time)
+  when the crash time is known. `dependencies` is present (possibly empty).
+* Replay: the same crash type is `reproduced`; another type invalidates the
+  attempt (`failure.different`); the window replayed with the app alive is
+  `not_reproduced`. Readers that only know the older kinds treat `crash`
+  like `exception`.
 
 ## 9. Validation
 
