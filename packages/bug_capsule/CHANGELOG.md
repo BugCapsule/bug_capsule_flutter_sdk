@@ -1,4 +1,7 @@
-## Unreleased
+## 0.4.1-beta.7 — 2026-10-27
+
+- Distribute standalone CLI executables for macOS, Linux and Windows, also available through `@bugcapsule/cli` on npm. Installing the CLI no longer requires Dart or Flutter.
+- Add opt-in inline screenshots and timeline support.
 
 - Crash capsules: while a session records, a crash journal (header, checkpoints and events, flushed at least every 250 ms from a background isolate, mirroring the flight recorder's eviction, at most 2 × `maxCapsuleBytes`) is kept per process. On the next launch, a native crash of an earlier run (with `bug_capsule_native`) gets a capsule built from its process's journal: failure kind `crash`, the `crash.native` gap, `labels.source = crash_journal`, `manifest.monitoring` set to the event, and the event carries its `capsuleId`. Crash capsules don't count against `maxCapsulesPerSession`; journals no crash claims are deleted at launch, and any older than 7 days. New `BugCapsuleConfig.crashJournal` (default on).
 - Capsule format v2 accepts failure kind `crash` (with `failure.crash`: mechanism, signal, in-app frame); crash capsules are always written as v2.

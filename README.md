@@ -49,7 +49,7 @@ timing, so races and data-dependent bugs come back.
 ## Install
 
 ```bash
-flutter pub add bug_capsule:^0.4.1-beta.6
+flutter pub add bug_capsule:^0.4.1-beta.7
 ```
 
 Everything ships in this one package, with one import:
@@ -287,33 +287,25 @@ on.
 
 ### Install the CLI
 
-The `bugcapsule` CLI ships in the same package and replays capsules from every
-BugCapsule SDK (Flutter, Android, iOS and web).
+Install the multi-runtime CLI with npm (Node.js 20 or newer):
 
-```bash
-dart pub global activate bug_capsule 0.4.1-beta.6
+```sh
+npm install -g @bugcapsule/cli@0.4.0-beta.3
 bugcapsule --version
-```
-
-If the shell can't find `bugcapsule`, add `~/.pub-cache/bin` to your `PATH`.
-Inside an app that depends on the package you can also run
-`dart run bug_capsule:bugcapsule <command>`.
-
-Sign in through the browser, like `firebase login`:
-
-```bash
 bugcapsule login
 ```
 
-It shows a code and opens BugCapsule in your browser. Check the code matches,
-pick the project and approve; the CLI saves a personal token for that project
-in `~/.bugcapsule/config.json`. Over SSH or without a browser, use
-`bugcapsule login --no-browser` and open the printed address on any device.
-`bugcapsule logout` revokes the token. A self-hosted backend takes
-`--url https://bugs.example.com`.
+No Dart or Flutter installation is needed for the CLI. On first use it downloads
+and verifies a standalone executable for macOS (Apple Silicon or Intel), Linux
+(ARM64 or x64), or Windows x64. Later runs use the cached executable, including
+offline inspection. Direct executable downloads are available in the
+[CLI release](https://github.com/BugCapsule/bug_capsule_flutter_sdk/releases/tag/v0.4.1-beta.7).
 
-In CI, use a service token (`bcv_…`) from **Project settings → Keys & CLI
-access** instead: `bugcapsule login --token bcv_…`, or set `BUGCAPSULE_TOKEN`.
+Replay needs the toolchain of the app being tested: Flutter for Flutter apps,
+Android SDK/JDK for Android, Xcode on macOS for iOS, or Node/Playwright for web.
+Existing Flutter projects can still use `dart run bug_capsule:bugcapsule`.
+If an old Dart installation owns the `bugcapsule` command, deactivate it with
+`dart pub global deactivate bug_capsule` before installing the npm CLI.
 
 ### Run it
 
@@ -417,7 +409,7 @@ More: [docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.ht
 ```yaml
 dependencies:
   bug_capsule: ^0.4.1-beta.7
-  bug_capsule_native: ^0.1.0
+  bug_capsule_native: ^0.1.0-beta.1
 ```
 
 Native crashes are reported on the next launch, in the same issues and

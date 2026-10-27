@@ -212,7 +212,12 @@ void main() {
         BugCapsule.status.toJson(),
         containsPair('connection', containsPair('state', 'connected')),
       );
-      expect(logs.where((l) => l.contains('token')), isEmpty);
+      // A capture path may include the test directory 'bugcapsule-token-'.
+      // Check actual credentials rather than that incidental word.
+      expect(
+        logs.where((l) => l.contains(tokenFor(backend.api)) || l.contains(key)),
+        isEmpty,
+      );
       // App version and build have defaults when only the token is given.
       expect(r.file.existsSync(), isTrue);
       final capsule = CapsuleCodec.decode(await r.file.readAsBytes());

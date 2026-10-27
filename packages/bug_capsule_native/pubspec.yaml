@@ -1,10 +1,9 @@
 name: bug_capsule_native
-description: Native crash reporting for BugCapsule in Flutter apps. Android NDK and iOS signal and Mach crashes of the app, the Flutter engine and plugins, ANRs and app hangs, and the system's exit records, through the BugCapsule Android and iOS SDKs.
-version: 0.1.0-dev.1
+description: Native crash reporting for Flutter apps using BugCapsule, including Android NDK crashes and ANRs, iOS signals, Mach exceptions, hangs and exit diagnostics.
+version: 0.1.0-beta.1
 homepage: https://bugcapsule.com
 documentation: https://docs.bugcapsule.com
 repository: https://github.com/BugCapsule/bug_capsule_flutter_sdk
-publish_to: none
 resolution: workspace
 
 environment:
@@ -14,8 +13,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  bug_capsule:
-    path: ../bug_capsule
+  bug_capsule: ^0.4.1-beta.7
 
 dev_dependencies:
   flutter_test:
