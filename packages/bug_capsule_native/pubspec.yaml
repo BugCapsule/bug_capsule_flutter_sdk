@@ -1,5 +1,5 @@
 name: bug_capsule_native
-description: Native crash reporting for Flutter apps using BugCapsule: Android NDK crashes and ANRs, iOS signals, Mach exceptions, hangs and exit diagnostics.
+description: Native crash reporting for Flutter apps using BugCapsule, including Android NDK crashes and ANRs, iOS signals, Mach exceptions, hangs and exit diagnostics.
 version: 0.1.0-beta.1
 homepage: https://bugcapsule.com
 documentation: https://docs.bugcapsule.com
