@@ -63,6 +63,45 @@ void main() {
 
   setUp(() => changes = []);
 
+  test(
+    'an explicit refresh during a running fetch fetches again afterwards',
+    () {
+      fakeAsync((async) {
+        final backend = FakeBackend(async);
+        // Like HTTP: the answer reflects the server when the request was sent.
+        final c = RemoteConfigController(
+          fetch: () async {
+            backend.calls++;
+            final answer = backend.config();
+            await Future<void>.delayed(const Duration(seconds: 1));
+            return ConfigFetched(answer);
+          },
+          cache: MemoryCache(),
+          scope: 'prod',
+          onChange: (p, n) => changes.add((p, n)),
+          now: () => async.getClock(DateTime.utc(2026)).now(),
+          random: Random(1),
+        );
+        var startupDone = false;
+        c.refresh().then((_) => startupDone = true); // the startup fetch
+        async.elapse(const Duration(milliseconds: 100));
+        backend.enabled = false; // the kill switch flips meanwhile
+        var done = false;
+        c.refresh(current: true).then((_) => done = true);
+        c.refresh(current: true); // a third caller shares the follow-up
+        c.refresh(); // an internal refresh just joins the running fetch
+        async.elapse(const Duration(seconds: 1));
+        expect(startupDone, isTrue);
+        expect(done, isFalse, reason: 'the startup answer predates the call');
+        expect(c.current!.enabled, isTrue);
+        async.elapse(const Duration(seconds: 1));
+        expect(done, isTrue);
+        expect(c.current!.enabled, isFalse);
+        expect(backend.calls, 2);
+      });
+    },
+  );
+
   test('refreshes after the TTL and applies every change', () {
     fakeAsync((async) {
       final backend = FakeBackend(async)..ttl = 60;

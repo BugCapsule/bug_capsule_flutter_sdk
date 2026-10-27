@@ -231,8 +231,11 @@ abstract final class BugCapsule {
       (await _rt?.store)?.savedCaptures() ?? const [];
 
   /// Fetches the remote capture config now (it is otherwise refreshed after
-  /// its TTL and when the app resumes).
-  static Future<void> refreshRemoteConfig() async => _rt?.remote?.refresh();
+  /// its TTL and when the app resumes). The returned future completes with
+  /// a config fetched after this call, also when a fetch was already running
+  /// (such as the one `init` starts).
+  static Future<void> refreshRemoteConfig() async =>
+      _rt?.remote?.refresh(current: true);
 
   /// Uploads queued capsules now, if the remote config allows it.
   static Future<void> flushUploads() async => _rt?.flushOutbox();
