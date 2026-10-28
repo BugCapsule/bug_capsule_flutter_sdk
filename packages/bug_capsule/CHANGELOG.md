@@ -1,3 +1,8 @@
+## 0.4.1-beta.9 — 2026-10-28
+
+- Refresh the README published on pub.dev with current Flutter installation commands and an explanation of the background capture and safe build-error presentation introduced in beta.8.
+- Clarify that the standalone CLI and native plugin use independent version numbers. No runtime behavior changes from beta.8.
+
 ## 0.4.1-beta.8 — 2026-10-28
 
 - Hide the QA capture overlay by default. Flutter release builds always hide it, including when capture mode is QA or showOverlay is explicitly enabled.
