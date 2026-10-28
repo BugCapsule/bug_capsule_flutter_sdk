@@ -1071,8 +1071,14 @@ Capsule? crashCapsuleFrom(
           ? 0
           : checkpoint.afterSeq,
       checkpointKind: checkpoint.kind,
+      // The app's labels give up two slots for the crash labels, so the
+      // capsule stays within CapsuleLimits.maxLabels.
       labels: {
-        for (final e in obj('labels').entries) e.key: '${e.value}',
+        for (final e
+            in obj('labels').entries
+                .where((e) => e.key != 'source' && e.key != 'crash.mechanism')
+                .take(CapsuleLimits.maxLabels - 2))
+          e.key: '${e.value}',
         'source': 'crash_journal',
         'crash.mechanism': request.failure.mechanism.length > 2000
             ? request.failure.mechanism.substring(0, 2000)
