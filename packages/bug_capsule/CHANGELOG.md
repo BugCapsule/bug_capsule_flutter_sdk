@@ -1,3 +1,9 @@
+## 0.4.1-beta.8 — 2026-10-28
+
+- Hide the QA capture overlay by default. Flutter release builds always hide it, including when capture mode is QA or showOverlay is explicitly enabled.
+- Replace Flutter widget build failures with a safe message instead of the gray/red error widget while preserving background error reporting. Configure a localized fallback with errorWidgetBuilder, or keep app-owned presentation with presentBuildErrors: false.
+- Restore the previous error widget builder on disposal without overwriting a newer app-installed builder. Fallback presentation does not report the same failure twice.
+
 ## 0.4.1-beta.7 — 2026-10-27
 
 - Distribute standalone CLI executables for macOS, Linux and Windows, also available through `@bugcapsule/cli` on npm. Installing the CLI no longer requires Dart or Flutter.

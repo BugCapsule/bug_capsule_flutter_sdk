@@ -10,7 +10,8 @@ import 'bug_capsule.dart';
 /// MaterialApp(builder: (context, child) => BugCapsuleOverlay(child: child!))
 /// ```
 ///
-/// Shown only in debug/QA mode while recording. Its own touches are not
+/// Opt in with `showOverlay: true`; hidden by default and in production.
+/// Shown only while recording. Its own touches are not
 /// recorded.
 class BugCapsuleOverlay extends StatefulWidget {
   const BugCapsuleOverlay({super.key, required this.child});

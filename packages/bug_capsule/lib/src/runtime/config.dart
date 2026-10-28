@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show ErrorWidgetBuilder;
 import '../core/core.dart';
 
 import 'backend.dart' show OutboxLimits;
@@ -59,6 +60,8 @@ class BugCapsuleConfig {
     this.outboxLimits = const OutboxLimits(),
     this.maxStaleConfig = const Duration(days: 7),
     bool? showOverlay,
+    this.presentBuildErrors = true,
+    this.errorWidgetBuilder,
     this.ignoreError,
     this.labels = const {},
     this.replayUrl,
@@ -168,6 +171,14 @@ class BugCapsuleConfig {
   final Duration maxStaleConfig;
   final bool? _showOverlay;
 
+  /// Replace failed Flutter widgets with a safe, user-facing message.
+  /// Reporting remains independent of this setting.
+  final bool presentBuildErrors;
+
+  /// Optional localized/branded fallback. Never display raw exception details.
+  /// When omitted, a neutral message asks the user to reopen the screen.
+  final ErrorWidgetBuilder? errorWidgetBuilder;
+
   /// Return true for errors that should not count as failures.
   final bool Function(Object error)? ignoreError;
   final Map<String, String> labels;
@@ -202,5 +213,10 @@ class BugCapsuleConfig {
     return fromEnv.isEmpty ? null : fromEnv == 'true';
   }
 
-  bool get showOverlay => _showOverlay ?? mode != CaptureMode.production;
+  /// QA UI is opt-in and never shown in Flutter release builds or production
+  /// capture mode, even when QA mode or showOverlay is explicitly configured.
+  bool get showOverlay =>
+      !kReleaseMode &&
+      (_showOverlay ?? false) &&
+      mode != CaptureMode.production;
 }
