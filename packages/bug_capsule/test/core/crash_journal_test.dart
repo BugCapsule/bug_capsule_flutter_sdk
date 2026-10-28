@@ -365,6 +365,29 @@ void main() {
       expect(m.runtimeName, 'flutter');
     });
 
+    test('a full set of app labels leaves room for the crash labels', () {
+      final journal = journalWith(
+        (r) => r.add(1100, 'action', {'id': 'pay'}),
+        header: {
+          ..._header(),
+          'labels': {
+            for (var i = 0; i < CapsuleLimits.maxLabels; i++) 'k$i': 'v$i',
+          },
+        },
+      );
+      final build = buildCrashCapsule(
+        journal,
+        _request(crashedAt: DateTime.fromMillisecondsSinceEpoch(1792922391300)),
+      );
+      expect(build, isNotNull);
+      final labels = CapsuleCodec.decode(build!.bytes).manifest.labels;
+      expect(labels.length, CapsuleLimits.maxLabels);
+      expect(labels['source'], 'crash_journal');
+      expect(labels['crash.mechanism'], 'signal');
+      expect(labels['k97'], 'v97');
+      expect(labels.containsKey('k98'), isFalse);
+    });
+
     test('uses the newest periodic checkpoint once the launch one is gone', () {
       final journal = journalWith((r) {
         for (var i = 0; i < 3; i++) {

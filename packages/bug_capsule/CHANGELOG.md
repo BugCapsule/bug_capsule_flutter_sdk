@@ -1,3 +1,7 @@
+## Unreleased
+
+- Crash capsules keep at most 98 app labels, so the two crash labels fit and an app with 99 or more labels no longer loses its crash capsule to validation.
+
 ## 0.4.1-beta.7 — 2026-10-27
 
 - Distribute standalone CLI executables for macOS, Linux and Windows, also available through `@bugcapsule/cli` on npm. Installing the CLI no longer requires Dart or Flutter.
