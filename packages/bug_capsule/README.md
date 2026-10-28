@@ -179,7 +179,7 @@ bugCapsuleDio.attach(dio);                   // after any custom adapter
 final router = GoRouter(initialLocation: bugCapsuleRouter.initialLocation('/'), routes: [...]);
 bugCapsuleRouter.attach(router);
 
-// Optional QA capture button:
+// Optional QA capture button (also requires showOverlay: true in config):
 MaterialApp.router(builder: (context, child) => BugCapsuleOverlay(child: child!), ...);
 ```
 
@@ -559,3 +559,24 @@ This SDK and its bundled CLI are available under the MIT License. See [LICENSE](
 
 Opt-in PNG frames are stored inside capsules and displayed against event time.
 See [capture, privacy, limits and platform examples](spec/screenshots-v1.md).
+
+### Background operation and failed screens
+
+Initialization adds no capture UI by default, including debug and QA builds.
+`BugCapsuleOverlay` requires `showOverlay: true` and stays hidden in production
+capture mode and all Flutter release builds, including release builds configured
+with `CaptureMode.qa` or `BUGCAPSULE_MODE=qa`.
+Explicit feedback widgets are still opt-in.
+
+Flutter build failures automatically display a neutral message in the failed
+widget's place instead of the gray/red error widget. Exception details are kept
+out of that message; the existing error pipeline reports them in the background,
+subject to configured monitoring, consent, sampling and upload availability.
+Customize/localize the message with `BugCapsuleConfig(errorWidgetBuilder: ...)`,
+or preserve your app's own error presentation with `presentBuildErrors: false`.
+The SDK restores the previous builder when disposed unless the app replaced it.
+
+This fallback covers widget build failures. Async, network and platform errors
+continue through reporting without replacing healthy UI. Native process crashes
+cannot display an in-process fallback. Recovery of application state remains the
+app's responsibility.

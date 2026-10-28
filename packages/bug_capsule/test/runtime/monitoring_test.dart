@@ -189,6 +189,39 @@ void main() {
 
   String raw() => jsonEncode(backend.envelopes);
 
+  test(
+    'build fallback is installed, reports once, and restores on reset',
+    () async {
+      final previous = ErrorWidget.builder;
+      await start();
+      expect(ErrorWidget.builder, isNot(same(previous)));
+      final details = FlutterErrorDetails(
+        exception: StateError('private-build-detail'),
+        stack: StackTrace.current,
+        library: 'widgets library',
+      );
+      FlutterError.reportError(details);
+      final fallback = ErrorWidget.builder(details);
+      expect(fallback, isNot(isA<ErrorWidget>()));
+      await flush();
+      final events = backend.items('event');
+      expect(events, hasLength(1));
+      expect(jsonEncode(events.single), contains('private-build-detail'));
+      await BugCapsule.resetForTest();
+      expect(ErrorWidget.builder, same(previous));
+    },
+  );
+
+  test('reset preserves a subsequently installed app fallback', () async {
+    final previous = ErrorWidget.builder;
+    await start();
+    Widget custom(FlutterErrorDetails _) => const SizedBox();
+    ErrorWidget.builder = custom;
+    await BugCapsule.resetForTest();
+    expect(ErrorWidget.builder, same(custom));
+    ErrorWidget.builder = previous;
+  });
+
   group('error events', () {
     test(
       'captureException sends a contract-shaped event with a session update',
