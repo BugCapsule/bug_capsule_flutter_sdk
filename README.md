@@ -48,13 +48,13 @@ timing, so races and data-dependent bugs come back.
 
 ## Install
 
-Current Flutter SDK release: [0.4.1-beta.8](https://pub.dev/packages/bug_capsule/versions/0.4.1-beta.8).
+Current Flutter SDK release: [0.4.1-beta.9](https://pub.dev/packages/bug_capsule/versions/0.4.1-beta.9).
 This release hides the capture overlay by default and in all Flutter release
 builds, and adds a safe message for widget build failures while preserving
 background error reporting. Rebuild your app after upgrading.
 
 ```bash
-flutter pub add bug_capsule:^0.4.1-beta.8
+flutter pub add bug_capsule:^0.4.1-beta.9
 ```
 
 Everything ships in this one package, with one import:
@@ -416,7 +416,7 @@ More: [docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.ht
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.8
+  bug_capsule: ^0.4.1-beta.9
   bug_capsule_native: ^0.1.0-beta.1
 ```
 
