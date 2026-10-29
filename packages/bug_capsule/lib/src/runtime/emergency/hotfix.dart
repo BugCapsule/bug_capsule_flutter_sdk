@@ -53,7 +53,8 @@ final class HotfixStatus {
   /// or `BugCapsuleConfig.appVersion`) for an available runtime.
   final String? releaseVersion;
 
-  /// The patch the running process uses; null on the base release.
+  /// The patch the running process uses; null on the base release. With
+  /// [HotfixState.failed] or [HotfixState.unavailable], null means unknown.
   final int? currentPatch;
 
   /// The patch that becomes active on the next start, when it differs from
