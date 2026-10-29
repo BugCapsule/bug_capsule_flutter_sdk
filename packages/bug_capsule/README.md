@@ -33,6 +33,7 @@ timing, so races and data-dependent bugs come back.
 - [Replay, verify and keep a regression test](#replay-verify-and-keep-a-regression-test)
 - [Monitoring](#monitoring)
 - [Privacy](#privacy)
+- [Emergency recovery (feature guards)](#emergency-recovery-feature-guards)
 - [Going to production](#going-to-production)
 - [Limitations](#limitations)
 - [Demo app](#demo-app)
@@ -466,6 +467,75 @@ Redaction is pattern-based. It does **not** find personal data that isn't a
 credential (names, emails, addresses) or secrets in URL paths. Inspect real
 capsules with `bugcapsule inspect` before a wider rollout. More:
 [Privacy and redaction](https://docs.bugcapsule.com/privacy.html).
+
+## Emergency recovery (feature guards)
+
+When a release misbehaves in production, emergency policies let you switch a
+named feature off, make it read-only, ask for an update or show a maintenance
+message from the BugCapsule dashboard, without shipping a new build. The app
+asks before running a guarded feature:
+
+```dart
+await BugCapsule.emergency.initialize(const EmergencyConfig(
+  trustAnchor: 'bcek.v1.…', // from the dashboard; compile it into the app
+  environment: 'production',
+  failureModes: {'checkout.*': EmergencyFailureMode.failClosed},
+));
+
+final decision = BugCapsule.emergency.evaluate('checkout.confirm_order');
+if (!decision.allowed) {
+  // decision.action: BLOCK, READ_ONLY, REQUIRE_UPDATE, SHOW_MAINTENANCE,
+  // DISABLE_FEATURE or USE_SAFE_FALLBACK (with decision.fallback).
+  showUnavailable(decision.publicUserMessage);
+  return;
+}
+```
+
+How it works:
+
+- **Signed policies, nothing executable.** The SDK downloads a policy document
+  signed with ECDSA P-256 and verifies it against the trust anchor compiled
+  into your app. A document that does not verify, is older than one already
+  seen, or has expired is rejected. No code is ever downloaded or run: a
+  policy only says whether a feature may run and what to show instead.
+- **Local, synchronous decisions.** `evaluate`, `isFeatureAllowed` and
+  `getPolicy` answer from memory and never wait for the network or throw.
+  Policies can target platforms, app version ranges and a percentage rollout;
+  the rollout subject is a random installation id unless you pass
+  `subject:` (a stable pseudonymous id, never an email address or other
+  personal data).
+- **Cached and refreshed.** The last verified document is stored on the
+  device and checked again at startup, so guards work offline from the first
+  frame. Policies refresh every `refreshInterval` (60 s by default, at least
+  15 s) while the app is in the foreground, when it returns to the
+  foreground, and when you call `BugCapsule.emergency.refreshPolicies()`.
+  `BugCapsule.emergency.changes` emits a snapshot when a new document arrives
+  or a document or policy expires; `BugCapsule.emergency.status` reports the
+  revision, expiry, last fetch and last error.
+- **Failure modes.** Without a usable document (none yet, expired, invalid
+  anchor, unsupported platform) each feature uses its failure mode:
+  `failOpen` (the default: allow), `failClosed` (block; use it for actions
+  that move money) or `useLastValidPolicy` (keep applying the expired
+  document). Keys can be exact (`checkout.confirm_order`) or prefixes
+  (`checkout.*`); an exact key wins, then the longest prefix.
+- **Same connection as capture.** The module uses the token or backend from
+  `BugCapsule.init` (or its own `token:` / `backend:`). It keeps working when
+  capture is disabled or switched off remotely, and can be initialized before
+  or after `BugCapsule.init`.
+
+**The client guard is a user-experience measure, not a security control.** A
+modified or outdated app can ignore it. Anything that moves money or data must
+be refused by your own server at the transactional boundary, using the same
+policies, with idempotency keys so retries never charge twice.
+
+Limits:
+
+- Android and iOS only. On web and desktop the module stays in failure mode
+  and logs once.
+- No code push: policies cannot change app behavior beyond the guards you
+  wrote.
+- Guard decisions are not yet recorded into capsules. While a capsule
+  replays, every feature is allowed and the module makes no network calls.
 
 ## Going to production
 

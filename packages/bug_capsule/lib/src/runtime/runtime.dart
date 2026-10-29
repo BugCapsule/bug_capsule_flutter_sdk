@@ -14,6 +14,25 @@ export 'backend.dart'
 export 'binding.dart';
 export 'config.dart';
 export 'connection_token.dart';
+export 'emergency/contract.dart'
+    show
+        EmergencyAction,
+        EmergencyDecision,
+        EmergencyDecisionSource,
+        EmergencyPlatform,
+        EmergencyPolicy,
+        EmergencyPolicyDocument,
+        EmergencyRejection,
+        EmergencyVersionRange;
+export 'emergency/emergency.dart' show BugCapsuleEmergency;
+export 'emergency/types.dart'
+    show
+        EmergencyConfig,
+        EmergencyDocumentState,
+        EmergencyError,
+        EmergencyFailureMode,
+        EmergencySnapshot,
+        EmergencyStatus;
 export 'integration.dart';
 export 'interactions.dart';
 export 'overlay.dart';
