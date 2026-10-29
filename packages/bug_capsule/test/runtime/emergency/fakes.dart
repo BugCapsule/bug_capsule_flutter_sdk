@@ -61,3 +61,45 @@ class FakeHost implements EmergencyHost {
   @override
   Directory? storageDirectory;
 }
+
+/// A scripted hotfix provider: every call returns [status] (or throws
+/// [error]); downloads finish when [download] completes, when it is set.
+class FakeHotfixProvider implements HotfixProvider {
+  FakeHotfixProvider([this.status = upToDate]);
+
+  static const upToDate = HotfixStatus(
+    provider: 'shorebird',
+    available: true,
+    state: HotfixState.upToDate,
+    releaseVersion: '2.4.1+42',
+    currentPatch: 3,
+  );
+
+  HotfixStatus status;
+  Object? error;
+  Completer<void>? download;
+  final List<String> calls = [];
+
+  Future<HotfixStatus> _answer(String call) async {
+    calls.add(call);
+    final e = error;
+    if (e != null) throw e;
+    return status;
+  }
+
+  @override
+  Future<HotfixAvailability> checkAvailability() async =>
+      HotfixAvailability(await _answer('checkAvailability'));
+
+  @override
+  Future<HotfixResult> downloadAvailablePatch() async {
+    final s = await _answer('downloadAvailablePatch');
+    await download?.future;
+    return s.state == HotfixState.restartRequired
+        ? HotfixRestartRequired(s)
+        : HotfixNothingToDownload(s);
+  }
+
+  @override
+  Future<HotfixStatus> getStatus() => _answer('getStatus');
+}

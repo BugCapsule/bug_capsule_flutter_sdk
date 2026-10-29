@@ -523,6 +523,40 @@ How it works:
   capture is disabled or switched off remotely, and can be initialized before
   or after `BugCapsule.init`.
 
+### Hotfixes (Shorebird)
+
+A guard switches a broken feature off; a hotfix fixes it. With a hotfix
+adapter, the module also tells the BugCapsule backend which patch each
+installation runs, so you can see whether a recovery can reach the installed
+builds and follow it once it ships. The adapter for Shorebird is the separate
+`bug_capsule_shorebird` package:
+
+```dart
+await BugCapsule.emergency.initialize(EmergencyConfig(
+  trustAnchor: 'bcek.v1.…',
+  hotfixProvider: BugCapsuleShorebird(),
+));
+
+final result = await BugCapsule.emergency.hotfix!.downloadAvailablePatch();
+if (result is HotfixRestartRequired) {
+  // The patch is active after the next start. When that is, is up to you.
+}
+```
+
+- `checkAvailability()`, `downloadAvailablePatch()` and `getStatus()` return
+  the provider's status: whether the build can be patched at all, the running
+  patch (`currentPatch`), a downloaded one waiting for the next start
+  (`nextPatch`) and the state (`up_to_date`, `outdated`, `downloading`,
+  `restart_required`, `unavailable`, `failed`). They never throw.
+- The SDK never restarts the app and never reports a downloaded patch as
+  active.
+- Only builds made with `shorebird release` can be patched; any other build
+  reports `available: false` and needs a store release. Code push changes Dart
+  code only.
+- Each new status is sent with the module's receipts (`RUNTIME`), at most one
+  per minute, and not during capsule replay. Other code push services can
+  implement `HotfixProvider`.
+
 **The client guard is a user-experience measure, not a security control.** A
 modified or outdated app can ignore it. Anything that moves money or data must
 be refused by your own server at the transactional boundary, using the same
@@ -532,8 +566,9 @@ Limits:
 
 - Android and iOS only. On web and desktop the module stays in failure mode
   and logs once.
-- No code push: policies cannot change app behavior beyond the guards you
-  wrote.
+- Policies are not code push: they cannot change app behavior beyond the
+  guards you wrote. A code fix arrives through a store release or a hotfix
+  adapter.
 - Guard decisions are not yet recorded into capsules. While a capsule
   replays, every feature is allowed and the module makes no network calls.
 

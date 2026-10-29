@@ -220,6 +220,67 @@ void main() {
     expect(server.receipts.first, containsPair('revision', 0));
   });
 
+  test('a hotfix status is posted as a RUNTIME receipt, and APPLIED '
+      'carries it', () async {
+    var answered = false;
+    server.policies = (req) async {
+      // The first fetch waits until the runtime report is in.
+      await until(() => server.receipts.isNotEmpty);
+      answered = true;
+      req.response
+        ..headers.contentType = ContentType.json
+        ..headers.set('etag', server.etag)
+        ..write(jsonEncode(server.envelope));
+    };
+    await initialize(
+      config: EmergencyConfig(
+        trustAnchor: _anchor,
+        backend: server.backend,
+        appVersion: '2.4.1+42',
+        hotfixProvider: FakeHotfixProvider(
+          const HotfixStatus(
+            provider: 'shorebird',
+            available: true,
+            state: HotfixState.restartRequired,
+            currentPatch: 3,
+            nextPatch: 4,
+          ),
+        ),
+      ),
+    );
+    await until(() => server.receipts.length >= 2);
+    expect(answered, isTrue);
+    const runtime = {
+      'hotfix': {
+        'provider': 'shorebird',
+        'available': true,
+        'releaseVersion': '2.4.1+42',
+        'currentPatch': 3,
+        'nextPatch': 4,
+        'state': 'restart_required',
+      },
+    };
+    final report = server.receipts.first;
+    expect(report, {
+      'environment': 'production',
+      'platform': 'FLUTTER_ANDROID',
+      'installationId': report['installationId'],
+      'appVersion': '2.4.1+42',
+      'sdkVersion': bugCapsuleVersion,
+      'revision': 0,
+      'status': 'RUNTIME',
+      'errorCode': null,
+      'runtime': runtime,
+    });
+    expect(report['installationId'], matches(RegExp(r'^[A-Za-z0-9_-]{22}$')));
+    final applied = server.receipts[1];
+    expect(applied['status'], 'APPLIED');
+    expect(applied['revision'], 42);
+    expect(applied['runtime'], runtime);
+    final post = server.seen.firstWhere((s) => s.path.endsWith('/receipts'));
+    expect(post.auth, 'Bearer $_ingestKey');
+  });
+
   test('a 200 body that is not JSON is malformed', () async {
     server.policies = (req) async {
       req.response.write('<html>proxy error</html>');
