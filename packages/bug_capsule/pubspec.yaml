@@ -25,6 +25,7 @@ dependencies:
   http: ^1.5.0
   mobx: ^2.3.0
   path_provider: ^2.1.5
+  pointycastle: ^4.0.0
   riverpod: ^3.0.0
   shared_preferences: ^2.5.0
   stream_channel: ^2.1.2
