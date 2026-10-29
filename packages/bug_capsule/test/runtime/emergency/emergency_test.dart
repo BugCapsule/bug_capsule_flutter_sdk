@@ -451,6 +451,210 @@ void main() {
     });
   });
 
+  group('hotfix', () {
+    List<Map<String, Object?>> reports() =>
+        transport.receipts.where((r) => r['status'] == 'RUNTIME').toList();
+    Map<String, Object?>? reported() =>
+        (reports().last['runtime']! as Map)['hotfix'] as Map<String, Object?>?;
+
+    test('without a provider there is no hotfix adapter', () async {
+      final f = facade();
+      expect(f.hotfix, isNull);
+      await f.initialize(EmergencyConfig(trustAnchor: signer.anchor()));
+      expect(f.hotfix, isNull);
+      await pumpEventQueue();
+      expect(reports(), isEmpty);
+    });
+
+    test('initialize reports the provider status with the highest revision '
+        'of the cache', () async {
+      transport.answer(served(doc(revision: 9)));
+      final first = facade();
+      await first.initialize(EmergencyConfig(trustAnchor: signer.anchor()));
+      await first.refreshPolicies();
+      await restart(first);
+      transport.receipts.clear();
+
+      final provider = FakeHotfixProvider();
+      final f = facade();
+      await f.initialize(
+        EmergencyConfig(trustAnchor: signer.anchor(), hotfixProvider: provider),
+      );
+      expect(f.hotfix, isNotNull);
+      await pumpEventQueue();
+      expect(provider.calls, ['getStatus']);
+      expect(reports(), hasLength(1));
+      expect(reports().single['revision'], 9);
+      expect(reports().single['errorCode'], isNull);
+      expect(reports().single['runtime'], {
+        'hotfix': {
+          'provider': 'shorebird',
+          'available': true,
+          'releaseVersion': '2.4.1+42',
+          'currentPatch': 3,
+          'nextPatch': null,
+          'state': 'up_to_date',
+        },
+      });
+      expect(f.hotfix!.lastStatus, FakeHotfixProvider.upToDate);
+    });
+
+    test('a missing release version is the app version for an available '
+        'runtime only', () async {
+      final provider = FakeHotfixProvider(
+        const HotfixStatus(
+          provider: 'shorebird',
+          available: true,
+          state: HotfixState.upToDate,
+        ),
+      );
+      final f = facade();
+      await f.initialize(
+        EmergencyConfig(trustAnchor: signer.anchor(), hotfixProvider: provider),
+      );
+      await pumpEventQueue();
+      expect(reported(), containsPair('releaseVersion', '2.4.1'));
+
+      clock = clock.add(const Duration(seconds: 61));
+      provider.status = const HotfixStatus(
+        provider: 'shorebird',
+        available: false,
+        state: HotfixState.unavailable,
+      );
+      await f.hotfix!.getStatus();
+      expect(reports(), hasLength(2));
+      expect(reported(), containsPair('releaseVersion', null));
+      expect(reported(), containsPair('available', false));
+    });
+
+    test('every call updates the report; concurrent downloads join', () async {
+      final provider = FakeHotfixProvider();
+      final f = facade();
+      await f.initialize(
+        EmergencyConfig(trustAnchor: signer.anchor(), hotfixProvider: provider),
+      );
+      await pumpEventQueue();
+      final hotfix = f.hotfix!;
+
+      clock = clock.add(const Duration(seconds: 61));
+      provider.status = const HotfixStatus(
+        provider: 'shorebird',
+        available: true,
+        state: HotfixState.outdated,
+        currentPatch: 3,
+      );
+      final availability = await hotfix.checkAvailability();
+      expect(availability.patchAvailable, isTrue);
+      expect(reported(), containsPair('state', 'outdated'));
+
+      clock = clock.add(const Duration(seconds: 61));
+      provider
+        ..status = const HotfixStatus(
+          provider: 'shorebird',
+          available: true,
+          state: HotfixState.restartRequired,
+          currentPatch: 3,
+          nextPatch: 4,
+        )
+        ..download = Completer<void>();
+      final a = hotfix.downloadAvailablePatch();
+      final b = hotfix.downloadAvailablePatch();
+      provider.download!.complete();
+      final result = await a;
+      expect(await b, same(result));
+      expect(result, isA<HotfixRestartRequired>());
+      expect((result as HotfixRestartRequired).nextPatch, 4);
+      expect(
+        provider.calls.where((c) => c == 'downloadAvailablePatch'),
+        hasLength(1),
+      );
+      expect(reports(), hasLength(3));
+      expect(reported(), containsPair('state', 'restart_required'));
+      expect(reported(), containsPair('currentPatch', 3));
+      expect(reported(), containsPair('nextPatch', 4));
+    });
+
+    test('a status that cannot be reported is logged and dropped', () async {
+      final provider = FakeHotfixProvider(
+        const HotfixStatus(
+          provider: 'Shorebird',
+          available: true,
+          state: HotfixState.upToDate,
+        ),
+      );
+      final f = facade();
+      await f.initialize(
+        EmergencyConfig(trustAnchor: signer.anchor(), hotfixProvider: provider),
+      );
+      await pumpEventQueue();
+      provider.status = const HotfixStatus(
+        provider: 'shorebird',
+        available: true,
+        state: HotfixState.upToDate,
+        currentPatch: 0,
+      );
+      final status = await f.hotfix!.getStatus();
+      expect(status.currentPatch, 0, reason: 'the app still gets the answer');
+      expect(reports(), isEmpty);
+      expect(
+        logs.where((l) => l.contains('hotfix status not reported')),
+        hasLength(2),
+      );
+    });
+
+    test('a provider that throws gives a failed result, reported under its '
+        'last known name', () async {
+      final provider = FakeHotfixProvider();
+      final f = facade();
+      await f.initialize(
+        EmergencyConfig(trustAnchor: signer.anchor(), hotfixProvider: provider),
+      );
+      await pumpEventQueue();
+      clock = clock.add(const Duration(seconds: 61));
+      provider.error = StateError('engine gone');
+      final result = await f.hotfix!.downloadAvailablePatch();
+      expect(result, isA<HotfixDownloadFailed>());
+      expect((result as HotfixDownloadFailed).reason, 'provider_error');
+      expect(result.status.state, HotfixState.failed);
+      expect(result.status.provider, 'shorebird');
+      expect(result.status.currentPatch, 3);
+      expect(reported(), containsPair('state', 'failed'));
+      expect(reported(), containsPair('currentPatch', 3));
+    });
+
+    test('replay: calls reach the provider, nothing is reported', () async {
+      host.isReplaying = true;
+      final provider = FakeHotfixProvider();
+      final f = facade();
+      await f.initialize(
+        EmergencyConfig(trustAnchor: signer.anchor(), hotfixProvider: provider),
+      );
+      await pumpEventQueue();
+      expect(provider.calls, isEmpty, reason: 'no report to make at startup');
+      expect(await f.hotfix!.getStatus(), FakeHotfixProvider.upToDate);
+      expect(transport.receipts, isEmpty);
+    });
+
+    test('a replay that starts later stops the reports', () async {
+      final provider = FakeHotfixProvider();
+      final f = facade();
+      await f.initialize(
+        EmergencyConfig(trustAnchor: signer.anchor(), hotfixProvider: provider),
+      );
+      await pumpEventQueue();
+      expect(reports(), hasLength(1));
+      host.isReplaying = true;
+      clock = clock.add(const Duration(seconds: 61));
+      provider.status = const HotfixStatus(
+        provider: 'shorebird',
+        available: true,
+        state: HotfixState.outdated,
+      );
+      await f.hotfix!.checkAvailability();
+      expect(reports(), hasLength(1));
+    });
+  });
+
   group('connection', () {
     test('uses the BugCapsule connection by default', () async {
       transport.answer(served(doc()));

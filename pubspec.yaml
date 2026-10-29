@@ -12,6 +12,7 @@ workspace:
   - packages/bug_capsule_native
   - packages/bug_capsule_google_maps
   - packages/bug_capsule_stripe
+  - packages/bug_capsule_shorebird
   - example/bug_capsule_demo
 
 dev_dependencies:
