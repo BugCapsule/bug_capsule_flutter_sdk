@@ -99,7 +99,7 @@ class EmergencyEngine {
   final Set<String> _receiptsSent = {};
   Map<String, Object?>? _runtime;
   String? _runtimeKey;
-  final Set<String> _runtimeSent = {};
+  String? _runtimeSentKey;
   DateTime? _runtimeSentAt;
   Timer? _runtimeTimer;
   final Set<String> _warned = {};
@@ -534,10 +534,9 @@ class EmergencyEngine {
   }
 
   /// The adapters' state changed: [runtime] is the validated `runtime`
-  /// object of §7.6. Reported at most once per distinct object and process,
-  /// and at most once per [runtimeReportInterval]; an object that changes
-  /// again within the interval is sent once, as it is when the interval
-  /// ends.
+  /// object of §7.6. Never the same object twice in a row, and at most one
+  /// report per [runtimeReportInterval]; an object that changes again
+  /// within the interval is sent once, as it is when the interval ends.
   void updateRuntime(Map<String, Object?> runtime) {
     if (_disposed) return;
     _runtime = runtime;
@@ -552,7 +551,7 @@ class EmergencyEngine {
   void _sendRuntime() {
     final runtime = _runtime;
     final key = _runtimeKey;
-    if (runtime == null || key == null || _runtimeSent.contains(key)) return;
+    if (runtime == null || key == null || key == _runtimeSentKey) return;
     if (!_started || _disposed || _paused || _runtimeTimer != null) return;
     if (isReplaying()) return;
     final backend = connection();
@@ -569,7 +568,7 @@ class EmergencyEngine {
         return;
       }
     }
-    _runtimeSent.add(key);
+    _runtimeSentKey = key;
     _runtimeSentAt = now;
     _post(backend, _highestRevision, 'RUNTIME', null, runtime);
   }

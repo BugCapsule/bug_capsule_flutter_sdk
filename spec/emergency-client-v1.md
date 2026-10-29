@@ -257,10 +257,16 @@ revision (`0` before any), `errorCode: null`, and a `runtime` object:
 Patch numbers are integers from 1 to 2³¹−1. Either of `hotfix` and `update`
 may be left out, and `runtime` must not carry other fields.
 
-* A client sends a report when its runtime object changes, at most once
-  per distinct object per process, and at most once every 60 s. When the object
-  changes again within that interval, the client sends only the latest one
-  when it ends. Reports are fire-and-forget, like every receipt.
+* A client sends a report when its runtime object changes. It never sends
+  the same object twice in a row, and it sends at most one report every 60 s.
+  When the object changes again within that interval, the client sends only
+  the latest one when the interval ends. Reports are fire-and-forget, like
+  every receipt.
+* `RUNTIME` receipts are exempt from the once-per-`(revision, status,
+  errorCode)` rule of §7.3. A client may send several of them for one
+  revision.
+* When `hotfix.state` is `failed` or `unavailable`, null patch numbers mean
+  "unknown". They do not mean the base release.
 * `APPLIED` and `FAILED` receipts may also carry the latest `runtime`.
 * No adapter can observe that an update was installed, because the process
   that started it is gone by then. An installed update shows up as the new

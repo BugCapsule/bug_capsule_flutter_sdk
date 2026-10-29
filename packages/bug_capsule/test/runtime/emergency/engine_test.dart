@@ -849,7 +849,7 @@ void main() {
       },
     );
 
-    test('each distinct object is sent once per process', () {
+    test('never the same object twice in a row; an object can come back', () {
       fakeAsync((async) {
         final e = engine(async);
         unawaited(e.start());
@@ -859,12 +859,22 @@ void main() {
         async.elapse(const Duration(minutes: 2));
         e.updateRuntime(hotfix('outdated'));
         async.elapse(const Duration(minutes: 2));
-        e.updateRuntime(hotfix('up_to_date'));
+        e.updateRuntime(hotfix('failed'));
+        async.elapse(const Duration(minutes: 2));
+        e.updateRuntime(hotfix('outdated'));
+        e.updateRuntime(hotfix('outdated'));
         async.elapse(const Duration(minutes: 2));
         expect(reports().map((r) => (r['runtime']! as Map)['hotfix']), [
           containsPair('state', 'up_to_date'),
           containsPair('state', 'outdated'),
+          containsPair('state', 'failed'),
+          containsPair('state', 'outdated'),
         ]);
+        expect(
+          reports().map((r) => r['revision']),
+          everyElement(0),
+          reason: 'several RUNTIME receipts for one revision',
+        );
         e.dispose();
       });
     });
@@ -892,16 +902,25 @@ void main() {
           reason: 'only the latest object, downloading is never sent',
         );
 
-        // Back to an object already sent before the interval ends: nothing.
+        // Changes that end on the object last sent: nothing more.
         async.elapse(const Duration(seconds: 5));
-        e.updateRuntime(hotfix('outdated'));
+        e.updateRuntime(hotfix('failed'));
+        e.updateRuntime(hotfix('restart_required', next: 4));
         async.elapse(const Duration(minutes: 5));
         expect(reports(), hasLength(2));
 
-        // A new object after the interval goes out at once.
-        e.updateRuntime(hotfix('failed'));
+        // An object sent earlier comes back: sent once the interval allows.
+        e.updateRuntime(hotfix('outdated'));
         async.flushMicrotasks();
         expect(reports(), hasLength(3));
+        expect(reports().last['runtime'], hotfix('outdated'));
+        async.elapse(const Duration(seconds: 1));
+        e.updateRuntime(hotfix('failed'));
+        async.elapse(const Duration(seconds: 58));
+        expect(reports(), hasLength(3));
+        async.elapse(const Duration(seconds: 1));
+        expect(reports(), hasLength(4));
+        expect(reports().last['runtime'], hotfix('failed'));
         e.dispose();
       });
     });
