@@ -462,6 +462,60 @@ void main() {
       ]);
     });
 
+    test(
+      'preserves patch identity and required runtime without interactions',
+      () {
+        final identity = CapsulePatchIdentity(
+          baseBuildId: 'base-release-1',
+          engineAbi: 1,
+          hostAbiHash: 'sha256:${'a' * 64}',
+          patchSetDigest: 'sha256:${'b' * 64}',
+          artifactDigest: 'sha256:${'c' * 64}',
+        );
+        final header = _header(dependencies: [identity.dependency.toJson()]);
+        header['patch'] = identity.toJson();
+        final journal = journalWith(
+          (r) => r.add(150, 'action', {'id': 'crash-screen'}),
+          header: header,
+        );
+        final manifest = CapsuleCodec.decode(
+          buildCrashCapsule(journal, _request())!.bytes,
+        ).manifest;
+        expect(manifest.patch?.toJson(), identity.toJson());
+        expect(manifest.dependencies, hasLength(1));
+        expect(
+          manifest.dependencies.single.toJson(),
+          identity.dependency.toJson(),
+        );
+        expect(manifest.dependencies.single.required, isTrue);
+      },
+    );
+
+    test(
+      'does not erase an unsupported runtime dependency during recovery',
+      () {
+        final dependency = {
+          'id': patchRuntimeDependencyKind,
+          'kind': patchRuntimeDependencyKind,
+          'adapter': 'future.patch_runtime',
+          'adapterVersion': '2',
+          'schema': 2,
+          'required': true,
+          'coverage': 'complete',
+        };
+        final journal = journalWith(
+          (r) => r.add(150, 'action', {'id': 'a'}),
+          header: _header(dependencies: [dependency]),
+        );
+        final manifest = CapsuleCodec.decode(
+          buildCrashCapsule(journal, _request())!.bytes,
+        ).manifest;
+        expect(manifest.dependencies.single.adapter, 'future.patch_runtime');
+        expect(manifest.dependencies.single.schema, 2);
+        expect(manifest.dependencies.single.required, isTrue);
+      },
+    );
+
     test('keeps only the dependencies whose events are in the window', () {
       final dependency = {
         'id': 'ws',

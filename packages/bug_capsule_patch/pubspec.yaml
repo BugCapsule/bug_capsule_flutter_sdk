@@ -1,0 +1,31 @@
+name: bug_capsule_patch
+description: BugCapsule patch runtime for Flutter. Runs signed replacements of registered module logic on an installed release build, with local rollback.
+version: 0.1.0-dev.1
+homepage: https://bugcapsule.com
+documentation: https://docs.bugcapsule.com
+repository: https://github.com/BugCapsule/bug_capsule_flutter_sdk
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.9.0
+  flutter: ">=3.35.0"
+
+dependencies:
+  bug_capsule:
+    path: ../bug_capsule
+  ffi: ^2.1.0
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        ffiPlugin: true
+      ios:
+        ffiPlugin: true

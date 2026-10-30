@@ -81,6 +81,79 @@ abstract final class Processes {
   }
 }
 
+/// Captures a lifecycle command without treating a nonzero exit as an error
+/// (terminating an already stopped app is harmless). Timeout kills only this
+/// tracked child; a descendant holding a pipe cannot prolong the deadline.
+Future<ProcessResult> runCaptured(
+  String exe,
+  List<String> args, {
+  Duration timeout = const Duration(seconds: 30),
+  bool runInShell = false,
+}) async {
+  if (timeout <= Duration.zero) {
+    throw StateError('$exe: attempt deadline expired');
+  }
+  final p = await Processes.start(exe, args, runInShell: runInShell);
+  final out = StringBuffer();
+  final err = StringBuffer();
+  final outputDone = Completer<void>();
+  final errorsDone = Completer<void>();
+  final output = p.stdout
+      .transform(utf8.decoder)
+      .listen(
+        out.write,
+        onDone: outputDone.complete,
+        onError: outputDone.completeError,
+      );
+  final errors = p.stderr
+      .transform(utf8.decoder)
+      .listen(
+        err.write,
+        onDone: errorsDone.complete,
+        onError: errorsDone.completeError,
+      );
+  try {
+    final collected = p.exitCode.then((code) async {
+      await Future.wait([outputDone.future, errorsDone.future]);
+      return code;
+    });
+    final code = await collected.timeout(
+      timeout,
+      onTimeout: () async {
+        await Processes.kill(p, grace: const Duration(milliseconds: 250));
+        throw StateError(
+          '$exe ${args.join(' ')} timed out after ${timeout.inMilliseconds}ms',
+        );
+      },
+    );
+    return ProcessResult(p.pid, code, out.toString(), err.toString());
+  } finally {
+    await output.cancel();
+    await errors.cancel();
+  }
+}
+
+/// Best-effort app cleanup must never replace or indefinitely delay a report.
+Future<void> terminateSimulatorApp(String udid, String bundleId) async {
+  try {
+    await runCaptured('xcrun', [
+      'simctl',
+      'terminate',
+      udid,
+      bundleId,
+    ], timeout: const Duration(seconds: 5));
+  } catch (e) {
+    stderr.writeln('simulator cleanup incomplete: $e');
+  }
+}
+
+/// Monotonic remaining time shared by setup commands and report waiting.
+Duration remainingAttemptTime(Stopwatch clock, Duration budget) {
+  final remaining = budget - clock.elapsed;
+  if (remaining <= Duration.zero) throw StateError('attempt deadline expired');
+  return remaining;
+}
+
 /// Runs a command to completion with a [timeout]; throws [StateError] with the
 /// tail of its output when it fails. Output is streamed when [verbose].
 Future<String> runChecked(

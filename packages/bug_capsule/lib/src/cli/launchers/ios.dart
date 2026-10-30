@@ -79,6 +79,7 @@ class IosNativeLauncher implements AppLauncher {
         ['simctl', 'boot', sim.udid],
         verbose: options.verbose,
         label: 'simctl boot',
+        timeout: const Duration(seconds: 30),
       );
       await runChecked(
         'xcrun',
@@ -110,7 +111,7 @@ class IosNativeLauncher implements AppLauncher {
     final app = _findApp(File(_xctestrun).parent);
     release = app == null ? null : await AppRelease.fromIosApp(app.path);
     Processes.onCleanup(() async {
-      await Process.run('xcrun', ['simctl', 'terminate', sim.udid, _bundleId]);
+      await terminateSimulatorApp(sim.udid, _bundleId);
     });
   }
 
@@ -243,7 +244,7 @@ class IosNativeLauncher implements AppLauncher {
         'no app in ${dir.path}; set "ios.bundleId" in bugcapsule.json',
       );
     }
-    final res = await Process.run('plutil', [
+    final res = await runCaptured('plutil', [
       '-extract',
       'CFBundleIdentifier',
       'raw',
@@ -264,6 +265,10 @@ class IosNativeLauncher implements AppLauncher {
     Duration timeout,
   ) async {
     final sim = _sim!;
+    final startup = Duration(seconds: _intSetting('startupSeconds') ?? 120);
+    final budget = timeout + startup;
+    final clock = Stopwatch()..start();
+    Duration remaining() => remainingAttemptTime(clock, budget);
     final armed = server.arm(capsule, settings);
     Process? xcodebuild;
     final subs = <StreamSubscription<String>>[];
@@ -271,8 +276,8 @@ class IosNativeLauncher implements AppLauncher {
     try {
       // Attempt isolation: a fresh data container (test-without-building
       // reinstalls the app from the build products).
-      await Process.run('xcrun', ['simctl', 'terminate', sim.udid, _bundleId]);
-      await Process.run('xcrun', ['simctl', 'uninstall', sim.udid, _bundleId]);
+      await runCaptured('xcrun', ['simctl', 'terminate', sim.udid, _bundleId], timeout: remaining());
+      await runCaptured('xcrun', ['simctl', 'uninstall', sim.udid, _bundleId], timeout: remaining());
       final started = DateTime.now();
 
       xcodebuild = await Processes.start(
@@ -323,9 +328,8 @@ class IosNativeLauncher implements AppLauncher {
         return crash == null ? report : report.copyWith(crash: crash);
       });
       // Install + launch of the test runner count against the budget too.
-      final startup = Duration(seconds: _intSetting('startupSeconds') ?? 120);
       return await Future.any([armed.report, exited]).timeout(
-        timeout + startup,
+        remaining(),
         onTimeout: () => errorReport(
           armed.settings,
           'no result within ${(timeout + startup).inSeconds}s (xcodebuild killed)\n${tail(log.toString(), 15)}',
@@ -341,7 +345,7 @@ class IosNativeLauncher implements AppLauncher {
       for (final s in subs) {
         await s.cancel();
       }
-      await Process.run('xcrun', ['simctl', 'terminate', sim.udid, _bundleId]);
+      await terminateSimulatorApp(sim.udid, _bundleId);
     }
   }
 
@@ -358,7 +362,7 @@ class IosNativeLauncher implements AppLauncher {
   Future<void> dispose() async {}
 
   static Future<_Simulator> _pickSimulator(String? query) async {
-    final res = await Process.run('xcrun', [
+    final res = await runCaptured('xcrun', [
       'simctl',
       'list',
       'devices',

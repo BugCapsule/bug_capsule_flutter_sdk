@@ -7,6 +7,7 @@ import 'package:bug_capsule/src/cli/commands.dart';
 import 'package:bug_capsule/src/cli/gate.dart';
 import 'package:bug_capsule/src/cli/launcher.dart';
 import 'package:bug_capsule/src/cli/replay_server.dart';
+import 'package:bug_capsule/src/cli/replay.dart';
 import 'package:bug_capsule/src/core/core.dart';
 import 'package:test/test.dart';
 
@@ -105,19 +106,21 @@ class FakeGateBackend {
   }
 }
 
-ReplayReport _attempt(ReplaySettings s, {required bool reproduced}) =>
-    ReplayReport(
-      outcome: reproduced
-          ? ReplayOutcome.reproduced
-          : ReplayOutcome.notReproduced,
-      attempt: s.attempt,
-      durationMs: 5,
-      strategy: ReplayStrategy.semantic,
-      expectedSignature: _signature,
-      eventsDispatched: 1,
-      eventsExpected: 1,
-      attemptId: s.attemptId,
-    );
+ReplayReport _attempt(
+  ReplaySettings s, {
+  required bool reproduced,
+  CapsulePatchIdentity? patch,
+}) => ReplayReport(
+  outcome: reproduced ? ReplayOutcome.reproduced : ReplayOutcome.notReproduced,
+  attempt: s.attempt,
+  durationMs: 5,
+  strategy: ReplayStrategy.semantic,
+  expectedSignature: _signature,
+  eventsDispatched: 1,
+  eventsExpected: 1,
+  attemptId: s.attemptId,
+  patch: patch,
+);
 
 /// Scripted attempts by capsule id: `pass`, `reproduce`, `flaky`, `throw`.
 class FakeLauncher implements AppLauncher {
@@ -129,6 +132,7 @@ class FakeLauncher implements AppLauncher {
   int prepares = 0;
   final List<String> attempts = [];
   bool failBuild = false;
+  Map<String, CapsulePatchIdentity?> identities = {};
 
   @override
   String get target => 'fake device';
@@ -156,7 +160,7 @@ class FakeLauncher implements AppLauncher {
       'reproduce' => _attempt(settings, reproduced: true),
       'flaky' => _attempt(settings, reproduced: settings.attempt == 1),
       'throw' => throw StateError('device went away'),
-      _ => _attempt(settings, reproduced: false),
+      _ => _attempt(settings, reproduced: false, patch: identities[id]),
     };
   }
 
@@ -200,12 +204,14 @@ void main() {
     List<String> args, {
     Map<String, String> script = const {},
     bool failBuild = false,
+    Map<String, CapsulePatchIdentity?> identities = const {},
   }) async {
     final runner = CommandRunner<int>('bugcapsule', 'test')
       ..addCommand(
         GateCommand(
-          launcherFactory: (options) =>
-              launcher = FakeLauncher(options, script)..failBuild = failBuild,
+          launcherFactory: (options) => launcher = FakeLauncher(options, script)
+            ..failBuild = failBuild
+            ..identities = identities,
         ),
       );
     return await runner.run([
@@ -226,6 +232,179 @@ void main() {
         ]) ??
         0;
   }
+
+  const identity = CapsulePatchIdentity(
+    baseBuildId: 'base',
+    patchSetDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    engineAbi: 1,
+    hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  );
+
+  test(
+    'real gate command posts the identity reported by every attempt',
+    () async {
+      backend.plan = [_item('cap-1', 'Fixed regression', reason: 'regression')];
+      expect(await gate([], identities: {'cap-1': identity}), 0);
+      expect(backend.runs.single.$2['patch'], identity.toJson());
+      expect(backend.reports.single['patch'], identity.toJson());
+    },
+  );
+
+  test(
+    'real gate command refuses mixed or missing attempt identities',
+    () async {
+      backend.plan = [
+        _item('cap-1', 'Fix'),
+        _item('cap-2', 'Regression', reason: 'regression'),
+      ];
+      expect(await gate([], identities: {'cap-1': identity}), 1);
+      expect(backend.reports, isEmpty);
+    },
+  );
+
+  test(
+    'a requested patch cannot manufacture identity for an empty gate',
+    () async {
+      final archive = File('${project.path}/unused.bcpatch')
+        ..writeAsBytesSync([1]);
+      expect(await gate(['--patch-artifact', archive.path]), 1);
+      expect(backend.reports, isEmpty);
+    },
+  );
+
+  group('exact gate report identity', () {
+    final item = GateItem.fromJson(
+      _item('cap', 'Regression', reason: 'regression'),
+    );
+    ReplayReport attempt(CapsulePatchIdentity? patch) => ReplayReport(
+      outcome: ReplayOutcome.notReproduced,
+      attempt: 1,
+      durationMs: 1,
+      strategy: ReplayStrategy.semantic,
+      patch: patch,
+    );
+    GateResult result(List<CapsulePatchIdentity?> patches) => GateResult(
+      item,
+      'not_reproduced',
+      summary: ReplaySummary(
+        ReplayKind.verify,
+        patches.map(attempt).toList(),
+        null,
+        requestedAttempts: patches.length,
+      ),
+    );
+    Map<String, Object?> report(
+      List<GateResult> results, {
+      bool required = false,
+    }) => gateReport(
+      release: 'com.shop@1.0.0+1',
+      platform: 'android',
+      results: results,
+      passed: true,
+      startedAt: DateTime.utc(2026),
+      finishedAt: DateTime.utc(2026),
+      requirePatchedIdentity: required,
+    );
+
+    test(
+      'checks each identity field across attempts within a single capsule',
+      () {
+        for (final wrong in [
+          const CapsulePatchIdentity(
+            baseBuildId: 'other',
+            patchSetDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            engineAbi: 1,
+            hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          ),
+          const CapsulePatchIdentity(
+            baseBuildId: 'base',
+            patchSetDigest: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+            engineAbi: 1,
+            hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          ),
+          const CapsulePatchIdentity(
+            baseBuildId: 'base',
+            patchSetDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            engineAbi: 2,
+            hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          ),
+          const CapsulePatchIdentity(
+            baseBuildId: 'base',
+            patchSetDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            engineAbi: 1,
+            hostAbiHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          ),
+        ]) {
+          expect(
+            () => report([
+              result([identity, wrong]),
+            ]),
+            throwsStateError,
+          );
+        }
+      },
+    );
+    test('missing or unexecuted attempts cannot count as patch evidence', () {
+      expect(
+        () => report([
+          result([identity, null]),
+        ]),
+        throwsStateError,
+      );
+      expect(
+        () => report([
+          result([identity]),
+          GateResult(item, 'error'),
+        ]),
+        throwsStateError,
+      );
+      expect(() => report([result([])], required: true), throwsStateError);
+      expect(
+        () => report([
+          result([null]),
+        ], required: true),
+        throwsStateError,
+      );
+    });
+    test(
+      'bare base cannot satisfy a requested patch; legacy unpatched gates remain unchanged',
+      () {
+        const base = CapsulePatchIdentity(
+          baseBuildId: 'base',
+          engineAbi: 1,
+          hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        );
+        expect(
+          () => report([
+            result([base]),
+          ], required: true),
+          throwsStateError,
+        );
+        expect(
+          report([
+            result([null]),
+          ]).containsKey('patch'),
+          isFalse,
+        );
+        expect(report([]).containsKey('patch'), isFalse);
+      },
+    );
+    test('artifact-signature variants share the same exact patch identity', () {
+      const variant = CapsulePatchIdentity(
+        baseBuildId: 'base',
+        patchSetDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        engineAbi: 1,
+        hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        artifactDigest: 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+      );
+      expect(
+        report([
+          result([identity, variant]),
+        ])['patch'],
+        identity.toJson(),
+      );
+    });
+  });
 
   test('an empty plan passes, says so and still reports', () async {
     expect(await gate([]), 0);

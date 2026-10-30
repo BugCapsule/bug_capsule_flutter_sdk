@@ -1,0 +1,17 @@
+name: bug_capsule_patch_gen
+description: Research tool. Lowers a documented subset of @Patchable Dart functions to BugCapsule Patch Language and generates their dispatch stubs.
+version: 0.0.1-dev.1
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  analyzer: ">=7.0.0 <12.0.0"
+
+dev_dependencies:
+  test: ^1.25.0
+
+executables:
+  bcpatch_gen: bcpatch_gen

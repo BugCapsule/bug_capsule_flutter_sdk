@@ -8,7 +8,7 @@ import 'package:test/test.dart';
 void main() {
   test('core and CLI import nothing that needs Flutter', () {
     final allowed = RegExp(
-      r"^import '(dart:(?!ui)|package:args/|package:bug_capsule/src/(core|cli)/|(?![a-z]+:)(?!.*(runtime|integrations)/))",
+      r"^import '(dart:(?!ui)|package:args/|package:pointycastle/digests/sha256\.dart'|package:bug_capsule/src/(core|cli)/|(?![a-z]+:)(?!.*(runtime|integrations)/))",
     );
     final offenders = <String>[];
     for (final dir in ['lib/src/core', 'lib/src/cli', 'bin']) {

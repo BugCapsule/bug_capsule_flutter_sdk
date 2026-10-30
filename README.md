@@ -543,6 +543,8 @@ package, `bug_capsule`, with the same API:
 
 Older upgrades: [docs/upgrading.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/upgrading.md).
 
+Module patch workflows are available through `bugcapsule patch`: build and inspect exact artifacts, resume uploads, start validation, and review versioned deployment requests. See [Patch CLI](docs/patch-cli.md) for authentication, source review, replay evidence and rollback.
+
 ## More documentation
 
 | Topic | Where |
