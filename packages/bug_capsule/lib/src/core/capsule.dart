@@ -295,6 +295,10 @@ class SessionInfo {
 const patchRuntimeDependencyKind = 'patch.runtime';
 const patchRuntimeAdapter = 'bug_capsule.patch_runtime';
 
+/// The adapter name the native SDKs write; capsules cross runtimes in tools.
+const patchRuntimeAdapterNative = 'bugcapsule.patch_runtime';
+const patchRuntimeSchema = 1;
+
 /// `manifest.patch` (capsule-v2 §10): what actually ran. A null
 /// [patchSetDigest] is the bare base build.
 class CapsulePatchIdentity {
@@ -335,7 +339,7 @@ class CapsulePatchIdentity {
     kind: patchRuntimeDependencyKind,
     adapter: patchRuntimeAdapter,
     adapterVersion: '1',
-    schema: 1,
+    schema: patchRuntimeSchema,
     required: true,
     coverage: DependencyCoverage.complete,
   );

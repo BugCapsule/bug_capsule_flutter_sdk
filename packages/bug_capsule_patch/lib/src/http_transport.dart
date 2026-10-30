@@ -8,6 +8,7 @@ import 'updater.dart';
 /// Refusal from the delivery endpoint, or a response outside its bounds.
 final class PatchHttpException implements Exception {
   PatchHttpException(this.reason, [this.status]);
+  const PatchHttpException.timedOut() : reason = 'timed_out', status = null;
   final String reason;
   final int? status;
 
@@ -43,8 +44,8 @@ final class HttpPatchTransport implements PatchTransport {
     required this.baseBuildId,
     required this.installationId,
     this.timeout = const Duration(seconds: 30),
-    HttpClient? client,
-  }) : _client = client ?? HttpClient() {
+    this.artifactTimeout = const Duration(minutes: 2),
+  }) {
     final u = Uri.parse(baseUrl);
     if (u.scheme != 'https' && !_isLoopback(u.host)) {
       throw ArgumentError('patch delivery needs https');
@@ -67,8 +68,12 @@ final class HttpPatchTransport implements PatchTransport {
   final String distributionProfile;
   final String baseBuildId;
   final String installationId;
+
+  /// Absolute limit of a channel or receipt request, reading included.
   final Duration timeout;
-  final HttpClient _client;
+
+  /// Absolute limit of an artifact download, reading included.
+  final Duration artifactTimeout;
 
   static bool _isLoopback(String host) => host == 'localhost' || host == '127.0.0.1' || host == '::1' || host == '10.0.2.2';
 
@@ -78,27 +83,61 @@ final class HttpPatchTransport implements PatchTransport {
     return base.replace(path: '$prefix/v1/apps/${Uri.encodeComponent(applicationId)}/patches$path', queryParameters: query);
   }
 
-  Future<HttpClientRequest> _open(String method, Uri uri) async {
-    final req = await _client.openUrl(method, uri).timeout(timeout);
-    req
-      ..followRedirects = false
-      ..headers.set(HttpHeaders.authorizationHeader, 'Bearer $deliveryToken');
-    return req;
+  /// Runs one operation on its own client under an absolute deadline covering
+  /// the connection, the headers and the body. Closing the client by force is
+  /// the only thing that ends a response in progress: `abort` has no effect
+  /// after the response arrives, and cancelling its stream keeps the socket.
+  Future<T> _bounded<T>(String method, Uri uri, Duration limit, Future<T> Function(HttpClientRequest req, Stopwatch elapsed, Duration limit) run) async {
+    final elapsed = Stopwatch()..start();
+    final client = HttpClient()..connectionTimeout = limit;
+    try {
+      final req = await client.openUrl(method, uri).timeout(limit);
+      req
+        ..followRedirects = false
+        ..headers.set(HttpHeaders.authorizationHeader, 'Bearer $deliveryToken');
+      return await run(req, elapsed, limit);
+    } on TimeoutException {
+      throw const PatchHttpException.timedOut();
+    } finally {
+      client.close(force: true);
+    }
   }
 
-  /// Reads at most [max] bytes, refusing early on a declared larger length.
-  Future<Uint8List> _read(HttpClientResponse res, int max) async {
-    if (res.contentLength > max) {
-      unawaited(res.listen(null).cancel());
-      throw PatchHttpException('response_too_large', res.statusCode);
-    }
+  Duration _left(Stopwatch elapsed, Duration limit) {
+    final left = limit - elapsed.elapsed;
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  Future<HttpClientResponse> _send(HttpClientRequest req, Stopwatch elapsed, Duration limit) => req.close().timeout(_left(elapsed, limit));
+
+  /// Reads at most [max] bytes before the deadline.
+  Future<Uint8List> _read(HttpClientResponse res, int max, Stopwatch elapsed, Duration limit) {
+    if (res.contentLength > max) throw PatchHttpException('response_too_large', res.statusCode);
     final out = BytesBuilder(copy: false);
-    // Leaving the loop cancels the stream, which closes the connection.
-    await for (final chunk in res.timeout(timeout)) {
-      if (out.length + chunk.length > max) throw PatchHttpException('response_too_large', res.statusCode);
-      out.add(chunk);
+    final done = Completer<Uint8List>();
+    late final StreamSubscription<List<int>> sub;
+    void fail(Object e) {
+      if (done.isCompleted) return;
+      unawaited(sub.cancel());
+      done.completeError(e);
     }
-    return out.takeBytes();
+
+    final timer = Timer(_left(elapsed, limit), () => fail(const PatchHttpException.timedOut()));
+    sub = res.listen(
+      (chunk) {
+        if (out.length + chunk.length > max) {
+          fail(PatchHttpException('response_too_large', res.statusCode));
+        } else {
+          out.add(chunk);
+        }
+      },
+      onError: fail,
+      onDone: () {
+        if (!done.isCompleted) done.complete(out.takeBytes());
+      },
+      cancelOnError: true,
+    );
+    return done.future.whenComplete(timer.cancel);
   }
 
   Never _refused(int status) => throw PatchHttpException(switch (status) {
@@ -111,48 +150,40 @@ final class HttpPatchTransport implements PatchTransport {
   }, status);
 
   @override
-  Future<SignedChannel?> fetchChannel({String? etag}) async {
-    final req = await _open('GET', _uri('/channel', {'platform': platform, 'distributionProfile': distributionProfile, 'baseBuildId': baseBuildId}));
-    if (etag != null) req.headers.set(HttpHeaders.ifNoneMatchHeader, etag);
-    final res = await req.close().timeout(timeout);
-    if (res.statusCode == 204 || res.statusCode == 304) {
-      await res.drain<void>();
-      return null;
-    }
-    if (res.statusCode != 200) {
-      await res.drain<void>();
-      _refused(res.statusCode);
-    }
-    final body = await _read(res, maxChannelBytes);
-    final j = jsonDecode(utf8.decode(body)) as Map<String, Object?>;
-    final channel = j['channel']! as Map<String, Object?>;
-    final keyring = j['keyring'] as Map<String, Object?>?;
-    return SignedChannel(
-      base64Decode(channel['document']! as String),
-      base64Decode(channel['signature']! as String),
-      etag: res.headers.value(HttpHeaders.etagHeader),
-      keyringDocument: keyring == null ? null : base64Decode(keyring['document']! as String),
-      keyringSignature: keyring == null ? null : base64Decode(keyring['signature']! as String),
-    );
+  Future<SignedChannel?> fetchChannel({String? etag}) {
+    final uri = _uri('/channel', {'platform': platform, 'distributionProfile': distributionProfile, 'baseBuildId': baseBuildId});
+    return _bounded('GET', uri, timeout, (req, elapsed, limit) async {
+      if (etag != null) req.headers.set(HttpHeaders.ifNoneMatchHeader, etag);
+      final res = await _send(req, elapsed, limit);
+      if (res.statusCode == 204 || res.statusCode == 304) return null;
+      if (res.statusCode != 200) _refused(res.statusCode);
+      final j = jsonDecode(utf8.decode(await _read(res, maxChannelBytes, elapsed, limit))) as Map<String, Object?>;
+      final channel = j['channel']! as Map<String, Object?>;
+      final keyring = j['keyring'] as Map<String, Object?>?;
+      return SignedChannel(
+        base64Decode(channel['document']! as String),
+        base64Decode(channel['signature']! as String),
+        etag: res.headers.value(HttpHeaders.etagHeader),
+        keyringDocument: keyring == null ? null : base64Decode(keyring['document']! as String),
+        keyringSignature: keyring == null ? null : base64Decode(keyring['signature']! as String),
+      );
+    });
   }
 
   @override
   Future<Uint8List> fetchArtifact(String digest) async {
     if (!_digest.hasMatch(digest)) throw PatchHttpException('bad_digest');
-    final req = await _open('GET', _uri('/artifacts/$digest'));
-    final res = await req.close().timeout(timeout);
-    if (res.statusCode != 200) {
-      await res.drain<void>();
-      _refused(res.statusCode);
-    }
-    return _read(res, maxArtifactBytes);
+    return _bounded('GET', _uri('/artifacts/$digest'), artifactTimeout, (req, elapsed, limit) async {
+      final res = await _send(req, elapsed, limit);
+      if (res.statusCode != 200) _refused(res.statusCode);
+      return await _read(res, maxArtifactBytes, elapsed, limit);
+    });
   }
 
   @override
-  Future<void> postReceipts(Map<String, Object?> batch) async {
+  Future<void> postReceipts(Map<String, Object?> batch) {
     final status = batch['status']! as Map<String, Object?>;
     final pending = status['pending'];
-    final req = await _open('POST', _uri('/receipts'));
     final body = utf8.encode(jsonEncode({
       'platform': platform,
       'baseBuildId': baseBuildId,
@@ -165,13 +196,13 @@ final class HttpPatchTransport implements PatchTransport {
           if (_receiptEvents.containsKey(r['event'])) {'seq': r['seq'], 'event': _receiptEvents[r['event']], 'digest': r['digest'], 'reason': r['reason'], 'at': r['at']},
       ],
     }));
-    req.headers.contentType = ContentType.json;
-    req.contentLength = body.length;
-    req.add(body);
-    final res = await req.close().timeout(timeout);
-    await res.drain<void>();
-    if (res.statusCode != 202) _refused(res.statusCode);
+    return _bounded('POST', _uri('/receipts'), timeout, (req, elapsed, limit) async {
+      req.headers.contentType = ContentType.json;
+      req.contentLength = body.length;
+      req.add(body);
+      final res = await _send(req, elapsed, limit);
+      if (res.statusCode != 202) _refused(res.statusCode);
+    });
   }
 
-  void close() => _client.close(force: true);
 }

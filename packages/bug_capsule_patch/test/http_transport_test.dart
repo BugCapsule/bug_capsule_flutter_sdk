@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -33,11 +34,11 @@ void main() {
       baseBuildId: 'build-1',
       installationId: 'install-1',
       timeout: const Duration(seconds: 2),
+      artifactTimeout: const Duration(seconds: 2),
     );
   });
 
   tearDown(() async {
-    t.close();
     await server.close(force: true);
   });
 
@@ -104,6 +105,88 @@ void main() {
       r.response.close().catchError((Object _) {});
     };
     await expectLater(t.fetchArtifact(digest), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', 'response_too_large')));
+  });
+
+  test('a trickled body cannot outlive the absolute deadline', () async {
+    var stopped = false;
+    handle = (r) async {
+      r.response.bufferOutput = false;
+      r.response.headers.contentLength = 1 << 20;
+      try {
+        while (!stopped) {
+          r.response.add([1]);
+          await r.response.flush();
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      } on Object catch (_) {}
+    };
+    final watch = Stopwatch()..start();
+    await expectLater(t.fetchArtifact(digest), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', 'timed_out')));
+    stopped = true;
+    expect(watch.elapsed, lessThan(const Duration(seconds: 4)));
+  });
+
+  /// A raw socket server, because `HttpServer` doesn't surface a client that
+  /// went away. Streams a body until the peer closes, which completes the
+  /// returned future. A transport that merely stops reading never closes.
+  Future<(HttpPatchTransport, Future<void>, ServerSocket)> endless(int status) async {
+    final raw = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final gone = Completer<void>();
+    raw.listen((socket) {
+      socket.listen((_) {}, onDone: () {
+        if (!gone.isCompleted) gone.complete();
+      }, onError: (Object _) {
+        if (!gone.isCompleted) gone.complete();
+      });
+      socket.write('HTTP/1.1 $status X\r\nTransfer-Encoding: chunked\r\n\r\n');
+      Timer.periodic(const Duration(milliseconds: 5), (timer) {
+        if (gone.isCompleted) {
+          timer.cancel();
+          socket.destroy();
+          return;
+        }
+        try {
+          socket.write('10000\r\n${'x' * 0x10000}\r\n');
+        } on Object catch (_) {
+          timer.cancel();
+        }
+      });
+    });
+    final transport = HttpPatchTransport(
+      baseUrl: 'http://127.0.0.1:${raw.port}',
+      deliveryToken: 'bcpd_secret',
+      applicationId: 'com.shop',
+      platform: 'flutter_android',
+      distributionProfile: 'internal',
+      baseBuildId: 'build-1',
+      installationId: 'install-1',
+      timeout: const Duration(seconds: 2),
+      artifactTimeout: const Duration(seconds: 2),
+    );
+    return (transport, gone.future, raw);
+  }
+
+  test('an unread error body closes the connection', () async {
+    final (x, gone, raw) = await endless(500);
+    final watch = Stopwatch()..start();
+    await expectLater(x.fetchArtifact(digest), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', 'http_error')));
+    expect(watch.elapsed, lessThan(const Duration(seconds: 1)));
+    await gone.timeout(const Duration(seconds: 3));
+    await raw.close();
+  });
+
+  test('a channel error body closes the connection', () async {
+    final (x, gone, raw) = await endless(503);
+    await expectLater(x.fetchChannel(), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', 'http_error')));
+    await gone.timeout(const Duration(seconds: 3));
+    await raw.close();
+  });
+
+  test('a body past the limit closes the connection', () async {
+    final (x, gone, raw) = await endless(200);
+    await expectLater(x.fetchArtifact(digest), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', 'response_too_large')));
+    await gone.timeout(const Duration(seconds: 3));
+    await raw.close();
   });
 
   test('a redirect is not followed, so the token stays here', () async {

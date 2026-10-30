@@ -60,7 +60,12 @@ final class BugCapsulePatchBinding implements PatchBinding {
       ),
     );
     if (!p.available) throw StateError('the pinned artifact was refused: ${p.unavailableReason}');
-    _patch = p;
-    return _identityOf(p);
+    final handle = _patch;
+    if (handle == null) {
+      _patch = p;
+    } else {
+      handle.adoptReplay(p);
+    }
+    return _identityOf(patch);
   }
 }

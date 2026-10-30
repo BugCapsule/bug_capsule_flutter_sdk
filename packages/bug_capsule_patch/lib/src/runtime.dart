@@ -99,11 +99,21 @@ final class PatchConfig {
 final class BugCapsulePatch {
   BugCapsulePatch._(this._native, this._engine, this.unavailableReason);
 
-  final Native? _native;
+  Native? _native;
   Pointer<Void>? _engine;
 
   /// Why this build runs fallbacks only; null when the runtime is up.
-  final String? unavailableReason;
+  String? unavailableReason;
+
+  /// Moves this handle onto [pinned], so everything already holding it (the
+  /// dispatcher, widgets) runs the replay pin and nothing keeps the live store.
+  void adoptReplay(BugCapsulePatch pinned) {
+    close();
+    _native = pinned._native;
+    _engine = pinned._engine;
+    unavailableReason = pinned.unavailableReason;
+    pinned._engine = null;
+  }
 
   bool get available => _engine != null;
 

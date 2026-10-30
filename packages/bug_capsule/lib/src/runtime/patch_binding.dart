@@ -26,7 +26,17 @@ String? patchPreflight({
   required CapsulePatchIdentity? running,
 }) {
   final captured = manifest.patch;
-  final needsRuntime = captured?.patchSetDigest != null || manifest.requiredDependencies.any((d) => d.kind == patchRuntimeDependencyKind);
+  final required = manifest.requiredDependencies.where((d) => d.kind == patchRuntimeDependencyKind).toList();
+  for (final d in required) {
+    if (d.adapter != patchRuntimeAdapter && d.adapter != patchRuntimeAdapterNative) {
+      return 'dependency.unsupported: ${d.adapter} (dependency "${d.id}") is not a known patch runtime';
+    }
+    if (d.schema != patchRuntimeSchema) {
+      return 'dependency.schema: ${d.adapter} cannot replay schema ${d.schema}; update the SDK';
+    }
+    if (captured == null) return 'patch.identity_missing: the capsule requires a patch runtime but records no identity';
+  }
+  final needsRuntime = captured?.patchSetDigest != null || required.isNotEmpty;
   if (!hasBinding) {
     if (needsRuntime || settings.patchArtifact) {
       return 'dependency.unsupported: $patchRuntimeAdapter is not set up in '
@@ -50,6 +60,11 @@ String? patchPreflight({
   final expected = settings.expectedPatchSetDigest;
   if (settings.patchArtifact && running.patchSetDigest != expected) {
     return 'patch.mismatch: loaded ${running.patchSetDigest}, expected $expected';
+  }
+  // A baseline reproduces what was captured; only a verify run may try a candidate.
+  if (settings.kind != 'verify' && running.patchSetDigest != captured?.patchSetDigest) {
+    return 'patch.mismatch: a baseline must run the captured ${captured?.patchSetDigest ?? 'base'}, '
+        'this attempt loaded ${running.patchSetDigest ?? 'base'}';
   }
   return null;
 }

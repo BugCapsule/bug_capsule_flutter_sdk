@@ -10,7 +10,7 @@ final digest = 'sha256:${'b' * 64}';
 
 CapsulePatchIdentity id({String b = base, String? patch, int abi = 1}) => CapsulePatchIdentity(baseBuildId: b, patchSetDigest: patch, engineAbi: abi, hostAbiHash: hash);
 
-CapsuleManifest manifest(CapsulePatchIdentity? patch) {
+CapsuleManifest manifest(CapsulePatchIdentity? patch, {List<CapsuleDependency>? deps}) {
   final doc = <String, Object?>{
     'capsuleId': 'c',
     'createdAt': DateTime.utc(2026).toIso8601String(),
@@ -26,14 +26,14 @@ CapsuleManifest manifest(CapsulePatchIdentity? patch) {
     'stats': {'eventCount': 0, 'droppedEvents': 0, 'checkpointKind': 'launch'},
     'labels': <String, String>{},
     if (patch != null) 'patch': patch.toJson(),
-    if (patch?.patchSetDigest != null) 'dependencies': [patch!.dependency.toJson()],
+    if (deps != null) 'dependencies': [for (final d in deps) d.toJson()] else if (patch?.patchSetDigest != null) 'dependencies': [patch!.dependency.toJson()],
   };
   return CapsuleManifest.fromJson(doc);
 }
 
-String? check(CapsulePatchIdentity? captured, CapsulePatchIdentity? running, {bool artifact = false, String? expected, bool binding = true}) => patchPreflight(
-  manifest: manifest(captured),
-  settings: ReplaySettings(patchArtifact: artifact, expectedPatchSetDigest: expected),
+String? check(CapsulePatchIdentity? captured, CapsulePatchIdentity? running, {bool artifact = false, String? expected, bool binding = true, String kind = 'replay', List<CapsuleDependency>? deps}) => patchPreflight(
+  manifest: manifest(captured, deps: deps),
+  settings: ReplaySettings(patchArtifact: artifact, expectedPatchSetDigest: expected, kind: kind),
   hasBinding: binding,
   running: running,
 );
@@ -73,13 +73,29 @@ void main() {
 
   test('the loaded digest must be the expected digest', () {
     final other = 'sha256:${'c' * 64}';
-    expect(check(id(), id(patch: other), artifact: true, expected: digest), startsWith('patch.mismatch'));
-    expect(check(id(), id(patch: digest), artifact: true, expected: digest), isNull);
+    expect(check(id(), id(patch: other), artifact: true, expected: digest, kind: 'verify'), startsWith('patch.mismatch'));
+    expect(check(id(), id(patch: digest), artifact: true, expected: digest, kind: 'verify'), isNull);
   });
 
   test('a fix run of a base capsule and a baseline of a patched capsule both pass', () {
-    expect(check(id(), id(patch: digest), artifact: true, expected: digest), isNull);
+    expect(check(id(), id(patch: digest), artifact: true, expected: digest, kind: 'verify'), isNull);
     expect(check(id(patch: digest), id(patch: digest), artifact: true, expected: digest), isNull);
+  });
+
+  test('a baseline must run the captured digest; only verify may run a candidate', () {
+    final other = 'sha256:${'c' * 64}';
+    expect(check(id(patch: digest), id(patch: other), artifact: true, expected: other), startsWith('patch.mismatch'), reason: 'captured A, artifact B');
+    expect(check(id(), id(patch: digest), artifact: true, expected: digest), startsWith('patch.mismatch'), reason: 'captured base, artifact B');
+    expect(check(null, id(patch: digest), artifact: true, expected: digest), startsWith('patch.mismatch'), reason: 'no identity, artifact B');
+    expect(check(id(patch: digest), id(patch: other), artifact: true, expected: other, kind: 'verify'), isNull);
+  });
+
+  test('a required patch.runtime is validated, not skipped', () {
+    CapsuleDependency dep({String adapter = patchRuntimeAdapter, int schema = 1}) => CapsuleDependency(id: 'patch.runtime', kind: patchRuntimeDependencyKind, adapter: adapter, adapterVersion: '1', schema: schema, required: true, coverage: DependencyCoverage.complete);
+    expect(check(id(patch: digest), id(patch: digest), artifact: true, expected: digest, deps: [dep(adapter: 'x.y')]), startsWith('dependency.unsupported'));
+    expect(check(id(patch: digest), id(patch: digest), artifact: true, expected: digest, deps: [dep(schema: 2)]), startsWith('dependency.schema'));
+    expect(check(null, id(), deps: [dep()]), startsWith('patch.identity_missing'));
+    expect(check(id(patch: digest), id(patch: digest), artifact: true, expected: digest, deps: [dep(adapter: patchRuntimeAdapterNative)]), isNull);
   });
 
   test('a run only counts for an identity every attempt shared', () {
