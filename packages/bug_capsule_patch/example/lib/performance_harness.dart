@@ -32,7 +32,10 @@ final class PerformanceHarness {
 
   static Map<String, Object?> rss() {
     try {
-      return {'residentBytes': ProcessInfo.currentRss};
+      return {
+        'residentBytes': ProcessInfo.currentRss,
+        'processMaxResidentBytes': ProcessInfo.maxRss,
+      };
     } on Object catch (e) {
       return {'error': '$e'};
     }
@@ -87,6 +90,7 @@ final class PerformanceHarness {
         'mode, runId, expectedOutput and expectedSource are required',
       );
     }
+    final startupOnly = request['startupOnly'] == true;
     final expected = (request['expectedOutput']! as Map).cast<String, String>();
     final record = <String, Object?>{
       'schemaVersion': 1,
@@ -106,13 +110,14 @@ final class PerformanceHarness {
           'operator must attach devicectl/device evidence; Dart OS name does not prove physical hardware',
       'thermalState': null,
       'thermalEvidence': 'record externally; no Dart thermal API is assumed',
-      'warmupCount': 20,
-      'sampleCount': 200,
+      'scope': startupOnly ? 'startup_probe' : 'evaluation_samples',
+      'warmupCount': startupOnly ? 0 : 20,
+      'sampleCount': startupOnly ? 0 : 200,
       'stopwatchFrequency': clock.frequency,
       'rssBeforeOpen': rss(),
       'latencyVerdict': 'not_configured',
       'measurementScope':
-          'first call is first in process, not guaranteed cold filesystem; RSS snapshots are not peak; startup clock begins in Dart main, after VM startup',
+          'first call is first in process, not guaranteed cold filesystem; residentBytes are snapshots; processMaxResidentBytes is process-lifetime high-water, not runtime allocation delta or an app budget; startup clock begins in Dart main, after VM startup',
     };
     final beforeOpen = nowNs;
     final patch = mode == 'runtime' ? open() : null;
@@ -156,13 +161,15 @@ final class PerformanceHarness {
 
       final first = evaluate();
       record['firstCallNs'] = first.$2;
-      for (var i = 0; i < 20; i++) {
+      for (var i = 0; i < (startupOnly ? 0 : 20); i++) {
         evaluate();
       }
-      final samples = [for (var i = 0; i < 200; i++) evaluate().$2];
-      final stats = summary(samples);
+      final samples = [
+        for (var i = 0; i < (startupOnly ? 0 : 200); i++) evaluate().$2,
+      ];
+      final stats = startupOnly ? <String, Object?>{} : summary(samples);
       record.addAll({
-        'evaluation': stats,
+        if (!startupOnly) 'evaluation': stats,
         'output': expected,
         'source': first.$3,
         'reasonCounts': reasons,
@@ -180,7 +187,7 @@ final class PerformanceHarness {
       }
       record['correctness'] = 'passed';
       final budgets = request['budgetsNs'];
-      if (budgets is Map) {
+      if (!startupOnly && budgets is Map) {
         final comparisons = <String, Object?>{};
         for (final key in ['p50Ns', 'p95Ns', 'p99Ns', 'maxNs']) {
           final limit = budgets[key];

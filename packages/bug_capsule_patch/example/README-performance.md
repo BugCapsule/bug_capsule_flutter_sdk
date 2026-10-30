@@ -54,3 +54,14 @@ To resume HTTP without deleting files, overwrite `benchmark-config.json` with
 omitting enabled keeps benchmarking active. Malformed requests still fail the
 benchmark validator rather than silently starting normal delivery. Disabled
 requests do not update old benchmark results from frame callbacks.
+
+For an external launch/first-frame trace set `"startupOnly":true`. This validates
+exactly the first call and skips all warmup and measured-loop calls. The record
+has scope `startup_probe`, both counts zero and no evaluation percentiles or
+latency-budget comparisons. Open, first call, markHealthy and result writing
+still occur before UI presentation; compare identical probe configurations in
+the same Release binary and retain the external trace. Default sampling is
+unchanged. RSS now additionally reports `processMaxResidentBytes`, the actual
+process-lifetime resident high-water from `ProcessInfo.maxRss`; this includes
+VM/startup history and is neither a post-runtime allocation delta nor an app
+memory-budget assertion. `residentBytes` remains a point-in-time snapshot.

@@ -91,6 +91,37 @@ void main() {
             as Map;
     expect(failed['correctness'], 'failed');
     expect(failed.containsKey('evaluation'), false);
+    final request =
+        jsonDecode(File('${dir.path}/benchmark-config.json').readAsStringSync())
+            as Map;
+    request['startupOnly'] = true;
+    File(
+      '${dir.path}/benchmark-config.json',
+    ).writeAsStringSync(jsonEncode(request));
+    calls = 0;
+    final startup = PerformanceHarness.run(
+      exchange: dir,
+      module: module,
+      input: 7,
+      open: () => throw StateError('baseline opened runtime'),
+      output: (x) => {'value': '$x'},
+    );
+    expect(calls, 1);
+    expect(startup.record['scope'], 'startup_probe');
+    expect(startup.record['warmupCount'], 0);
+    expect(startup.record['sampleCount'], 0);
+    expect(startup.record.containsKey('evaluation'), false);
+    expect(
+      () => PerformanceHarness.run(
+        exchange: dir,
+        module: module,
+        input: 8,
+        open: () => throw StateError('baseline opened runtime'),
+        output: (x) => {'value': '$x'},
+      ),
+      throwsStateError,
+    );
+    expect(PerformanceHarness.rss()['processMaxResidentBytes'], greaterThan(0));
   });
   test('nearest-rank summary preserves raw chronological samples', () {
     final samples = List.generate(200, (i) => 200 - i);
