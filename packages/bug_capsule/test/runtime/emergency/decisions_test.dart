@@ -61,7 +61,7 @@ class _Transport implements BugCapsuleTransport {
 
   @override
   Future<UploadResult> upload(List<int> bytes) async =>
-      UploadResult(UploadStatus.uploaded, serverId: 'srv');
+      const UploadResult(UploadStatus.uploaded, serverId: 'srv');
   @override
   void close() {}
 }
