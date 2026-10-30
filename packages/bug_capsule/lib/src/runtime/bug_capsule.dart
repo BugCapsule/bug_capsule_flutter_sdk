@@ -613,9 +613,11 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
 
   CapsulePatchIdentity? _pinnedPatch;
   bool _patchRead = false;
+  String? _patchPreparationFailure;
 
   /// What this process runs. Read once: a process pins one generation.
   CapsulePatchIdentity? get _patchIdentity {
+    if (_patchPreparationFailure != null) return null;
     if (_patchRead) return _pinnedPatch;
     _patchRead = true;
     return _pinnedPatch = _tryOr(() => config.patchBinding?.identity, null);
@@ -623,6 +625,8 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
 
   /// Loads the exact patch of a replay attempt. Returns why it can't run.
   Future<String?> _pinPatch(ReplayChannel channel, Capsule capsule, ReplaySettings settings) async {
+    final preparationFailure = _patchPreparationFailure;
+    if (preparationFailure != null) return 'patch.unavailable: $preparationFailure';
     final binding = config.patchBinding;
     _patchRead = true;
     if (binding != null) {
@@ -893,9 +897,13 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     ]);
     BugCapsule._emergency.runtimeAttached();
     try {
-      await config.patchBinding?.prepare();
+      await config.patchBinding?.prepare().timeout(
+        _overrides?.setupTimeout ?? setupTimeout,
+      );
     } catch (e) {
-      debugPrint('[bugcapsule] patch binding not ready: $e');
+      _patchPreparationFailure = '$e';
+      _setupAbandoned = true;
+      debugPrint('[bugcapsule] patch binding not ready; capture disabled: $e');
     }
     String? replayUrl;
     try {
@@ -915,6 +923,13 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         await _startReplay(replayUrl, appRunner, binding);
         return;
       }
+    }
+    if (_patchPreparationFailure != null) {
+      // Futures cannot be cancelled. Even if preparation completes later, do
+      // not record a session whose patch identity was unknown at startup.
+      _stopRecording();
+      await appRunner();
+      return;
     }
     try {
       // A plugin or integration that never answers must not hold the app.

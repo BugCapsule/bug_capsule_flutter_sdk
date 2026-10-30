@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -23,11 +24,31 @@ final class BugCapsulePatchBinding implements PatchBinding {
   final List<PatchSurfaceContract> surfaces;
   final String? libraryPath;
   BugCapsulePatch? _patch;
+  Future<void>? _preparing;
 
   PatchConfig get _ready => _config ?? (throw StateError('patch binding not prepared: pass it to BugCapsule.init first'));
 
+  /// The resolved configuration. Deferred bindings expose it after [prepare].
+  PatchConfig get config => _ready;
+
   @override
-  Future<void> prepare() async => _config ??= await _resolve!();
+  Future<void> prepare() {
+    if (_config != null) return Future<void>.value();
+    final pending = _preparing;
+    if (pending != null) return pending;
+    // Install the future before invoking user code, including synchronous throws.
+    final completer = Completer<void>();
+    _preparing = completer.future;
+    Future<PatchConfig>.sync(_resolve!).then((value) {
+      _config = value;
+      _preparing = null;
+      completer.complete();
+    }, onError: (Object error, StackTrace stack) {
+      _preparing = null; // A rejected resolution may be retried explicitly.
+      completer.completeError(error, stack);
+    });
+    return completer.future;
+  }
 
   /// The runtime of this process.
   BugCapsulePatch get patch => _patch ??= BugCapsulePatch.open(_ready, modules: modules, surfaces: surfaces, libraryPath: libraryPath);
