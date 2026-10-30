@@ -1090,6 +1090,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
             return queued;
           },
           isRecording: () => _recording,
+          patchIdentity: () => _patchIdentity,
           crashCapsule: _crashCapsule,
           journalId: () => _journal == null ? null : _journalId,
         ),
