@@ -673,6 +673,7 @@ class GateCommand extends Command<int> {
           passed: passed,
           startedAt: startedAt,
           finishedAt: finishedAt,
+          requirePatchedIdentity: args['patch-artifact'] != null,
         ),
       );
       reportId = report['id'] as String?;

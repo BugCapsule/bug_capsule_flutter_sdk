@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../core/replay_protocol.dart';
 import 'replay.dart';
 import 'term.dart';
 
@@ -142,17 +143,53 @@ Map<String, Object?> gateReport({
   required DateTime startedAt,
   required DateTime finishedAt,
   String? gitSha,
-}) => {
-  'release': release,
-  'platform': platform,
-  'gitSha': gitSha != null && gitSha.length > 64
-      ? gitSha.substring(0, 64)
-      : gitSha,
-  'startedAt': startedAt.toUtc().toIso8601String(),
-  'finishedAt': finishedAt.toUtc().toIso8601String(),
-  'results': [for (final r in results.take(200)) r.toReportJson()],
-  'passed': passed,
-};
+  bool requirePatchedIdentity = false,
+}) {
+  final attempts = results
+      .expand<ReplayReport>((r) => r.summary?.reports ?? const <ReplayReport>[])
+      .toList();
+  final hasIdentity = attempts.any((r) => r.patch != null);
+  Map<String, Object?>? identity;
+  if (requirePatchedIdentity || hasIdentity) {
+    if (results.isEmpty ||
+        results.any((r) => r.summary == null || r.summary!.reports.isEmpty) ||
+        attempts.any((r) => r.patch == null)) {
+      throw StateError(
+        'patch gate identity is missing from actual replay attempts',
+      );
+    }
+    for (final attempt in attempts) {
+      final p = attempt.patch!;
+      final current = <String, Object?>{
+        'baseBuildId': p.baseBuildId,
+        'patchSetDigest': p.patchSetDigest,
+        'engineAbi': p.engineAbi,
+        'hostAbiHash': p.hostAbiHash,
+      };
+      if (requirePatchedIdentity && p.patchSetDigest == null) {
+        throw StateError('patch gate attempt ran the bare base');
+      }
+      if (identity != null && jsonEncode(identity) != jsonEncode(current)) {
+        throw StateError(
+          'patch gate attempts disagree on their exact identity',
+        );
+      }
+      identity = current;
+    }
+  }
+  return {
+    'patch': ?identity,
+    'release': release,
+    'platform': platform,
+    'gitSha': gitSha != null && gitSha.length > 64
+        ? gitSha.substring(0, 64)
+        : gitSha,
+    'startedAt': startedAt.toUtc().toIso8601String(),
+    'finishedAt': finishedAt.toUtc().toIso8601String(),
+    'results': [for (final r in results.take(200)) r.toReportJson()],
+    'passed': passed,
+  };
+}
 
 String _cell(String s, int width) {
   final one = s.replaceAll('\n', ' ');
