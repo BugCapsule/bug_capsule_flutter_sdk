@@ -25,6 +25,19 @@ export 'emergency/contract.dart'
         EmergencyRejection,
         EmergencyVersionRange;
 export 'emergency/emergency.dart' show BugCapsuleEmergency;
+export 'emergency/hotfix.dart'
+    show
+        EmergencyHotfix,
+        HotfixAvailability,
+        HotfixDownloadFailed,
+        HotfixDownloadInProgress,
+        HotfixNothingToDownload,
+        HotfixProvider,
+        HotfixRestartRequired,
+        HotfixResult,
+        HotfixState,
+        HotfixStatus,
+        HotfixUnavailable;
 export 'emergency/types.dart'
     show
         EmergencyConfig,

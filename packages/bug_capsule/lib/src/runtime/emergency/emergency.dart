@@ -11,6 +11,7 @@ import '../config.dart' show BugCapsuleBackendConfig;
 import '../connection_token.dart';
 import 'contract.dart';
 import 'engine.dart';
+import 'hotfix.dart';
 import 'store.dart';
 import 'transport.dart';
 import 'types.dart';
@@ -95,6 +96,8 @@ final class BugCapsuleEmergency {
   BugCapsuleBackendConfig? _configuredBackend;
   _LifecycleObserver? _observer;
   WidgetsBinding? _observedBinding;
+  EmergencyHotfix? _hotfix;
+  Map<String, Object?>? _runtime;
   StreamController<EmergencySnapshot> _changes =
       StreamController<EmergencySnapshot>.broadcast();
   final Set<String> _warned = {};
@@ -115,6 +118,10 @@ final class BugCapsuleEmergency {
       return _initializing ?? Future.value();
     }
     _config = config;
+    final provider = config.hotfixProvider;
+    if (provider != null) {
+      _hotfix = EmergencyHotfix.internal(provider, _hotfixStatus);
+    }
     return _initializing = _initialize(config).catchError((Object e) {
       _inactiveReason = 'setup_failed';
       _warnOnce('setup failed, failure modes apply: $e');
@@ -199,8 +206,12 @@ final class BugCapsuleEmergency {
       now: overrides?.now,
       random: overrides?.random,
     );
+    final runtime = _runtime;
+    if (runtime != null) engine.updateRuntime(runtime);
     _observeLifecycle();
     await engine.start();
+    // The first report says whether this build can be patched at all.
+    unawaited(_hotfix?.getStatus());
   }
 
   static EmergencyPlatform? _hostPlatform() {
@@ -240,6 +251,20 @@ final class BugCapsuleEmergency {
   String? _appVersion() {
     final v = _config?.appVersion ?? _host.appVersion;
     return v == null || v.isEmpty ? null : v;
+  }
+
+  /// Every status the hotfix provider returns updates the runtime report
+  /// (§7.6); one that cannot be reported is logged once and dropped.
+  void _hotfixStatus(HotfixStatus status) {
+    final Map<String, Object?> runtime;
+    try {
+      runtime = {'hotfix': hotfixRuntimeJson(status, _appVersion())};
+    } on FormatException catch (e) {
+      _warnOnce('hotfix status not reported: ${e.message}');
+      return;
+    }
+    _runtime = runtime;
+    _engine?.updateRuntime(runtime);
   }
 
   void _emit(EmergencySnapshot snapshot) {
@@ -315,6 +340,13 @@ final class BugCapsuleEmergency {
     }
   }
 
+  /// The hotfix adapter of [EmergencyConfig.hotfixProvider]; null without
+  /// one or before [initialize]. Its calls go to the provider, and every
+  /// status they return is reported to the BugCapsule backend (§7.6). A
+  /// downloaded patch becomes active on the next start; the app is never
+  /// restarted.
+  EmergencyHotfix? get hotfix => _hotfix;
+
   /// Whether [evaluate] allows [featureKey].
   bool isFeatureAllowed(String featureKey, {String? subject}) =>
       evaluate(featureKey, subject: subject).allowed;
@@ -389,6 +421,8 @@ final class BugCapsuleEmergency {
     _inactiveReason = null;
     _initializing = null;
     _configuredBackend = null;
+    _hotfix = null;
+    _runtime = null;
     _warned.clear();
     await _changes.close();
     _changes = StreamController<EmergencySnapshot>.broadcast();

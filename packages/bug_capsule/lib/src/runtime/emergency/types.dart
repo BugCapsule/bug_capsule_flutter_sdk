@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../config.dart' show BugCapsuleBackendConfig;
 import 'contract.dart';
+import 'hotfix.dart';
 
 /// What a feature does while there is no usable policy document (§7.4).
 enum EmergencyFailureMode {
@@ -27,6 +28,7 @@ class EmergencyConfig {
     this.token,
     this.backend,
     this.appVersion,
+    this.hotfixProvider,
   });
 
   /// `bcek.v1.…` from the dashboard: the application id and the public keys
@@ -55,6 +57,12 @@ class EmergencyConfig {
   /// `BugCapsuleConfig.appVersion` (or the `BUGCAPSULE_APP_VERSION`
   /// dart-define).
   final String? appVersion;
+
+  /// A code push adapter such as `BugCapsuleShorebird` (package
+  /// `bug_capsule_shorebird`), available as `BugCapsule.emergency.hotfix`.
+  /// Its status is reported to the BugCapsule backend so a recovery can be
+  /// followed to the installed builds (§7.6). Null: no hotfix adapter.
+  final HotfixProvider? hotfixProvider;
 
   static const minRefreshInterval = Duration(seconds: 15);
 
