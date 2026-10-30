@@ -15,6 +15,7 @@ import 'git.dart';
 import 'inspect.dart';
 import 'launcher.dart';
 import 'processes.dart';
+import 'patch_commands.dart';
 import 'project_config.dart';
 import 'replay.dart';
 import 'replay_server.dart';
@@ -42,7 +43,8 @@ CommandRunner<int> buildRunner() =>
       ..addCommand(PushCommand())
       ..addCommand(ShareCommand())
       ..addCommand(KillSwitchCommand())
-      ..addCommand(SymbolsCommand());
+      ..addCommand(SymbolsCommand())
+      ..addCommand(PatchCommand());
 
 Future<int> runBugCapsule(List<String> args) async {
   final runner = buildRunner();
