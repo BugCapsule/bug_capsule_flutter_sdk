@@ -1,0 +1,16 @@
+group = "dev.bugcapsule.bug_capsule_patch"
+version = "0.1.0"
+
+apply plugin: "com.android.library"
+
+android {
+    namespace = "dev.bugcapsule.bug_capsule_patch"
+    compileSdk = 35
+    defaultConfig {
+        minSdk = 23
+    }
+    // The prebuilt runtime ships in the app's own APK/AAB.
+    sourceSets {
+        main.jniLibs.srcDirs = ["src/main/jniLibs"]
+    }
+}
