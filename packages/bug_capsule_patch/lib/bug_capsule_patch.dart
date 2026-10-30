@@ -11,5 +11,6 @@
 /// ```
 library;
 
+export 'src/dispatch.dart';
 export 'src/hotfix.dart';
 export 'src/runtime.dart';
