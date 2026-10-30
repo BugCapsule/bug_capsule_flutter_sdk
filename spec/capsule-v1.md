@@ -146,6 +146,7 @@ is the only one that reads it.
 | `mobx.action` | `{name}` | no |
 | `mobx.error` | `{reaction, error}` | no |
 | `http` | see below | served as fixture |
+| `emergency.decision` | a remote guard decision ([emergency client](emergency-client-v1.md) §7.8) | served to the guard |
 | `log` | `{level, message}` | no |
 | `failure` | same shape as `manifest.failure` | no (it is the assertion) |
 
