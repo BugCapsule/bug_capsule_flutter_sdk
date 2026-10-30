@@ -4,13 +4,23 @@ import 'dart:io';
 import 'package:bug_capsule_patch/bug_capsule_patch.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'performance_harness.dart';
 
-const baseBuildId = String.fromEnvironment('BCPATCH_BASE_BUILD', defaultValue: 'flutter-demo-1');
-const trustAnchor = 'bcpk.v1.dev-root-1.BA4PNvbk7UmdPR93U56lG_Bpqwq3WgzIrI3zk7IuT-hKhRymUfOY4eQFQGei0tjUkzmpyqaHCZf3MtgxbBxq68U';
+const baseBuildId = String.fromEnvironment(
+  'BCPATCH_BASE_BUILD',
+  defaultValue: 'flutter-demo-1',
+);
+const trustAnchor =
+    'bcpk.v1.dev-root-1.BA4PNvbk7UmdPR93U56lG_Bpqwq3WgzIrI3zk7IuT-hKhRymUfOY4eQFQGei0tjUkzmpyqaHCZf3MtgxbBxq68U';
 
 typedef Line = ({String sku, int qty, int unitCents});
 typedef Cart = ({List<Line> lines, int couponPercent});
-typedef Priced = ({String subtotal, String discount, String total, String label});
+typedef Priced = ({
+  String subtotal,
+  String discount,
+  String total,
+  String label,
+});
 
 String _money(int cents) {
   final abs = cents.abs();
@@ -20,31 +30,49 @@ String _money(int cents) {
 /// The shipped behavior, with the bug the patch fixes: the percentage is
 /// applied without dividing by 100.
 Priced bundledCoupon(Cart cart) {
-  final subtotal = cart.lines.fold<int>(0, (acc, l) => acc + l.unitCents * l.qty);
+  final subtotal = cart.lines.fold<int>(
+    0,
+    (acc, l) => acc + l.unitCents * l.qty,
+  );
   final discount = subtotal * cart.couponPercent;
-  return (subtotal: _money(subtotal), discount: _money(discount), total: _money(subtotal - discount), label: 'BASE ${cart.couponPercent}%');
+  return (
+    subtotal: _money(subtotal),
+    discount: _money(discount),
+    total: _money(subtotal - discount),
+    label: 'BASE ${cart.couponPercent}%',
+  );
 }
 
 final coupon = PatchModule<Cart, Priced>(
   id: 'pricing.coupon',
-  inputSchema: 'rec(couponPercent:int,lines:list(rec(qty:int,sku:str,unitPrice:dec(2))))',
+  inputSchema:
+      'rec(couponPercent:int,lines:list(rec(qty:int,sku:str,unitPrice:dec(2))))',
   outputSchema: 'rec(discount:dec(2),label:str,subtotal:dec(2),total:dec(2))',
   encode: (c) => {
     'couponPercent': c.couponPercent,
     'lines': [
-      for (final l in c.lines) {'sku': l.sku, 'qty': l.qty, 'unitPrice': _money(l.unitCents)},
+      for (final l in c.lines)
+        {'sku': l.sku, 'qty': l.qty, 'unitPrice': _money(l.unitCents)},
     ],
   },
   decode: (o) {
     final m = o! as Map<String, Object?>;
-    return (subtotal: m['subtotal']! as String, discount: m['discount']! as String, total: m['total']! as String, label: m['label']! as String);
+    return (
+      subtotal: m['subtotal']! as String,
+      discount: m['discount']! as String,
+      total: m['total']! as String,
+      label: m['label']! as String,
+    );
   },
   fallback: bundledCoupon,
 );
 
 const sample = (
   couponPercent: 20,
-  lines: <Line>[(sku: 'a', qty: 2, unitCents: 1999), (sku: 'b', qty: 10, unitCents: 300)],
+  lines: <Line>[
+    (sku: 'a', qty: 2, unitCents: 1999),
+    (sku: 'b', qty: 10, unitCents: 300),
+  ],
 );
 
 const summarySurface = PatchSurfaceContract(
@@ -65,13 +93,16 @@ List<String> processInbox(BugCapsulePatch patch, Directory exchange) {
   final log = <String>[];
   final inbox = Directory('${exchange.path}/inbox');
   if (!inbox.existsSync()) return log;
-  final files = inbox.listSync().whereType<File>().toList()..sort((a, b) => a.path.compareTo(b.path));
+  final files = inbox.listSync().whereType<File>().toList()
+    ..sort((a, b) => a.path.compareTo(b.path));
   for (final f in files) {
     final name = f.uri.pathSegments.last;
     try {
       if (name.endsWith('.channel')) {
         final sig = File('${f.path}.sig');
-        log.add('channel ${jsonEncode(patch.applyChannel(f.readAsBytesSync(), sig.readAsBytesSync()))}');
+        log.add(
+          'channel ${jsonEncode(patch.applyChannel(f.readAsBytesSync(), sig.readAsBytesSync()))}',
+        );
         sig.deleteSync();
         f.deleteSync();
       } else if (name.endsWith('.bcpatch')) {
@@ -87,16 +118,19 @@ List<String> processInbox(BugCapsulePatch patch, Directory exchange) {
 }
 
 Future<void> main() async {
+  PerformanceHarness.clock.start();
   WidgetsFlutterBinding.ensureInitialized();
   final support = await getApplicationSupportDirectory();
   final exchange = await _exchangeDir();
   // Test-only: an acceptance run points the lab at a real backend. Without
   // this file the lab uses its file inbox. The base build id stays the binary's.
   final remoteFile = File('${exchange.path}/patch-config.json');
-  final remote = remoteFile.existsSync() ? jsonDecode(remoteFile.readAsStringSync()) as Map<String, Object?> : null;
+  final remote = remoteFile.existsSync()
+      ? jsonDecode(remoteFile.readAsStringSync()) as Map<String, Object?>
+      : null;
   const applicationId = 'dev.bugcapsule.patchlab.flutter';
   final platform = Platform.isAndroid ? 'flutter_android' : 'flutter_ios';
-  final patch = BugCapsulePatch.open(
+  BugCapsulePatch openPatch() => BugCapsulePatch.open(
     PatchConfig(
       storeDir: '${support.path}/bcpatch',
       projectId: remote?['projectId'] as String? ?? 'demo',
@@ -111,10 +145,52 @@ Future<void> main() async {
     modules: [coupon],
     surfaces: const [summarySurface],
   );
+  if (File('${exchange.path}/benchmark-config.json').existsSync()) {
+    try {
+      final benchmark = PerformanceHarness.run(
+        exchange: exchange,
+        module: coupon,
+        input: sample,
+        open: openPatch,
+        output: (p) => {
+          'subtotal': p.subtotal,
+          'discount': p.discount,
+          'total': p.total,
+          'label': p.label,
+        },
+      );
+      final record = benchmark.record;
+      record['baseBuildId'] = baseBuildId;
+      record['state'] = 'BENCHMARK';
+      record['evalMicros'] = (record['firstCallNs']! as int) ~/ 1000;
+      runApp(PatchLab(record, benchmark.patch));
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        record['appCodeToFirstPostFrameNs'] = PerformanceHarness.nowNs;
+        record['rssAtFirstPostFrame'] = PerformanceHarness.rss();
+        PerformanceHarness.write(exchange, record);
+      });
+    } on Object catch (e) {
+      final file = File('${exchange.path}/benchmark-result.json');
+      if (!file.existsSync()) {
+        PerformanceHarness.write(exchange, {
+          'correctness': 'failed',
+          'error': '$e',
+        });
+      }
+      runApp(MaterialApp(home: Scaffold(body: Text('Benchmark failed: $e'))));
+    }
+    return;
+  }
+  final patch = openPatch();
   final watch = Stopwatch()..start();
   final result = patch.call(coupon, sample);
   final micros = watch.elapsedMicroseconds;
-  final before = patch.available ? patch.status() : <String, Object?>{'state': 'UNAVAILABLE', 'reason': patch.unavailableReason};
+  final before = patch.available
+      ? patch.status()
+      : <String, Object?>{
+          'state': 'UNAVAILABLE',
+          'reason': patch.unavailableReason,
+        };
   final inbox = patch.available ? processInbox(patch, exchange) : <String>[];
   final smokeOk = result.value.total.isNotEmpty;
   if (patch.available && smokeOk) patch.markHealthy('first_screen');
@@ -125,7 +201,12 @@ Future<void> main() async {
     'baseBuildId': baseBuildId,
     'source': result.source.name,
     'reason': result.reason,
-    'output': {'subtotal': result.value.subtotal, 'discount': result.value.discount, 'total': result.value.total, 'label': result.value.label},
+    'output': {
+      'subtotal': result.value.subtotal,
+      'discount': result.value.discount,
+      'total': result.value.total,
+      'label': result.value.label,
+    },
     'evalMicros': micros,
     'state': before['state'],
     'running': before['running'],
@@ -134,8 +215,7 @@ Future<void> main() async {
   };
   runApp(PatchLab(record, patch));
   if (remote != null) {
-    final updater = PatchUpdater(
-      patch,
+    final transport = TimedPatchTransport(
       HttpPatchTransport(
         baseUrl: remote['baseUrl']! as String,
         deliveryToken: remote['deliveryToken']! as String,
@@ -146,24 +226,46 @@ Future<void> main() async {
         installationId: 'device-1',
       ),
     );
+    final updater = PatchUpdater(patch, transport);
+    final updateStart = PerformanceHarness.nowNs;
     final r = await updater.checkForUpdate();
+    final updateNs = PerformanceHarness.nowNs - updateStart;
+    final receiptStart = PerformanceHarness.nowNs;
     var sent = -1;
     try {
       sent = await updater.flushReceipts();
     } on Object catch (e) {
       record['receiptError'] = '$e';
     }
-    record['update'] = {'state': r.state.name, 'artifactDigest': r.artifactDigest, 'reason': r.reason, 'receiptsSent': sent};
+    if (remote['measurePerformance'] == true) {
+      record['deliveryPerformance'] = {
+        'checkVerifyStageNs': updateNs,
+        'flushReceiptsNs': PerformanceHarness.nowNs - receiptStart,
+        'artifactFetches': transport.artifactFetches,
+        'scope':
+            'whole transport download/buffering; update includes metadata, verification and staging; no cold-cache claim',
+      };
+    }
+    record['update'] = {
+      'state': r.state.name,
+      'artifactDigest': r.artifactDigest,
+      'reason': r.reason,
+      'receiptsSent': sent,
+    };
     record['status'] = patch.status();
   }
-  File('${exchange.path}/results.jsonl').writeAsStringSync('${jsonEncode(record)}\n', mode: FileMode.append, flush: true);
+  File('${exchange.path}/results.jsonl').writeAsStringSync(
+    '${jsonEncode(record)}\n',
+    mode: FileMode.append,
+    flush: true,
+  );
 }
 
 class PatchLab extends StatelessWidget {
   const PatchLab(this.record, this.patch, {super.key});
 
   final Map<String, Object?> record;
-  final BugCapsulePatch patch;
+  final BugCapsulePatch? patch;
 
   @override
   Widget build(BuildContext context) {
@@ -182,15 +284,19 @@ class PatchLab extends StatelessWidget {
             Text('Total: ${output['total']}'),
             Text('Eval: ${record['evalMicros']} µs'),
             const SizedBox(height: 24),
-            PatchSurfaceView(
-              patch: patch,
-              id: summarySurface.id,
-              actions: {'lab.pay': () {}},
-              bundled: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [const Text('Bundled summary'), FilledButton(onPressed: () {}, child: const Text('Pay'))],
+            if (patch != null)
+              PatchSurfaceView(
+                patch: patch!,
+                id: summarySurface.id,
+                actions: {'lab.pay': () {}},
+                bundled: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Bundled summary'),
+                    FilledButton(onPressed: () {}, child: const Text('Pay')),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),
