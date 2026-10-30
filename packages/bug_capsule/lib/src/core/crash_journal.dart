@@ -932,6 +932,12 @@ Capsule? crashCapsuleFrom(
 
   final dependencies = <CapsuleDependency>[];
   for (final d in templates) {
+    // Runtime identity is required even when the crash window contains no
+    // interaction events. Keep its original schema for replay preflight.
+    if (d.kind == patchRuntimeDependencyKind) {
+      dependencies.add(d);
+      continue;
+    }
     final n = window
         .where(
           (e) =>
