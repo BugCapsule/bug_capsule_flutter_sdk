@@ -48,17 +48,23 @@ final class BugCapsulePatchBinding implements PatchBinding {
       return path;
     }
 
-    final p = BugCapsulePatch.open(
-      config,
-      modules: modules,
-      surfaces: surfaces,
-      libraryPath: libraryPath,
-      replay: PatchReplay(
-        bundlePath: await write('artifact.bcpatch', bundle),
-        keyringPath: await write('keyring.json', keyring),
-        keyringSignaturePath: await write('keyring.sig', keyringSignature),
-      ),
-    );
+    final BugCapsulePatch p;
+    try {
+      p = BugCapsulePatch.open(
+        config,
+        modules: modules,
+        surfaces: surfaces,
+        libraryPath: libraryPath,
+        replay: PatchReplay(
+          bundlePath: await write('artifact.bcpatch', bundle),
+          keyringPath: await write('keyring.json', keyring),
+          keyringSignaturePath: await write('keyring.sig', keyringSignature),
+        ),
+      );
+    } finally {
+      // The runtime loads the archive at open; nothing reads these afterwards.
+      await dir.delete(recursive: true);
+    }
     if (!p.available) throw StateError('the pinned artifact was refused: ${p.unavailableReason}');
     final handle = _patch;
     if (handle == null) {

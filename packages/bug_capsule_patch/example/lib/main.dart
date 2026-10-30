@@ -90,17 +90,23 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final support = await getApplicationSupportDirectory();
   final exchange = await _exchangeDir();
+  // Test-only: an acceptance run points the lab at a real backend. Without
+  // this file the lab uses its file inbox. The base build id stays the binary's.
+  final remoteFile = File('${exchange.path}/patch-config.json');
+  final remote = remoteFile.existsSync() ? jsonDecode(remoteFile.readAsStringSync()) as Map<String, Object?> : null;
+  const applicationId = 'dev.bugcapsule.patchlab.flutter';
+  final platform = Platform.isAndroid ? 'flutter_android' : 'flutter_ios';
   final patch = BugCapsulePatch.open(
     PatchConfig(
       storeDir: '${support.path}/bcpatch',
-      projectId: 'demo',
-      applicationId: 'dev.bugcapsule.patchlab.flutter',
+      projectId: remote?['projectId'] as String? ?? 'demo',
+      applicationId: applicationId,
       environment: 'staging',
-      platform: Platform.isAndroid ? 'flutter_android' : 'flutter_ios',
+      platform: platform,
       distributionProfile: 'development',
       baseBuildId: baseBuildId,
       installationId: 'device-1',
-      trustRoots: const [trustAnchor],
+      trustRoots: [remote?['trustRoot'] as String? ?? trustAnchor],
     ),
     modules: [coupon],
     surfaces: const [summarySurface],
@@ -126,8 +132,31 @@ Future<void> main() async {
     'inbox': inbox,
     'status': patch.available ? patch.status() : null,
   };
-  File('${exchange.path}/results.jsonl').writeAsStringSync('${jsonEncode(record)}\n', mode: FileMode.append, flush: true);
   runApp(PatchLab(record, patch));
+  if (remote != null) {
+    final updater = PatchUpdater(
+      patch,
+      HttpPatchTransport(
+        baseUrl: remote['baseUrl']! as String,
+        deliveryToken: remote['deliveryToken']! as String,
+        applicationId: applicationId,
+        platform: platform,
+        distributionProfile: 'development',
+        baseBuildId: baseBuildId,
+        installationId: 'device-1',
+      ),
+    );
+    final r = await updater.checkForUpdate();
+    var sent = -1;
+    try {
+      sent = await updater.flushReceipts();
+    } on Object catch (e) {
+      record['receiptError'] = '$e';
+    }
+    record['update'] = {'state': r.state.name, 'artifactDigest': r.artifactDigest, 'reason': r.reason, 'receiptsSent': sent};
+    record['status'] = patch.status();
+  }
+  File('${exchange.path}/results.jsonl').writeAsStringSync('${jsonEncode(record)}\n', mode: FileMode.append, flush: true);
 }
 
 class PatchLab extends StatelessWidget {
