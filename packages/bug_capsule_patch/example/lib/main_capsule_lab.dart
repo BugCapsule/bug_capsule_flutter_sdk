@@ -82,14 +82,17 @@ class _CapsuleLabState extends State<CapsuleLab> {
       processInbox(patch, widget.exchange);
       patch.markHealthy('first_screen');
       await Future<void>.delayed(const Duration(milliseconds: 300));
+      final priorCaptures = widget.automaticCapture
+          ? (await BugCapsule.savedCaptures()).map((f) => f.path).toSet()
+          : <String>{};
       BugCapsule.action('lab.checkout', _checkout)();
       await Future<void>.delayed(const Duration(milliseconds: 300));
-      if (widget.automaticCapture) {
+      if (widget.automaticCapture && _total.startsWith('-')) {
         // Use the SDK's real failure-linked capture, retaining its monitoring event.
         List<File> captures = [];
         for (var i = 0; i < 100 && captures.isEmpty; i++) {
           await Future<void>.delayed(const Duration(milliseconds: 100));
-          captures = await BugCapsule.savedCaptures();
+          captures = (await BugCapsule.savedCaptures()).where((f) => !priorCaptures.contains(f.path)).toList();
         }
         if (captures.isEmpty) throw StateError('automatic failure capture missing');
         captures.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
