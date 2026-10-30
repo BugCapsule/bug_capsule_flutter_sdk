@@ -17,6 +17,7 @@ import 'backend.dart';
 import 'binding.dart';
 import 'config.dart';
 import 'connection_token.dart';
+import 'emergency/emergency.dart';
 import 'integration.dart';
 import 'interactions.dart';
 import 'monitoring/breadcrumbs.dart';
@@ -137,6 +138,14 @@ abstract final class BugCapsule {
   }
 
   static bool get isInitialized => _rt != null;
+
+  /// Remote feature guards: signed emergency policies, verified against the
+  /// trust anchor compiled into the app and evaluated locally. Works with or
+  /// without capture, and before or after [init]. See [BugCapsuleEmergency].
+  static BugCapsuleEmergency get emergency => _emergency;
+  static final BugCapsuleEmergency _emergency = BugCapsuleEmergency.internal(
+    _EmergencyHost(),
+  );
 
   /// Connection and instrumentation, for setup checks and support: whether
   /// the token works, whether the backend accepted the config fetch and the
@@ -482,7 +491,34 @@ abstract final class BugCapsule {
     await _rt?.dispose();
     _rt = null;
     Scope.root.clear();
+    // ignore: invalid_use_of_visible_for_testing_member
+    await _emergency.resetForTest();
   }
+}
+
+/// The emergency module's view of the runtime: the connection (also when
+/// capture is off or killed remotely), replay, app version and test storage.
+class _EmergencyHost implements EmergencyHost {
+  @override
+  BugCapsuleBackendConfig? get backend => BugCapsule._rt?._backend;
+
+  @override
+  bool get isReplaying => BugCapsule._rt?.engine != null;
+
+  @override
+  String? get appVersion {
+    final rt = BugCapsule._rt;
+    if (rt == null) {
+      const fromEnv = String.fromEnvironment('BUGCAPSULE_APP_VERSION');
+      return fromEnv.isEmpty ? null : fromEnv;
+    }
+    final v = rt.config.appVersion;
+    return v == 'unknown' ? null : v;
+  }
+
+  @override
+  Directory? get storageDirectory =>
+      BugCapsule.debugOverrides?.storageDirectory;
 }
 
 class _NoopSink implements TransactionSink {
@@ -781,6 +817,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       for (final i in integrations.whereType<MessengerInterceptor>())
         if (i.interceptDefaultMessenger) i,
     ]);
+    BugCapsule._emergency.runtimeAttached();
     String? replayUrl;
     try {
       replayUrl =
