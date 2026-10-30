@@ -11,8 +11,10 @@
 /// ```
 library;
 
+export 'src/binding.dart';
 export 'src/dispatch.dart';
 export 'src/hotfix.dart';
+export 'src/http_transport.dart';
 export 'src/runtime.dart';
 export 'src/surface.dart';
 export 'src/updater.dart';

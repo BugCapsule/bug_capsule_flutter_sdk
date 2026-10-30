@@ -126,6 +126,35 @@ class InspectCommand extends Command<int> {
 
 // ------------------------------------------------------------- run / verify
 
+/// `--patch-artifact`, with `--patch-keyring` and `--patch-keyring-signature`
+/// for a delegated signer. A named file that can't be read stops the run:
+/// replaying the bare base instead would prove nothing about the patch.
+PatchArchive? _patchArchive(ArgResults args) {
+  if (!args.options.contains('patch-artifact')) return null;
+  final path = args['patch-artifact'] as String?;
+  final keyring = args['patch-keyring'] as String?;
+  final signature = args['patch-keyring-signature'] as String?;
+  if ((keyring == null) != (signature == null)) {
+    throw UsageException('--patch-keyring and --patch-keyring-signature go together', '');
+  }
+  if (path == null) {
+    if (keyring != null) throw UsageException('a keyring needs --patch-artifact', '');
+    return null;
+  }
+  return PatchArchive(
+    File(path).readAsBytesSync(),
+    keyring: keyring == null ? null : File(keyring).readAsBytesSync(),
+    keyringSignature: signature == null ? null : File(signature).readAsBytesSync(),
+  );
+}
+
+void _addPatchOptions(ArgParser p) {
+  p
+    ..addOption('patch-artifact', help: 'Pin every attempt to this .bcpatch. Without it the attempt runs the bare base.')
+    ..addOption('patch-keyring', help: 'The archived keyring authorizing a delegated signer.')
+    ..addOption('patch-keyring-signature', help: 'The raw root signature of --patch-keyring.');
+}
+
 void _addLaunchOptions(ArgParser p, {bool release = true}) {
   p
     ..addOption(
@@ -290,6 +319,7 @@ class ReplayCommand extends Command<int> {
       help:
           'Backend capsule id to record the result on (automatic for backend capsules).',
     );
+    _addPatchOptions(argParser);
   }
 
   final ReplayKind kind;
@@ -400,6 +430,7 @@ class ReplayCommand extends Command<int> {
         buildSha: buildSha,
         runtime: runtime,
         attemptTimeout: _attemptTimeout(args, config),
+            patch: _patchArchive(args),
       );
       printSummary(summary, loaded.capsule);
       await _report(loaded, summary, launcher.target, launcher.release);
@@ -455,6 +486,7 @@ class GateCommand extends Command<int> {
   GateCommand({LauncherFactory? launcherFactory})
     : _launcher = launcherFactory {
     _addLaunchOptions(argParser, release: false);
+    _addPatchOptions(argParser);
     argParser
       ..addOption(
         'release',
@@ -800,6 +832,7 @@ class GateCommand extends Command<int> {
             buildSha: buildSha,
             runtime: runtime,
             attemptTimeout: _attemptTimeout(args, config),
+            patch: _patchArchive(args),
           );
         }
         String? runId;
@@ -1064,6 +1097,7 @@ class _RegressRun extends Command<int> {
                 buildSha: sha,
                 runtime: runtime,
                 attemptTimeout: _attemptTimeout(args, config),
+            patch: _patchArchive(args),
               );
         final String result;
         switch (s.verdict) {

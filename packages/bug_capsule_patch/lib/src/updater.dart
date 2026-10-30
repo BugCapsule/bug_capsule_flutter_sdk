@@ -5,10 +5,14 @@ import 'runtime.dart';
 
 /// Signed channel metadata as delivered, kept as the exact received bytes.
 final class SignedChannel {
-  const SignedChannel(this.document, this.signature, {this.etag});
+  const SignedChannel(this.document, this.signature, {this.etag, this.keyringDocument, this.keyringSignature});
   final Uint8List document;
   final Uint8List signature;
   final String? etag;
+
+  /// The current keyring, applied first so a rotated signer verifies.
+  final Uint8List? keyringDocument;
+  final Uint8List? keyringSignature;
 }
 
 /// How an app reaches its delivery endpoint. TLS, tokens and retries live
@@ -46,6 +50,7 @@ final class PatchUpdater {
     try {
       final channel = await transport.fetchChannel(etag: _etag);
       if (channel == null) return const PatchUpdateResult(PatchUpdateState.upToDate);
+      if (channel.keyringDocument != null) patch.applyKeyring(channel.keyringDocument!, channel.keyringSignature!);
       final result = await _act(patch.applyChannel(channel.document, channel.signature));
       // Only after the download and staging worked: a 304 must not end retries.
       _etag = channel.etag;

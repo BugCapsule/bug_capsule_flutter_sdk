@@ -26,6 +26,7 @@ import 'monitoring/breadcrumbs.dart';
 import 'monitoring/hub.dart';
 import 'monitoring/scope.dart';
 import 'monitoring/tracing.dart';
+import 'patch_binding.dart';
 import 'remote_config.dart';
 import 'replay_engine.dart';
 import 'state_tracker.dart';
@@ -609,6 +610,33 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
 
   @override
   final BugCapsuleConfig config;
+
+  CapsulePatchIdentity? _pinnedPatch;
+  bool _patchRead = false;
+
+  /// What this process runs. Read once: a process pins one generation.
+  CapsulePatchIdentity? get _patchIdentity {
+    if (_patchRead) return _pinnedPatch;
+    _patchRead = true;
+    return _pinnedPatch = _tryOr(() => config.patchBinding?.identity, null);
+  }
+
+  /// Loads the exact patch of a replay attempt. Returns why it can't run.
+  Future<String?> _pinPatch(ReplayChannel channel, Capsule capsule, ReplaySettings settings) async {
+    final binding = config.patchBinding;
+    _patchRead = true;
+    if (binding != null) {
+      try {
+        final bundle = settings.patchArtifact ? await channel.fetchPatchFile(ReplayProtocol.patchPath) : null;
+        final keyring = settings.patchKeyring ? await channel.fetchPatchFile(ReplayProtocol.keyringPath) : null;
+        final signature = settings.patchKeyring ? await channel.fetchPatchFile(ReplayProtocol.keyringSignaturePath) : null;
+        _pinnedPatch = await binding.pinForReplay(bundle, keyring: keyring, keyringSignature: signature);
+      } catch (e) {
+        return 'patch.unavailable: $e';
+      }
+    }
+    return patchPreflight(manifest: capsule.manifest, settings: settings, hasBinding: binding != null, running: _pinnedPatch);
+  }
   final List<BugCapsuleIntegration> integrations;
   final BugCapsuleTestOverrides? _overrides;
   final Random _random;
@@ -1199,7 +1227,12 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       'labels': _sanitizeLabels(config.labels),
       'runtime': _runtimeInfo().toJson(),
       'capabilities': _capabilities(templates),
-      'dependencies': [for (final d in templates) d.toJson()],
+      'dependencies': [
+        for (final d in templates) d.toJson(),
+        if (_patchIdentity?.patchSetDigest != null)
+          _patchIdentity!.dependency.toJson(),
+      ],
+      'patch': ?_patchIdentity?.toJson(),
       'eligibilityGaps': {
         for (final kind in CheckpointKind.values) kind.name: gaps(kind),
       },
@@ -1635,9 +1668,11 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         'events between the checkpoint and the window were evicted; raise window or maxEvents',
       );
     }
+    final patch = _patchIdentity;
     final dependencies = [
       for (final a in _interactionAdapters)
         ?_tryOr(() => a.dependency(window), null),
+      if (patch?.patchSetDigest != null) patch!.dependency,
     ];
     final open = window.checkpoint.kind == CheckpointKind.periodic
         ? window.checkpoint.data['interactions']
@@ -1701,6 +1736,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         capabilities: _capabilities(dependencies),
         monitoring: monitoring,
         dependencies: dependencies,
+        patch: patch,
       ),
       checkpoint: window.checkpoint.shift(anchor),
       events: events,
@@ -2109,7 +2145,8 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     }
     replay.precheck();
     interactions.replay = replay.interactions;
-    final blocked = replay.preflight(_interactionAdapters);
+    final blocked = await _pinPatch(channel, capsule, settings) ?? replay.preflight(_interactionAdapters);
+    replay.patch = _patchIdentity;
     if (blocked != null) {
       await channel.report(
         ReplayReport(
@@ -2121,6 +2158,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
           message: blocked,
           attemptId: settings.attemptId,
           runtime: 'flutter',
+          patch: _patchIdentity,
         ),
       );
       engine = null;

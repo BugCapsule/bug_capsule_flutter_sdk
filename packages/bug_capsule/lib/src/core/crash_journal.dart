@@ -1096,6 +1096,11 @@ Capsule? crashCapsuleFrom(
       capabilities: capabilities,
       monitoring: request.monitoring,
       dependencies: dependencies,
+      patch: h['patch'] == null
+          ? null
+          : CapsulePatchIdentity.fromJson(
+              (h['patch'] as Map).cast<String, Object?>(),
+            ),
       journalGapMs: journalGapMs,
     ),
     checkpoint: checkpoint.shift(anchor),

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
@@ -21,6 +22,24 @@ class ReplayChannel {
 
   Uri _uri(String path) =>
       Uri.parse('${baseUrl.replaceAll(RegExp(r'/+$'), '')}$path');
+
+  /// A file of this attempt's patch archive. Throws when it can't be loaded.
+  Future<Uint8List> fetchPatchFile(String path) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    try {
+      final res = await (await client.getUrl(_uri(path))).close();
+      if (res.statusCode != 200) {
+        throw StateError('$path download failed: HTTP ${res.statusCode}');
+      }
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in res) {
+        bytes.add(chunk);
+      }
+      return bytes.takeBytes();
+    } finally {
+      client.close(force: true);
+    }
+  }
 
   Future<(Capsule, ReplaySettings)> fetch() async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
@@ -227,12 +246,16 @@ class ReplayEngine implements ReplayContext {
     }
   }
 
+  /// What this attempt runs, reported with every result.
+  CapsulePatchIdentity? patch;
+
   /// capsule-v2 §2 preflight: every required dependency has an installed
   /// adapter that supports its schema, and nothing open at a periodic
   /// checkpoint needs restoring. Returns why the capsule cannot replay, or
   /// null.
   String? preflight(Iterable<InteractionIntegration> adapters) {
     for (final d in capsule.manifest.requiredDependencies) {
+      if (d.kind == patchRuntimeDependencyKind) continue;
       final candidates = [
         for (final a in adapters)
           if (a.adapter == d.adapter) a,
@@ -396,6 +419,7 @@ class ReplayEngine implements ReplayContext {
         ? ReplayOutcome.reproduced
         : ReplayOutcome.notReproduced;
     return ReplayReport(
+      patch: patch,
       outcome: outcome,
       attempt: settings.attempt,
       durationMs: _clock.elapsedMilliseconds,

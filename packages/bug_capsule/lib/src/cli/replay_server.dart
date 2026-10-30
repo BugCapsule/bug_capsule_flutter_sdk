@@ -88,6 +88,13 @@ class ReplayServer {
   /// Host the app should use to reach this server.
   final String host;
   ArmedAttempt? _current;
+
+  /// The archived `.bcpatch` that attempts load, when a run is pinned to one.
+  List<int>? patchArtifact;
+
+  /// The archived keyring of a delegated signer, and its raw signature.
+  List<int>? patchKeyring;
+  List<int>? patchKeyringSignature;
   final Random _random = Random.secure();
 
   int get port => _server.port;
@@ -114,6 +121,9 @@ class ReplayServer {
         idleCompression: settings.idleCompression,
         attemptId: attemptId,
         runtime: settings.runtime,
+        patchArtifact: settings.patchArtifact,
+        patchKeyring: settings.patchKeyring,
+        expectedPatchSetDigest: settings.expectedPatchSetDigest,
       ),
     );
     return _current = armed;
@@ -148,6 +158,17 @@ class ReplayServer {
     if (attempt != null) offerLine(attempt, line);
   }
 
+  void _serveFile(HttpResponse res, List<int>? bytes) {
+    if (bytes == null) {
+      res.statusCode = HttpStatus.notFound;
+      return;
+    }
+    res
+      ..headers.contentType = ContentType.binary
+      ..headers.set('cache-control', 'no-store')
+      ..add(bytes);
+  }
+
   Future<void> _handle(HttpRequest req) async {
     final res = req.response;
     try {
@@ -169,6 +190,12 @@ class ReplayServer {
         return;
       }
       switch ((req.method, '/${segments[2]}')) {
+        case ('GET', ReplayProtocol.patchPath):
+          _serveFile(res, patchArtifact);
+        case ('GET', ReplayProtocol.keyringPath):
+          _serveFile(res, patchKeyring);
+        case ('GET', ReplayProtocol.keyringSignaturePath):
+          _serveFile(res, patchKeyringSignature);
         case ('GET', ReplayProtocol.capsulePath):
           res
             ..headers.contentType = ContentType.binary

@@ -42,6 +42,22 @@ final class PatchResult<O> {
   final String? reason;
 }
 
+/// Replay pinning: the archived files an attempt loads, read-only and offline.
+/// A null [bundlePath] is the bare base.
+final class PatchReplay {
+  const PatchReplay({this.bundlePath, this.keyringPath, this.keyringSignaturePath});
+
+  final String? bundlePath;
+  final String? keyringPath;
+  final String? keyringSignaturePath;
+
+  Map<String, Object?> toJson() => {
+    'bundlePath': bundlePath,
+    'keyringPath': ?keyringPath,
+    'keyringSignaturePath': ?keyringSignaturePath,
+  };
+}
+
 /// Identity of the installed binary and where its patches come from.
 final class PatchConfig {
   const PatchConfig({
@@ -93,7 +109,7 @@ final class BugCapsulePatch {
 
   /// Opens the store and selects the generation for this process. Never
   /// throws: without a usable runtime every [call] uses the fallback.
-  static BugCapsulePatch open(PatchConfig config, {required List<PatchModule<dynamic, dynamic>> modules, List<PatchSurfaceContract> surfaces = const [], String? libraryPath}) {
+  static BugCapsulePatch open(PatchConfig config, {required List<PatchModule<dynamic, dynamic>> modules, List<PatchSurfaceContract> surfaces = const [], String? libraryPath, PatchReplay? replay}) {
     final native = Native.load(libraryPath);
     if (native == null) return BugCapsulePatch._(null, null, 'runtime_missing');
     if (native.version != abiVersion) return BugCapsulePatch._(null, null, 'abi_mismatch');
@@ -111,6 +127,7 @@ final class BugCapsulePatch {
         for (final m in modules) {'id': m.id, 'input': m.inputSchema, 'output': m.outputSchema},
       ],
       'surfaces': [for (final s in surfaces) s.toJson()],
+      if (replay != null) 'replay': replay.toJson(),
     });
     try {
       return BugCapsulePatch._(native, native.open(utf8.encode(json)), null);
