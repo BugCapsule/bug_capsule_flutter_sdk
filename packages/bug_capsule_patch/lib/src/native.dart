@@ -17,6 +17,7 @@ const opReceipts = 9;
 const opAck = 10;
 const opCancel = 11;
 const opLocalEval = 12;
+const opSurface = 13;
 
 const abiVersion = 1;
 

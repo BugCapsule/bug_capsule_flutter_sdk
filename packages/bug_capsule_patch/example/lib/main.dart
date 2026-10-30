@@ -47,6 +47,13 @@ const sample = (
   lines: <Line>[(sku: 'a', qty: 2, unitCents: 1999), (sku: 'b', qty: 10, unitCents: 300)],
 );
 
+const summarySurface = PatchSurfaceContract(
+  id: 'lab.summary',
+  components: ['column', 'row', 'text', 'spacer', 'button'],
+  actions: ['lab.pay'],
+  requiredActions: ['lab.pay'],
+);
+
 Future<Directory> _exchangeDir() async {
   // Android: readable by adb on a release build. iOS: reachable with devicectl.
   if (Platform.isAndroid) return (await getExternalStorageDirectory())!;
@@ -96,6 +103,7 @@ Future<void> main() async {
       trustRoots: const [trustAnchor],
     ),
     modules: [coupon],
+    surfaces: const [summarySurface],
   );
   final watch = Stopwatch()..start();
   final result = patch.call(coupon, sample);
@@ -119,13 +127,14 @@ Future<void> main() async {
     'status': patch.available ? patch.status() : null,
   };
   File('${exchange.path}/results.jsonl').writeAsStringSync('${jsonEncode(record)}\n', mode: FileMode.append, flush: true);
-  runApp(PatchLab(record));
+  runApp(PatchLab(record, patch));
 }
 
 class PatchLab extends StatelessWidget {
-  const PatchLab(this.record, {super.key});
+  const PatchLab(this.record, this.patch, {super.key});
 
   final Map<String, Object?> record;
+  final BugCapsulePatch patch;
 
   @override
   Widget build(BuildContext context) {
@@ -143,6 +152,16 @@ class PatchLab extends StatelessWidget {
             Text('Discount: ${output['discount']}'),
             Text('Total: ${output['total']}'),
             Text('Eval: ${record['evalMicros']} µs'),
+            const SizedBox(height: 24),
+            PatchSurfaceView(
+              patch: patch,
+              id: summarySurface.id,
+              actions: {'lab.pay': () {}},
+              bundled: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [const Text('Bundled summary'), FilledButton(onPressed: () {}, child: const Text('Pay'))],
+              ),
+            ),
           ],
         ),
       ),

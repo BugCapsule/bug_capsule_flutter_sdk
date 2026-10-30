@@ -14,3 +14,4 @@ library;
 export 'src/dispatch.dart';
 export 'src/hotfix.dart';
 export 'src/runtime.dart';
+export 'src/surface.dart';

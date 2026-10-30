@@ -3,6 +3,7 @@ import 'dart:ffi';
 import 'dart:typed_data';
 
 import 'native.dart';
+import 'surface.dart';
 
 /// A module the app ships a fallback for, and that patches may replace. The
 /// schemas are canonical type text (`int`, `dec(2)`, `rec(a:int,b:str)`); a
@@ -92,7 +93,7 @@ final class BugCapsulePatch {
 
   /// Opens the store and selects the generation for this process. Never
   /// throws: without a usable runtime every [call] uses the fallback.
-  static BugCapsulePatch open(PatchConfig config, {required List<PatchModule<dynamic, dynamic>> modules, String? libraryPath}) {
+  static BugCapsulePatch open(PatchConfig config, {required List<PatchModule<dynamic, dynamic>> modules, List<PatchSurfaceContract> surfaces = const [], String? libraryPath}) {
     final native = Native.load(libraryPath);
     if (native == null) return BugCapsulePatch._(null, null, 'runtime_missing');
     if (native.version != abiVersion) return BugCapsulePatch._(null, null, 'abi_mismatch');
@@ -109,6 +110,7 @@ final class BugCapsulePatch {
       'modules': [
         for (final m in modules) {'id': m.id, 'input': m.inputSchema, 'output': m.outputSchema},
       ],
+      'surfaces': [for (final s in surfaces) s.toJson()],
     });
     try {
       return BugCapsulePatch._(native, native.open(utf8.encode(json)), null);
@@ -166,6 +168,18 @@ final class BugCapsulePatch {
     if (engine == null) return null;
     try {
       return _native!.call(engine, opAsset, a: utf8.encode(id));
+    } on NativeError {
+      return null;
+    }
+  }
+
+  /// The patched document for a registered surface, or null to use the
+  /// bundled layout. Render it with `PatchSurfaceView`.
+  Uint8List? surface(String id) {
+    final engine = _engine;
+    if (engine == null) return null;
+    try {
+      return _native!.call(engine, opSurface, a: utf8.encode(id));
     } on NativeError {
       return null;
     }
