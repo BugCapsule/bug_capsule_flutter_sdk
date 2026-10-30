@@ -20,6 +20,27 @@ class FakeTransport implements PatchTransport {
 }
 
 void main() {
+  test(
+    'only explicit boolean false disables an existing benchmark request',
+    () {
+      final dir = Directory.systemTemp.createTempSync('bc-benchmark-switch-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/benchmark-config.json');
+      expect(PerformanceHarness.enabled(dir), false);
+      for (final request in [
+        '{}',
+        '{"enabled":true}',
+        '{"enabled":"false"}',
+        '{',
+        'null',
+      ]) {
+        file.writeAsStringSync(request);
+        expect(PerformanceHarness.enabled(dir), true, reason: request);
+      }
+      file.writeAsStringSync('{"enabled":false}');
+      expect(PerformanceHarness.enabled(dir), false);
+    },
+  );
   test('baseline verifies all calls and never opens runtime', () {
     final dir = Directory.systemTemp.createTempSync('bc-benchmark-');
     addTearDown(() => dir.deleteSync(recursive: true));

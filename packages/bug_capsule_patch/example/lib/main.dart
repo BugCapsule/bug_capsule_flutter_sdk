@@ -145,7 +145,7 @@ Future<void> main() async {
     modules: [coupon],
     surfaces: const [summarySurface],
   );
-  if (File('${exchange.path}/benchmark-config.json').existsSync()) {
+  if (PerformanceHarness.enabled(exchange)) {
     try {
       final benchmark = PerformanceHarness.run(
         exchange: exchange,
@@ -165,6 +165,7 @@ Future<void> main() async {
       record['evalMicros'] = (record['firstCallNs']! as int) ~/ 1000;
       runApp(PatchLab(record, benchmark.patch));
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!PerformanceHarness.enabled(exchange)) return;
         record['appCodeToFirstPostFrameNs'] = PerformanceHarness.nowNs;
         record['rssAtFirstPostFrame'] = PerformanceHarness.rss();
         PerformanceHarness.write(exchange, record);

@@ -11,6 +11,18 @@ final class BenchmarkResult<O> {
 }
 
 final class PerformanceHarness {
+  // Malformed requests still enter the benchmark validator and fail closed.
+  static bool enabled(Directory exchange) {
+    final file = File('${exchange.path}/benchmark-config.json');
+    if (!file.existsSync()) return false;
+    try {
+      final value = jsonDecode(file.readAsStringSync());
+      return !(value is Map && value['enabled'] == false);
+    } on Object {
+      return true;
+    }
+  }
+
   static final clock = Stopwatch()..start();
   static int get nowNs {
     final ticks = clock.elapsedTicks;

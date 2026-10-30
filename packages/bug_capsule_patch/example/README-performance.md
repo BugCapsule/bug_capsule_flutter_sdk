@@ -48,3 +48,9 @@ no download happened. Use a fresh authorized digest and backend request logs
 to substantiate a first-download claim; do not erase the trust journal. Timing
 success does not establish server-side receipt acceptance: retain HTTP/backend
 evidence separately. Do not distribute private configuration with evidence.
+
+To resume HTTP without deleting files, overwrite `benchmark-config.json` with
+`{"enabled":false}`. Only the JSON boolean false disables an existing request;
+omitting enabled keeps benchmarking active. Malformed requests still fail the
+benchmark validator rather than silently starting normal delivery. Disabled
+requests do not update old benchmark results from frame callbacks.
