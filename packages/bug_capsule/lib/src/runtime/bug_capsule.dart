@@ -17,6 +17,8 @@ import 'backend.dart';
 import 'binding.dart';
 import 'config.dart';
 import 'connection_token.dart';
+import 'emergency/contract.dart' show EmergencyDecision;
+import 'emergency/decisions.dart';
 import 'emergency/emergency.dart';
 import 'integration.dart';
 import 'interactions.dart';
@@ -506,6 +508,17 @@ class _EmergencyHost implements EmergencyHost {
   bool get isReplaying => BugCapsule._rt?.engine != null;
 
   @override
+  void recordDecision(Map<String, Object?> data) =>
+      BugCapsule._rt?._recordDecision(data);
+
+  @override
+  EmergencyDecision? replayDecision(String featureKey, String? subjectTag) =>
+      BugCapsule._rt?.engine?.emergencyDecision(featureKey, subjectTag);
+
+  @override
+  void decisionsIncomplete() => BugCapsule._rt?._refreshJournalHeader();
+
+  @override
   String? get appVersion {
     final rt = BugCapsule._rt;
     if (rt == null) {
@@ -722,6 +735,38 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     recorder?.add(now(), type, clean);
   }
 
+  /// A changed guard decision (§7.8). It goes through the capture rules like
+  /// any event; one they drop, or whose key or action they change, can't be
+  /// replayed, so the capsule's decisions become partial.
+  void _recordDecision(Map<String, Object?> data) {
+    final recorder = _recording ? _recorder : null;
+    if (recorder == null) return;
+    final clean = _sanitizeEvent(EventTypes.emergencyDecision, data);
+    if (_decisionIntact(data, clean)) {
+      recorder.add(now(), EventTypes.emergencyDecision, clean!);
+    } else {
+      BugCapsule._emergency.decisionDropped();
+    }
+  }
+
+  /// Replay looks decisions up by these fields, so they must survive redaction.
+  static bool _decisionIntact(
+    Map<String, Object?> data,
+    Map<String, Object?>? clean,
+  ) =>
+      clean != null &&
+      clean['key'] == data['key'] &&
+      clean['subject'] == data['subject'] &&
+      clean['action'] == data['action'];
+
+  /// The decisions in effect now: for those made before recording started,
+  /// and so a window that starts at a periodic checkpoint knows them.
+  void _writeTrackedDecisions() {
+    for (final data in BugCapsule._emergency.trackedDecisions.toList()) {
+      _recordDecision(data);
+    }
+  }
+
   /// Defense in depth: whatever an integration records goes through the
   /// redactor again (idempotent for already-redacted data), then the app's
   /// [BugCapsuleConfig.beforeRecord]. Pointer and lifecycle events carry only
@@ -758,7 +803,8 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
             out['requestBody'] = data['requestBody'];
           }
         }
-        if (type == 'screenshot') out['base64'] = data['base64']; // Provider-masked binary pixels.
+        if (type == 'screenshot')
+          out['base64'] = data['base64']; // Provider-masked binary pixels.
         if (type == EventTypes.failure && data['signature'] is String) {
           out['signature'] = data['signature'];
         }
@@ -1044,6 +1090,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       );
       _startJournal(s.root, recorder);
       _installCapture();
+      _writeTrackedDecisions();
     }
 
     binding.addPostFrameCallback((_) {
@@ -1381,6 +1428,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
           data: data,
         ),
       );
+      _writeTrackedDecisions();
       _refreshJournalHeader();
     } catch (e) {
       _warnOnce('periodic checkpoint failed: $e');
@@ -1750,6 +1798,9 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     'errors.uncaught': 'supported',
     'clock.virtual': 'explicit',
     'random.seeded': 'explicit',
+    emergencyDecisionsCapability: BugCapsule._emergency.decisionsComplete
+        ? 'supported'
+        : 'partial',
     for (final i in integrations) 'integration.${i.name}': 'supported',
     for (final d in dependencies)
       'interaction.${d.adapter}': d.required ? 'supported' : 'partial',
@@ -1878,6 +1929,11 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
               return null;
             }
             final data = _sanitizeEvent(e.type, e.data, hook: false);
+            if (e.type == EventTypes.emergencyDecision &&
+                !_decisionIntact(e.data, data)) {
+              BugCapsule._emergency.decisionDropped();
+              return null;
+            }
             return data == null
                 ? null
                 : BugCapsuleEvent(seq: e.seq, t: e.t, type: e.type, data: data);

@@ -414,7 +414,7 @@ void main() {
 
   group('replay', () {
     test(
-      'while replaying: ALLOW from replay, no network, no receipts',
+      'while replaying without a recorded decision: ALLOW, no network',
       () async {
         host.isReplaying = true;
         transport.otherwise = () => served(doc());
@@ -622,7 +622,7 @@ void main() {
       expect(reported(), containsPair('currentPatch', 3));
     });
 
-    test('replay: calls reach the provider, nothing is reported', () async {
+    test('replay: nothing reaches the provider or is reported', () async {
       host.isReplaying = true;
       final provider = FakeHotfixProvider();
       final f = facade();
@@ -631,7 +631,9 @@ void main() {
       );
       await pumpEventQueue();
       expect(provider.calls, isEmpty, reason: 'no report to make at startup');
-      expect(await f.hotfix!.getStatus(), FakeHotfixProvider.upToDate);
+      final status = await f.hotfix!.getStatus();
+      expect(status.state, HotfixState.unavailable);
+      expect(provider.calls, isEmpty);
       expect(transport.receipts, isEmpty);
     });
 

@@ -60,6 +60,18 @@ class FakeHost implements EmergencyHost {
   String? appVersion;
   @override
   Directory? storageDirectory;
+
+  final List<Map<String, Object?>> recorded = [];
+  EmergencyDecision? Function(String key, String? subjectTag)? replay;
+  int incomplete = 0;
+
+  @override
+  void recordDecision(Map<String, Object?> data) => recorded.add(data);
+  @override
+  EmergencyDecision? replayDecision(String featureKey, String? subjectTag) =>
+      replay?.call(featureKey, subjectTag);
+  @override
+  void decisionsIncomplete() => incomplete++;
 }
 
 /// A scripted hotfix provider: every call returns [status] (or throws

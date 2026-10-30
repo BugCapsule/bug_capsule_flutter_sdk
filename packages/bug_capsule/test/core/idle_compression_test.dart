@@ -20,6 +20,16 @@ void main() {
       expect(c.idleSince(0, 1500), isNull);
     });
 
+    test('guard decisions rewritten at checkpoints are not activity', () {
+      final c = IdleCompressor([
+        ev(0, EventTypes.action),
+        ev(30000, EventTypes.emergencyDecision),
+        ev(60000, EventTypes.emergencyDecision),
+        ev(90000, EventTypes.action),
+      ]);
+      expect(c.idleSince(0, 90000), 0);
+    });
+
     test('a quiet gap is idle from the previous input', () {
       final c = IdleCompressor([
         ev(0, EventTypes.action),
