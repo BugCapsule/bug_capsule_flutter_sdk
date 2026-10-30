@@ -14,6 +14,14 @@ final class FakeBinding implements PatchBinding {
 
   @override
   CapsulePatchIdentity? identity;
+  bool prepared = false;
+
+  /// A plugin call: only possible once `init` created the Flutter binding.
+  @override
+  Future<void> prepare() async {
+    expect(WidgetsBinding.instance, isNotNull);
+    prepared = true;
+  }
 
   @override
   Future<CapsulePatchIdentity?> pinForReplay(Uint8List? bundle, {Uint8List? keyring, Uint8List? keyringSignature}) async => identity;
@@ -51,6 +59,12 @@ void main() {
     expect(c.manifest.requiredDependencies.single.kind, patchRuntimeDependencyKind);
   });
 
+  test('init prepares the binding before anything reads it', () async {
+    final b = FakeBinding(CapsulePatchIdentity(baseBuildId: 'build-1', engineAbi: 1, hostAbiHash: hash));
+    await capture(b);
+    expect(b.prepared, isTrue);
+  });
+
   test('a capture on the bare base records the identity and needs no runtime', () async {
     final c = await capture(FakeBinding(CapsulePatchIdentity(baseBuildId: 'build-1', engineAbi: 1, hostAbiHash: hash)));
     expect(c.manifest.patch!.baseBuildId, 'build-1');
@@ -71,6 +85,9 @@ void main() {
 }
 
 final class _Throwing implements PatchBinding {
+  @override
+  Future<void> prepare() async => throw StateError('no directory');
+
   @override
   CapsulePatchIdentity? get identity => throw StateError('runtime gone');
 

@@ -892,6 +892,11 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         if (i.interceptDefaultMessenger) i,
     ]);
     BugCapsule._emergency.runtimeAttached();
+    try {
+      await config.patchBinding?.prepare();
+    } catch (e) {
+      debugPrint('[bugcapsule] patch binding not ready: $e');
+    }
     String? replayUrl;
     try {
       replayUrl =

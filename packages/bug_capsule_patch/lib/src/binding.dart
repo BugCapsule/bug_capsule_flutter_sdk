@@ -8,21 +8,32 @@ import 'surface.dart';
 
 /// Opens the runtime for BugCapsule: normally from the device store, and in a
 /// replay attempt pinned to one exact artifact. Pass it as
-/// `BugCapsuleConfig.patchBinding`, then use [patch].
+/// `BugCapsuleConfig.patchBinding`, then use [patch] from the app.
 final class BugCapsulePatchBinding implements PatchBinding {
-  BugCapsulePatchBinding(this.config, {required this.modules, this.surfaces = const [], this.libraryPath});
+  BugCapsulePatchBinding(PatchConfig this._config, {required this.modules, this.surfaces = const [], this.libraryPath}) : _resolve = null;
 
-  final PatchConfig config;
+  /// For a config that needs plugins, such as a store directory from
+  /// path_provider. [resolve] runs inside `BugCapsule.init`, once the Flutter
+  /// binding exists; `init` has to be the first line of `main`.
+  BugCapsulePatchBinding.deferred(Future<PatchConfig> Function() resolve, {required this.modules, this.surfaces = const [], this.libraryPath}) : _config = null, _resolve = resolve;
+
+  PatchConfig? _config;
+  final Future<PatchConfig> Function()? _resolve;
   final List<PatchModule<dynamic, dynamic>> modules;
   final List<PatchSurfaceContract> surfaces;
   final String? libraryPath;
   BugCapsulePatch? _patch;
 
-  /// The runtime of this process.
-  BugCapsulePatch get patch => _patch ??= BugCapsulePatch.open(config, modules: modules, surfaces: surfaces, libraryPath: libraryPath);
+  PatchConfig get _ready => _config ?? (throw StateError('patch binding not prepared: pass it to BugCapsule.init first'));
 
   @override
-  CapsulePatchIdentity? get identity => _identityOf(patch);
+  Future<void> prepare() async => _config ??= await _resolve!();
+
+  /// The runtime of this process.
+  BugCapsulePatch get patch => _patch ??= BugCapsulePatch.open(_ready, modules: modules, surfaces: surfaces, libraryPath: libraryPath);
+
+  @override
+  CapsulePatchIdentity? get identity => _config == null ? null : _identityOf(patch);
 
   CapsulePatchIdentity? _identityOf(BugCapsulePatch p) {
     if (!p.available) return null;
@@ -51,7 +62,7 @@ final class BugCapsulePatchBinding implements PatchBinding {
     final BugCapsulePatch p;
     try {
       p = BugCapsulePatch.open(
-        config,
+        _ready,
         modules: modules,
         surfaces: surfaces,
         libraryPath: libraryPath,

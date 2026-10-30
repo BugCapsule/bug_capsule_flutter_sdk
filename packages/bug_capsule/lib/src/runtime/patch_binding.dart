@@ -6,6 +6,11 @@ import '../core/replay_protocol.dart';
 /// Connects the patch runtime to capture and replay. `bug_capsule_patch`
 /// implements this; pass it as `BugCapsuleConfig.patchBinding`.
 abstract interface class PatchBinding {
+  /// Awaited by `BugCapsule.init` right after it creates the Flutter binding,
+  /// before any capture or replay. `init` must be the first line of `main`, so
+  /// this is the first moment plugins such as path_provider can be used.
+  Future<void> prepare();
+
   /// What this process runs. Capsules record it.
   CapsulePatchIdentity? get identity;
 
