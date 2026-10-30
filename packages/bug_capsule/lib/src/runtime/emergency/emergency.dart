@@ -10,6 +10,7 @@ import '../../version.dart';
 import '../config.dart' show BugCapsuleBackendConfig;
 import '../connection_token.dart';
 import 'contract.dart';
+import 'decisions.dart';
 import 'engine.dart';
 import 'hotfix.dart';
 import 'store.dart';
@@ -31,6 +32,15 @@ abstract interface class EmergencyHost {
 
   /// The SDK storage root replaced in tests (`BugCapsuleTestOverrides`).
   Directory? get storageDirectory;
+
+  /// Writes a changed decision into the recording, if there is one (§7.8).
+  void recordDecision(Map<String, Object?> data);
+
+  /// The capsule's decision for [featureKey] now; null when it has none.
+  EmergencyDecision? replayDecision(String featureKey, String? subjectTag);
+
+  /// [BugCapsuleEmergency.decisionsComplete] became false.
+  void decisionsIncomplete();
 }
 
 /// Replaces storage, platform, clock, randomness and transport in tests.
@@ -101,6 +111,23 @@ final class BugCapsuleEmergency {
   StreamController<EmergencySnapshot> _changes =
       StreamController<EmergencySnapshot>.broadcast();
   final Set<String> _warned = {};
+  final EmergencyDecisionTracker _decisions = EmergencyDecisionTracker();
+
+  /// False once a decision could not be recorded (§7.8).
+  @internal
+  bool get decisionsComplete => _decisions.complete;
+
+  /// Each decision known now, as `emergency.decision` event data.
+  @internal
+  Iterable<Map<String, Object?>> get trackedDecisions => _decisions.current;
+
+  /// The app's capture hook dropped a decision.
+  @internal
+  void decisionDropped() {
+    if (!_decisions.complete) return;
+    _decisions.markIncomplete();
+    _host.decisionsIncomplete();
+  }
 
   void _warnOnce(String message) {
     if (_warned.add(message)) debugPrint('[bugcapsule] emergency: $message');
@@ -120,7 +147,11 @@ final class BugCapsuleEmergency {
     _config = config;
     final provider = config.hotfixProvider;
     if (provider != null) {
-      _hotfix = EmergencyHotfix.internal(provider, _hotfixStatus);
+      _hotfix = EmergencyHotfix.internal(
+        provider,
+        _hotfixStatus,
+        isReplaying: () => _host.isReplaying,
+      );
     }
     return _initializing = _initialize(config).catchError((Object e) {
       _inactiveReason = 'setup_failed';
@@ -314,8 +345,14 @@ final class BugCapsuleEmergency {
   /// installation id; pass only a stable pseudonymous id, never an email
   /// address or anything else that identifies a person.
   EmergencyDecision evaluate(String featureKey, {String? subject}) {
+    if (_host.isReplaying) return _replayed(featureKey, subject);
+    final decision = _decide(featureKey, subject);
+    _track(decision, subject);
+    return decision;
+  }
+
+  EmergencyDecision _decide(String featureKey, String? subject) {
     try {
-      if (_host.isReplaying) return emergencyReplayDecision(featureKey);
       if (!isEmergencyFeatureKey(featureKey)) {
         _warnOnce(
           '"$featureKey" is not a feature key (lower-case dotted names); '
@@ -337,6 +374,31 @@ final class BugCapsuleEmergency {
           EmergencyFailureMode.failOpen,
         );
       }
+    }
+  }
+
+  /// What the app saw during capture, or everything allowed when the capsule
+  /// doesn't say (§7.8).
+  EmergencyDecision _replayed(String featureKey, String? subject) {
+    try {
+      final tag = subject == null ? null : _decisions.tagOf(subject);
+      final decision = _host.replayDecision(featureKey, tag);
+      if (decision != null) return decision;
+    } catch (e) {
+      _warnOnce('could not replay the decision: $e');
+    }
+    return emergencyReplayDecision(featureKey);
+  }
+
+  /// Never affects the decision: a failure here only costs the recording.
+  void _track(EmergencyDecision decision, String? subject) {
+    try {
+      final wasComplete = _decisions.complete;
+      final changed = _decisions.track(decision, subject);
+      if (changed != null) _host.recordDecision(changed);
+      if (wasComplete && !_decisions.complete) _host.decisionsIncomplete();
+    } catch (e) {
+      _warnOnce('could not record the decision: $e');
     }
   }
 
@@ -424,6 +486,7 @@ final class BugCapsuleEmergency {
     _hotfix = null;
     _runtime = null;
     _warned.clear();
+    _decisions.clear();
     await _changes.close();
     _changes = StreamController<EmergencySnapshot>.broadcast();
   }

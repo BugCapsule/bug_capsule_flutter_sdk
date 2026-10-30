@@ -569,8 +569,10 @@ Limits:
 - Policies are not code push: they cannot change app behavior beyond the
   guards you wrote. A code fix arrives through a store release or a hotfix
   adapter.
-- Guard decisions are not yet recorded into capsules. While a capsule
-  replays, every feature is allowed and the module makes no network calls.
+- Guard decisions are recorded into capsules. While a capsule replays, each
+  evaluation returns what the user saw, with `source: replay`, and the module
+  makes no network calls. A feature the capsule has no decision for is allowed,
+  and so is every feature in a capsule from an older SDK.
 
 ## Going to production
 

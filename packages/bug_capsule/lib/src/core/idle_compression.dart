@@ -25,6 +25,8 @@ class IdleCompressor {
     if (to - from <= minGapMs) return null;
     var since = from;
     for (final e in events) {
+      // Rewritten after every periodic checkpoint: not something happening.
+      if (e.type == EventTypes.emergencyDecision) continue;
       final start = e.type == EventTypes.http
           ? e.t - (e.data['durationMs'] as int? ?? 0)
           : e.t;

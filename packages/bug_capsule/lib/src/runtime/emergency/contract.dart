@@ -62,7 +62,7 @@ enum EmergencyDecisionSource {
   /// No usable document: the feature's failure mode decided.
   failureMode('failure_mode'),
 
-  /// The SDK is replaying a capsule: everything is allowed.
+  /// The SDK is replaying a capsule: the decision recorded in it (§7.8).
   replay('replay');
 
   const EmergencyDecisionSource(this.wire);
@@ -586,8 +586,7 @@ final class EmergencyDecision {
   final String? policyId;
   final int? policyRevision;
 
-  /// The revision of the document that decided; null for failure modes and
-  /// replay.
+  /// The revision of the document that decided; null for failure modes.
   final int? documentRevision;
 
   /// Text the policy author wrote for end users; null when there is none.

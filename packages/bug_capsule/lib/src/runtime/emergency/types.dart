@@ -246,7 +246,8 @@ EmergencyDecision emergencyFailureDecision(
   );
 }
 
-/// While a capsule replays everything is allowed (§7.4).
+/// While a capsule replays, a feature the capsule has no decision for is
+/// allowed (§7.8).
 EmergencyDecision emergencyReplayDecision(String featureKey) =>
     EmergencyDecision(
       featureKey: featureKey,

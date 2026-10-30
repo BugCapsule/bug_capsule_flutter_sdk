@@ -151,6 +151,27 @@ void main() {
       expect(hotfix.lastStatus, FakeHotfixProvider.upToDate);
     });
 
+    test('during replay nothing reaches the provider', () async {
+      var replaying = true;
+      final provider = FakeHotfixProvider();
+      final hotfix = EmergencyHotfix.internal(
+        provider,
+        seen.add,
+        isReplaying: () => replaying,
+      );
+      expect((await hotfix.getStatus()).state, HotfixState.unavailable);
+      expect((await hotfix.checkAvailability()).status.available, isFalse);
+      expect(
+        await hotfix.downloadAvailablePatch(),
+        isA<HotfixNothingToDownload>(),
+      );
+      expect(provider.calls, isEmpty);
+      expect(seen, isEmpty);
+      replaying = false;
+      await hotfix.getStatus();
+      expect(provider.calls, ['getStatus']);
+    });
+
     test('a provider that throws before any status: a failed result that is '
         'not passed on', () async {
       final provider = FakeHotfixProvider()..error = StateError('boom');
