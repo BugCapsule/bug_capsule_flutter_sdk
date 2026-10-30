@@ -8,6 +8,8 @@ import 'package:flutter/widgets.dart';
 import '../core/core.dart';
 
 import 'actions.dart';
+import 'emergency/contract.dart' show EmergencyDecision;
+import 'emergency/decisions.dart';
 import 'integration.dart';
 import 'interactions.dart';
 
@@ -145,6 +147,18 @@ class ReplayEngine implements ReplayContext {
 
   /// Replay clock in recorded milliseconds since [run] started.
   int elapsed() => _clock.elapsedMilliseconds + _skippedMs;
+
+  late final EmergencyDecisionScript _decisions = EmergencyDecisionScript(
+    capsule.events,
+  );
+
+  /// The decision the app saw now during capture; null when there was none.
+  EmergencyDecision? emergencyDecision(String key, String? subjectTag) {
+    final base = capsule.checkpoint.kind == CheckpointKind.launch
+        ? 0
+        : capsule.checkpoint.t;
+    return _decisions.lookup(key, subjectTag, base + elapsed());
+  }
 
   /// Expected divergences stop being kept at 200; material ones at 400,
   /// then one material `divergences.truncated` marks the loss, so a capped

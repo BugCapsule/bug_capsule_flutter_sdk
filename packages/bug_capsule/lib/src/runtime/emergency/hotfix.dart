@@ -252,18 +252,31 @@ Map<String, Object?> hotfixRuntimeJson(
 final class EmergencyHotfix implements HotfixProvider {
   /// Created by `BugCapsule.emergency.initialize`.
   @internal
-  EmergencyHotfix.internal(this.provider, this._onStatus);
+  EmergencyHotfix.internal(
+    this.provider,
+    this._onStatus, {
+    bool Function()? isReplaying,
+  }) : _isReplaying = isReplaying ?? (() => false);
 
   final HotfixProvider provider;
   final void Function(HotfixStatus status) _onStatus;
+  final bool Function() _isReplaying;
   HotfixStatus? _last;
   Future<HotfixResult>? _downloading;
+
+  /// A replayed REQUIRE_UPDATE must not reach the provider (§7.8).
+  static const _replayStatus = HotfixStatus(
+    provider: 'replay',
+    available: false,
+    state: HotfixState.unavailable,
+  );
 
   /// The status of the last call; null before the first one completes.
   HotfixStatus? get lastStatus => _last;
 
   @override
   Future<HotfixAvailability> checkAvailability() async {
+    if (_isReplaying()) return const HotfixAvailability(_replayStatus);
     try {
       final a = await provider.checkAvailability();
       _seen(a.status);
@@ -275,8 +288,10 @@ final class EmergencyHotfix implements HotfixProvider {
 
   /// Joins a download already started through this object.
   @override
-  Future<HotfixResult> downloadAvailablePatch() =>
-      _downloading ??= _download().whenComplete(() => _downloading = null);
+  Future<HotfixResult> downloadAvailablePatch() async {
+    if (_isReplaying()) return const HotfixNothingToDownload(_replayStatus);
+    return _downloading ??= _download().whenComplete(() => _downloading = null);
+  }
 
   Future<HotfixResult> _download() async {
     try {
@@ -294,6 +309,7 @@ final class EmergencyHotfix implements HotfixProvider {
 
   @override
   Future<HotfixStatus> getStatus() async {
+    if (_isReplaying()) return _replayStatus;
     try {
       final s = await provider.getStatus();
       _seen(s);

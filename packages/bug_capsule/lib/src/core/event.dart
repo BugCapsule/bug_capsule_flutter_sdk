@@ -24,6 +24,7 @@ abstract final class EventTypes {
   static const mobxAction = 'mobx.action';
   static const mobxError = 'mobx.error';
   static const http = 'http';
+  static const emergencyDecision = 'emergency.decision';
   static const log = 'log';
   static const failure = 'failure';
 
