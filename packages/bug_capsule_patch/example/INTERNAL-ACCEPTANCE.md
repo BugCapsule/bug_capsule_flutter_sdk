@@ -37,3 +37,10 @@ only that recorded scenario. After validated publication, restart the same
 installed app to activate the staged fix; publish a signed rollback and restart
 again to return to the bundled baseline. Record the installed binary hash before
 and after. Emulator/Simulator evidence does not qualify physical devices or stores.
+
+For a capsule linked to a real monitoring issue, provision the app sandbox's
+`tmp/acceptance-monitoring.json` before launch with `backendUrl` and `ingestKey`.
+The optional file is read synchronously before SDK initialization. This enables
+SDK automatic failure capture; the lab copies the resulting failure-linked
+capsule rather than creating a second manual capsule. Keep this disposable
+project credential private. Replay does not run the lab's recording callback.

@@ -19,6 +19,14 @@ const gitSha = String.fromEnvironment('BUGCAPSULE_GIT_SHA', defaultValue: 'capsu
 /// A negative total fails an assertion, so a replay reproduces it exactly when
 /// the pinned module still has the bug.
 void main() {
+  // Provisioned into this app sandbox by the acceptance runner; never a build secret.
+  final connectionFile = File('${Directory.systemTemp.path}/acceptance-monitoring.json');
+  final connection = connectionFile.existsSync()
+      ? jsonDecode(connectionFile.readAsStringSync()) as Map<String, dynamic>
+      : null;
+  final backend = connection == null ? null : BugCapsuleBackendConfig(
+    url: connection['backendUrl'] as String, ingestKey: connection['ingestKey'] as String,
+  );
   if (profile != 'development' && !RegExp(r'^[0-9a-f]{40}$').hasMatch(gitSha)) {
     throw StateError('nondevelopment capture requires explicit BUGCAPSULE_GIT_SHA');
   }
@@ -39,13 +47,15 @@ void main() {
     );
   }, modules: [coupon], surfaces: const [summarySurface]);
   BugCapsule.init(
-    config: BugCapsuleConfig(appVersion: '1.0.0', appBuild: '1', mode: CaptureMode.qa, gitSha: gitSha, autoCaptureOnFailure: false, patchBinding: binding),
-    appRunner: () => runApp(CapsuleLab(binding, exchange)),
+    config: BugCapsuleConfig(appVersion: '1.0.0', appBuild: '1', mode: CaptureMode.qa, gitSha: gitSha, autoCaptureOnFailure: backend != null, backend: backend, patchBinding: binding),
+    appRunner: () => runApp(CapsuleLab(binding, exchange, automaticCapture: backend != null)),
   );
 }
 
 class CapsuleLab extends StatefulWidget {
-  const CapsuleLab(this.binding, this.exchange, {super.key});
+  const CapsuleLab(this.binding, this.exchange, {this.automaticCapture = false, super.key});
+
+  final bool automaticCapture;
 
   final BugCapsulePatchBinding binding;
   final Directory exchange;
@@ -74,8 +84,21 @@ class _CapsuleLabState extends State<CapsuleLab> {
       await Future<void>.delayed(const Duration(milliseconds: 300));
       BugCapsule.action('lab.checkout', _checkout)();
       await Future<void>.delayed(const Duration(milliseconds: 300));
-      final captured = await BugCapsule.capture();
-      if (captured != null) await captured.file.copy('${widget.exchange.path}/lab.bugcapsule');
+      if (widget.automaticCapture) {
+        // Use the SDK's real failure-linked capture, retaining its monitoring event.
+        List<File> captures = [];
+        for (var i = 0; i < 100 && captures.isEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          captures = await BugCapsule.savedCaptures();
+        }
+        if (captures.isEmpty) throw StateError('automatic failure capture missing');
+        captures.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+        await captures.first.copy('${widget.exchange.path}/lab.bugcapsule');
+        await BugCapsule.flush();
+      } else {
+        final captured = await BugCapsule.capture();
+        if (captured != null) await captured.file.copy('${widget.exchange.path}/lab.bugcapsule');
+      }
       File('${widget.exchange.path}/capture.txt').writeAsStringSync('${patch.status()['running']}');
       final beforeUpdate = patch.status();
       PatchUpdateResult? update;
