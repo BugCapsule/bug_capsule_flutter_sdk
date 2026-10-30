@@ -56,8 +56,18 @@ class BugCapsuleEvent {
   final String type;
   final Map<String, Object?> data;
 
-  BugCapsuleEvent shift(int offsetMs) =>
-      BugCapsuleEvent(seq: seq, t: t - offsetMs, type: type, data: data);
+  /// [t] and a screenshot's `capturedAtT` are on the same clock, so both move.
+  BugCapsuleEvent shift(int offsetMs) {
+    final capturedAt = data['capturedAtT'];
+    return BugCapsuleEvent(
+      seq: seq,
+      t: t - offsetMs,
+      type: type,
+      data: capturedAt is int
+          ? {...data, 'capturedAtT': capturedAt - offsetMs}
+          : data,
+    );
+  }
 
   Map<String, Object?> toJson() => {
     'seq': seq,

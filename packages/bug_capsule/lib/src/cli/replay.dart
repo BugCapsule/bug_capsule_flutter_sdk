@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../core/core.dart';
 
@@ -31,6 +33,13 @@ class ReplaySummary {
   final int requestedAttempts;
   final RunEvaluation evaluation;
 
+  /// What every attempt ran. Null when they disagree or reported nothing, so
+  /// a mixed run can't count as evidence for one identity.
+  CapsulePatchIdentity? get patch {
+    final seen = {for (final r in reports) jsonEncode(r.patch?.toJson())};
+    return seen.length == 1 ? reports.first.patch : null;
+  }
+
   Verdict get verdict => evaluation.verdict;
 
   /// Attempts that ran (may be fewer than requested).
@@ -55,6 +64,7 @@ class ReplaySummary {
   }) => {
     'kind': kind.name,
     'outcome': wireOutcome,
+    'patch': ?patch?.toJson(),
     'attempts': requestedAttempts < 1 ? 1 : requestedAttempts,
     'reproductions': reproductions,
     'validAttempts': evaluation.validAttempts,
@@ -148,8 +158,15 @@ Future<ReplaySummary> replayCapsule({
   String? buildSha,
   String? runtime,
   Duration? attemptTimeout,
+  PatchArchive? patch,
 }) async {
   final m = loaded.capsule.manifest;
+  final patchArtifact = patch?.artifact;
+  server
+    ..patchArtifact = patchArtifact
+    ..patchKeyring = patch?.keyring
+    ..patchKeyringSignature = patch?.keyringSignature;
+  final expectedPatch = patchArtifact == null ? null : patchSetDigestOf(patchArtifact);
   final reports = <ReplayReport>[];
   final budget =
       attemptTimeout ??
@@ -164,6 +181,9 @@ Future<ReplaySummary> replayCapsule({
       strictNetwork: strictNetwork,
       idleCompression: idleCompression,
       runtime: runtime,
+      patchArtifact: patchArtifact != null,
+      patchKeyring: patch?.keyring != null,
+      expectedPatchSetDigest: expectedPatch,
     );
     ReplayReport report;
     try {
@@ -306,3 +326,24 @@ List<String> summaryLines(ReplaySummary s) {
 /// Exit codes: 0 success (reproduced / fixed), 1 the opposite (not
 /// reproduced / still failing), 2 flaky, 3 inconclusive or incompatible.
 int exitCodeFor(ReplaySummary s) => s.evaluation.exitCode;
+
+/// What a pinned run loads. The keyring of a delegated signer travels with the
+/// artifact: signing history can't be replaced by a bare public key.
+class PatchArchive {
+  const PatchArchive(this.artifact, {this.keyring, this.keyringSignature});
+  final List<int> artifact;
+  final List<int>? keyring;
+  final List<int>? keyringSignature;
+}
+
+/// The `patchSetDigest` of a `.bcpatch`. Only names what the run must load:
+/// the runtime on the device does the verifying.
+String patchSetDigestOf(List<int> bundle) {
+  const header = 12;
+  if (bundle.length < header || String.fromCharCodes(bundle.take(7)) != 'BCPATCH') {
+    throw const FormatException('not a .bcpatch artifact');
+  }
+  final n = ByteData.sublistView(Uint8List.fromList(bundle.sublist(8, header))).getUint32(0, Endian.little);
+  final doc = jsonDecode(utf8.decode(bundle.sublist(header, header + n))) as Map;
+  return doc['patchSetDigest'] as String;
+}

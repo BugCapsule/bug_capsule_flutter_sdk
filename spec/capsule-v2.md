@@ -386,3 +386,32 @@ readers ignore them).
 Shared valid and invalid examples live in `spec/fixtures/capsule-v2`; the
 v1 fixtures stay unchanged except that `invalid/spec-version-2.json` became
 `invalid/spec-version-3.json` (v2 readers accept specVersion 2).
+
+## 10. Patch identity
+
+A capsule from an app running the BugCapsule patch engine may say what ran:
+
+```json
+"patch": {
+  "baseBuildId": "build-1",
+  "patchSetDigest": "sha256:…",
+  "engineAbi": 1,
+  "hostAbiHash": "sha256:…",
+  "artifactDigest": "sha256:…"
+}
+```
+
+`manifest.patch` is append-only metadata. `patchSetDigest` is null when the bare
+base ran, and such a capsule stays v1 if nothing else makes it v2; `artifactDigest`
+is optional.
+
+A reader that ignores this field would replay the bare base, and could report a
+fix for a failure that needs the patch. So a capsule with a non-null
+`patchSetDigest` **must** be v2 and declare a dependency with `kind: "patch.runtime"`
+and `required: true`. A replayer without that adapter ends `incompatible` at
+preflight (§2), and the backend refuses a capsule that breaks this rule.
+
+Replaying a patched capsule loads the archived artifact of that exact identity,
+offline, never from a live channel. If it is missing, the outcome is `incompatible`
+with reason code `patch.artifact_missing`, not a fallback to the latest patch.
+Runs and gate reports record the identity that ran in their `patch` field.

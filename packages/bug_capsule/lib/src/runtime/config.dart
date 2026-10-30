@@ -1,3 +1,4 @@
+import 'patch_binding.dart';
 import 'package:flutter/foundation.dart';
 import '../core/core.dart';
 
@@ -42,6 +43,7 @@ class BugCapsuleConfig {
     this.backend,
     String? gitSha,
     this.stateSchemaVersion = 1,
+    this.patchBinding,
     this.checkpointInterval = const Duration(seconds: 30),
     this.window = const Duration(minutes: 5),
     this.maxEvents = 20000,
@@ -119,6 +121,9 @@ class BugCapsuleConfig {
 
   /// Bump when serialized state classes change incompatibly.
   final int stateSchemaVersion;
+
+  /// Records the running patch in capsules and pins it during replay.
+  final PatchBinding? patchBinding;
   final Duration checkpointInterval;
 
   /// Events older than this are evicted (a periodic checkpoint then becomes

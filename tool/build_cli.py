@@ -20,7 +20,7 @@ output.parent.mkdir(parents=True, exist_ok=True)
 source = root / 'packages' / 'bug_capsule'
 with tempfile.TemporaryDirectory(prefix='bugcapsule-cli-') as tmp:
     stage = Path(tmp)
-    (stage / 'pubspec.yaml').write_text('name: bugcapsule_standalone\nenvironment:\n  sdk: ^3.9.0\ndependencies:\n  args: 2.7.0\n')
+    (stage / 'pubspec.yaml').write_text('name: bugcapsule_standalone\nenvironment:\n  sdk: ^3.9.0\ndependencies:\n  args: 2.7.0\n  pointycastle: 4.0.0\n')
     for folder in ['cli', 'core']:
         shutil.copytree(source / 'lib' / 'src' / folder, stage / 'lib' / 'src' / folder)
     shutil.copy2(source / 'lib' / 'src' / 'version.dart', stage / 'lib' / 'src' / 'version.dart')

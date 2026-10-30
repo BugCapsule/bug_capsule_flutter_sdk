@@ -1,3 +1,4 @@
+import 'capsule.dart' show CapsulePatchIdentity;
 import 'failure.dart';
 
 /// HTTP protocol between the `bugcapsule` CLI (host) and an app in replay mode.
@@ -19,6 +20,14 @@ abstract final class ReplayProtocol {
   static const settingsPath = '/settings';
   static const resultPath = '/result';
 
+  /// The archived `.bcpatch` of this attempt, when [ReplaySettings.patchArtifact].
+  static const patchPath = '/patch-artifact';
+
+  /// The archived root-signed keyring behind a delegated signing key, and
+  /// its raw signature, when [ReplaySettings.patchKeyring].
+  static const keyringPath = '/patch-keyring';
+  static const keyringSignaturePath = '/patch-keyring-signature';
+
   /// Printed to stdout as a fallback channel: `BUGCAPSULE_RESULT::{json}`.
   static const stdoutPrefix = 'BUGCAPSULE_RESULT::';
 }
@@ -39,6 +48,9 @@ class ReplaySettings {
     this.idleCompression = true,
     this.attemptId,
     this.runtime,
+    this.patchArtifact = false,
+    this.patchKeyring = false,
+    this.expectedPatchSetDigest,
   });
 
   factory ReplaySettings.fromJson(Map<String, Object?> j) => ReplaySettings(
@@ -50,6 +62,9 @@ class ReplaySettings {
     idleCompression: j['idleCompression'] as bool? ?? true,
     attemptId: j['attemptId'] as String?,
     runtime: j['runtime'] as String?,
+    patchArtifact: j['patchArtifact'] as bool? ?? false,
+    patchKeyring: j['patchKeyring'] as bool? ?? false,
+    expectedPatchSetDigest: j['expectedPatchSetDigest'] as String?,
   );
 
   final ReplayStrategy strategy;
@@ -76,6 +91,15 @@ class ReplaySettings {
   /// Runtime the CLI launched (`flutter`, `android`, `ios`, `web`).
   final String? runtime;
 
+  /// The attempt runs the exact artifact at [ReplayProtocol.patchPath].
+  final bool patchArtifact;
+
+  /// The artifact needs its archived keyring: it was signed by a delegated key.
+  final bool patchKeyring;
+
+  /// The patch set the attempt must load; the app reports what it did load.
+  final String? expectedPatchSetDigest;
+
   Map<String, Object?> toJson() => {
     'strategy': strategy.name,
     'settleTimeoutMs': settleTimeoutMs,
@@ -85,6 +109,9 @@ class ReplaySettings {
     'idleCompression': idleCompression,
     if (attemptId != null) 'attemptId': attemptId,
     if (runtime != null) 'runtime': runtime,
+    if (patchArtifact) 'patchArtifact': true,
+    if (patchKeyring) 'patchKeyring': true,
+    'expectedPatchSetDigest': ?expectedPatchSetDigest,
   };
 }
 
@@ -312,6 +339,7 @@ class ReplayReport {
     this.attemptId,
     this.runtime,
     this.crash,
+    this.patch,
   });
 
   factory ReplayReport.fromJson(Map<String, Object?> j) => ReplayReport(
@@ -344,6 +372,11 @@ class ReplayReport {
     runtime: j['runtime'] as String?,
     crash: j['crash'] is Map
         ? ObservedCrash.fromJson((j['crash'] as Map).cast<String, Object?>())
+        : null,
+    patch: j['patch'] is Map
+        ? CapsulePatchIdentity.fromJson(
+            (j['patch'] as Map).cast<String, Object?>(),
+          )
         : null,
   );
 
@@ -380,6 +413,9 @@ class ReplayReport {
   /// attempt's outcome ([resolveCrash]).
   final ObservedCrash? crash;
 
+  /// What this attempt actually ran; null when the app has no patch runtime.
+  final CapsulePatchIdentity? patch;
+
   /// A copy with the given fields replaced.
   ReplayReport copyWith({
     ReplayOutcome? outcome,
@@ -389,6 +425,7 @@ class ReplayReport {
     List<Divergence>? divergences,
     String? message,
     ObservedCrash? crash,
+    CapsulePatchIdentity? patch,
   }) => ReplayReport(
     outcome: outcome ?? this.outcome,
     attempt: attempt,
@@ -408,6 +445,7 @@ class ReplayReport {
     attemptId: attemptId,
     runtime: runtime,
     crash: crash ?? this.crash,
+    patch: patch ?? this.patch,
   );
 
   /// Same report with [divergences] appended (e.g. by a runner that saw
@@ -434,5 +472,6 @@ class ReplayReport {
     if (attemptId != null) 'attemptId': attemptId,
     if (runtime != null) 'runtime': runtime,
     if (crash != null) 'crash': crash!.toJson(),
+    if (patch != null) 'patch': patch!.toJson(),
   };
 }

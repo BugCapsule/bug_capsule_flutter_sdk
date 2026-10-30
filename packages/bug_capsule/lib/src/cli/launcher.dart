@@ -67,10 +67,7 @@ class Device {
 }
 
 Future<List<Device>> listDevices() async {
-  final res = await Process.run('flutter', [
-    'devices',
-    '--machine',
-  ], runInShell: true);
+  final res = await runCaptured('flutter', ['devices', '--machine'], runInShell: true);
   final out = '${res.stdout}';
   final start = out.indexOf('[');
   if (res.exitCode != 0 || start < 0) {
@@ -232,7 +229,7 @@ class AppRelease {
   /// a built `.app`.
   static Future<AppRelease?> fromIosApp(String appPath) async {
     Future<String?> read(String key) async {
-      final res = await Process.run('plutil', [
+      final res = await runCaptured('plutil', [
         '-extract',
         key,
         'raw',
@@ -311,34 +308,10 @@ Future<void> _run(
   String? workingDirectory,
   required bool verbose,
   String? label,
+  Duration timeout = const Duration(minutes: 20),
 }) async {
-  final p = await Processes.start(
-    exe,
-    args,
-    workingDirectory: workingDirectory,
-    runInShell: true,
-  );
-  final out = StringBuffer();
-  final subs = [
-    p.stdout.transform(utf8.decoder).listen((s) {
-      out.write(s);
-      if (verbose) stdout.write(s);
-    }),
-    p.stderr.transform(utf8.decoder).listen((s) {
-      out.write(s);
-      if (verbose) stderr.write(s);
-    }),
-  ];
-  final code = await p.exitCode;
-  for (final s in subs) {
-    await s.cancel();
-  }
-  if (code != 0) {
-    if (!verbose) stderr.write(out);
-    throw StateError(
-      '${label ?? '$exe ${args.join(' ')}'} failed (exit $code)',
-    );
-  }
+  await runChecked(exe, args, workingDirectory: workingDirectory,
+    verbose: verbose, label: label, timeout: timeout, runInShell: true);
 }
 
 /// iOS simulator: build the debug .app once, install it, then launch it per
@@ -376,6 +349,7 @@ class IosSimulatorLauncher implements AppLauncher {
         workingDirectory: options.projectDir,
         verbose: options.verbose,
         label: 'flutter build ios --simulator',
+        timeout: options.projectConfig.buildTimeout,
       );
       progress.done();
     } catch (_) {
@@ -389,7 +363,7 @@ class IosSimulatorLauncher implements AppLauncher {
       (d) => d.path.endsWith('.app'),
       orElse: () => throw StateError('no .app found in ${productsDir.path}'),
     );
-    final plist = await Process.run('plutil', [
+    final plist = await runCaptured('plutil', [
       '-extract',
       'CFBundleIdentifier',
       'raw',
@@ -402,6 +376,7 @@ class IosSimulatorLauncher implements AppLauncher {
       ['simctl', 'install', _udid, app.path],
       verbose: options.verbose,
       label: 'simctl install',
+      timeout: const Duration(seconds: 30),
     );
   }
 
@@ -412,18 +387,20 @@ class IosSimulatorLauncher implements AppLauncher {
     ReplaySettings settings,
     Duration timeout,
   ) async {
+    final clock = Stopwatch()..start();
+    Duration remaining() => remainingAttemptTime(clock, timeout);
     final armed = server.arm(capsule, settings);
     var finished = false;
     try {
-      await Process.run('xcrun', ['simctl', 'terminate', _udid, _bundleId]);
-      await _writeReplayRequest(armed.url);
+      await runCaptured('xcrun', ['simctl', 'terminate', _udid, _bundleId], timeout: remaining());
+      await _writeReplayRequest(armed.url, remaining());
       final started = DateTime.now();
-      final launch = await Process.run('xcrun', [
+      final launch = await runCaptured('xcrun', [
         'simctl',
         'launch',
         _udid,
         _bundleId,
-      ]);
+      ], timeout: remaining());
       if (launch.exitCode != 0) {
         throw StateError('simctl launch failed: ${launch.stderr}');
       }
@@ -439,7 +416,7 @@ class IosSimulatorLauncher implements AppLauncher {
               () => finished,
             ).then((_) => _deathReport(armed, started));
       return await Future.any([armed.report, died]).timeout(
-        timeout,
+        remaining(),
         onTimeout: () => _timeoutReport(
           armed.settings,
           'no result within ${timeout.inSeconds}s',
@@ -448,7 +425,7 @@ class IosSimulatorLauncher implements AppLauncher {
     } finally {
       finished = true;
       armed.close();
-      await Process.run('xcrun', ['simctl', 'terminate', _udid, _bundleId]);
+      await terminateSimulatorApp(_udid, _bundleId);
     }
   }
 
@@ -457,7 +434,7 @@ class IosSimulatorLauncher implements AppLauncher {
     while (!stop()) {
       await Future<void>.delayed(const Duration(milliseconds: 500));
       if (stop()) break;
-      final alive = await Process.run('kill', ['-0', '$pid']);
+      final alive = await runCaptured('kill', ['-0', '$pid']);
       if (alive.exitCode != 0) return;
     }
     await Completer<void>().future;
@@ -481,14 +458,14 @@ class IosSimulatorLauncher implements AppLauncher {
 
   /// Drops `replay_request.json` into the app's data container; the SDK
   /// reads and deletes it on the next launch (debug builds only).
-  Future<void> _writeReplayRequest(String url) async {
-    final res = await Process.run('xcrun', [
+  Future<void> _writeReplayRequest(String url, Duration timeout) async {
+    final res = await runCaptured('xcrun', [
       'simctl',
       'get_app_container',
       _udid,
       _bundleId,
       'data',
-    ]);
+    ], timeout: timeout);
     if (res.exitCode != 0) {
       throw StateError('cannot locate app container: ${res.stderr}');
     }

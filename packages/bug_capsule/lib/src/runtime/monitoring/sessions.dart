@@ -19,6 +19,7 @@ class SessionTracker {
     required this.distinctId,
     required this.send,
     required this.persist,
+    this.patch,
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now;
 
@@ -33,6 +34,9 @@ class SessionTracker {
 
   /// Saves the open session (null: none open) for the next launch.
   final void Function(Map<String, Object?>? state) persist;
+
+  /// What this process runs; rollout health compares sessions by it.
+  final CapsulePatchIdentity? Function()? patch;
   final DateTime Function() _now;
 
   _Session? _current;
@@ -68,9 +72,12 @@ class SessionTracker {
 
   void start() {
     if (_current != null) end();
+    final identity = patch?.call();
     final s = _current = _Session(uuidV4(), _now())
       ..release = release
-      ..environment = environment;
+      ..environment = environment
+      ..patchBaseBuildId = identity?.baseBuildId
+      ..patchSetDigest = identity?.patchSetDigest;
     _emit(s);
   }
 
@@ -141,6 +148,8 @@ class _Session {
         // Files written before these were persisted: the current ones.
         ..release = j['release'] as String?
         ..environment = j['environment'] as String?
+        ..patchBaseBuildId = j['patchBaseBuildId'] as String?
+        ..patchSetDigest = j['patchSetDigest'] as String?
         ..lastUpdate =
             DateTime.tryParse('${j['lastUpdate']}') ??
             DateTime.parse(j['started'] as String);
@@ -152,6 +161,11 @@ class _Session {
   /// The release / environment this session ran with (null: not known).
   String? release;
   String? environment;
+
+  /// The patch this session ran, never the current one: a recovered session
+  /// may belong to a patch that has since been rolled back.
+  String? patchBaseBuildId;
+  String? patchSetDigest;
   int seq = 0;
   int errors = 0;
   String status = 'ok';
@@ -178,6 +192,8 @@ class _Session {
       'release': ?(release ?? t.release),
       'environment': environment ?? t.environment,
       'runtime': 'flutter',
+      'patchBaseBuildId': ?patchBaseBuildId,
+      'patchSetDigest': ?patchSetDigest,
     };
   }
 
@@ -187,6 +203,8 @@ class _Session {
     'seq': seq,
     'release': ?release,
     'environment': ?environment,
+    'patchBaseBuildId': ?patchBaseBuildId,
+    'patchSetDigest': ?patchSetDigest,
     'started': started.toUtc().toIso8601String(),
     'errors': errors,
     'status': status,

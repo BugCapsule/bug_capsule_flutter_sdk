@@ -49,6 +49,7 @@ export 'emergency/types.dart'
 export 'integration.dart';
 export 'interactions.dart';
 export 'overlay.dart';
+export 'patch_binding.dart';
 export 'state_tracker.dart';
 export 'status.dart';
 export 'remote_config.dart'

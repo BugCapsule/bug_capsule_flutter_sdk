@@ -1,0 +1,22 @@
+PODS:
+  - bug_capsule_patch (0.1.0):
+    - Flutter
+  - Flutter (1.0.0)
+
+DEPENDENCIES:
+  - bug_capsule_patch (from `.symlinks/plugins/bug_capsule_patch/ios`)
+  - Flutter (from `Flutter`)
+
+EXTERNAL SOURCES:
+  bug_capsule_patch:
+    :path: ".symlinks/plugins/bug_capsule_patch/ios"
+  Flutter:
+    :path: Flutter
+
+SPEC CHECKSUMS:
+  bug_capsule_patch: cc3b84ed830874d60d41bcb84f6f0e4a113a9daf
+  Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
+
+PODFILE CHECKSUM: 3ba3a73b1b12adcf321a227a745625fe0888cc82
+
+COCOAPODS: 1.16.2

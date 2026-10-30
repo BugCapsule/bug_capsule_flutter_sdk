@@ -289,6 +289,62 @@ class SessionInfo {
   };
 }
 
+/// The dependency kind a capsule captured with a patch loaded must require,
+/// so a replayer that knows nothing of patches refuses it instead of running
+/// the bare base and reporting a false fix (capsule-v2 §10).
+const patchRuntimeDependencyKind = 'patch.runtime';
+const patchRuntimeAdapter = 'bug_capsule.patch_runtime';
+
+/// The adapter name the native SDKs write; capsules cross runtimes in tools.
+const patchRuntimeAdapterNative = 'bugcapsule.patch_runtime';
+const patchRuntimeSchema = 1;
+
+/// `manifest.patch` (capsule-v2 §10): what actually ran. A null
+/// [patchSetDigest] is the bare base build.
+class CapsulePatchIdentity {
+  const CapsulePatchIdentity({
+    required this.baseBuildId,
+    required this.engineAbi,
+    required this.hostAbiHash,
+    this.patchSetDigest,
+    this.artifactDigest,
+  });
+
+  factory CapsulePatchIdentity.fromJson(Map<String, Object?> j) =>
+      CapsulePatchIdentity(
+        baseBuildId: j['baseBuildId'] as String,
+        patchSetDigest: j['patchSetDigest'] as String?,
+        engineAbi: j['engineAbi'] as int,
+        hostAbiHash: j['hostAbiHash'] as String,
+        artifactDigest: j['artifactDigest'] as String?,
+      );
+
+  final String baseBuildId;
+  final String? patchSetDigest;
+  final int engineAbi;
+  final String hostAbiHash;
+  final String? artifactDigest;
+
+  Map<String, Object?> toJson() => {
+    'baseBuildId': baseBuildId,
+    'patchSetDigest': patchSetDigest,
+    'engineAbi': engineAbi,
+    'hostAbiHash': hostAbiHash,
+    'artifactDigest': ?artifactDigest,
+  };
+
+  /// The required dependency of a capsule captured with a patch loaded.
+  CapsuleDependency get dependency => const CapsuleDependency(
+    id: patchRuntimeDependencyKind,
+    kind: patchRuntimeDependencyKind,
+    adapter: patchRuntimeAdapter,
+    adapterVersion: '1',
+    schema: patchRuntimeSchema,
+    required: true,
+    coverage: DependencyCoverage.complete,
+  );
+}
+
 class CapsuleManifest {
   const CapsuleManifest({
     required this.capsuleId,
@@ -315,6 +371,7 @@ class CapsuleManifest {
     this.capabilities = const {},
     this.monitoring,
     this.dependencies = const [],
+    this.patch,
     this.journalGapMs,
   });
 
@@ -379,6 +436,11 @@ class CapsuleManifest {
       monitoring: monitoring == null
           ? null
           : CapsuleMonitoring.fromJson(monitoring.cast<String, Object?>()),
+      patch: j['patch'] == null
+          ? null
+          : CapsulePatchIdentity.fromJson(
+              (j['patch'] as Map).cast<String, Object?>(),
+            ),
       dependencies: [
         for (final d in (j['dependencies'] as List?) ?? const [])
           CapsuleDependency.fromJson((d as Map).cast<String, Object?>()),
@@ -428,6 +490,9 @@ class CapsuleManifest {
   /// written as spec v2.
   final List<CapsuleDependency> dependencies;
 
+  /// What ran when this was captured; null when no patch runtime is set up.
+  final CapsulePatchIdentity? patch;
+
   /// Crash capsules: the crash time minus the time of the last event the
   /// journal flushed, when the crash time is known (`stats.journalGapMs`).
   final int? journalGapMs;
@@ -467,6 +532,7 @@ class CapsuleManifest {
     if (runtime != null) 'runtime': runtime!.toJson(),
     if (capabilities.isNotEmpty) 'capabilities': capabilities,
     if (monitoring != null) 'monitoring': monitoring!.toJson(),
+    if (patch != null) 'patch': patch!.toJson(),
     // Spec v2 requires the field (a crash capsule is v2 without any).
     if (dependencies.isNotEmpty || failure?.kind == FailureKind.crash)
       'dependencies': [for (final d in dependencies) d.toJson()],

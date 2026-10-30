@@ -56,6 +56,7 @@ class MonitoringHost {
     required this.refreshConfig,
     required this.writeCapsule,
     required this.isRecording,
+    this.patchIdentity,
     this.crashCapsule,
     this.journalId,
   });
@@ -71,6 +72,9 @@ class MonitoringHost {
   final Future<String?> Function(String note, CapsuleMonitoring? monitoring)
   writeCapsule;
   final bool Function() isRecording;
+
+  /// What this process runs.
+  final CapsulePatchIdentity? Function()? patchIdentity;
 
   /// Builds the crash capsule for a fatal event of an earlier process from
   /// that process's crash journal (crash-capsules §2); completes with its
@@ -238,6 +242,7 @@ class MonitoringHub implements TransactionSink {
         }
       },
       persist: _persistSession,
+      patch: host.patchIdentity,
     );
     final native = await _startNative();
     final previous = sessions.recover(
