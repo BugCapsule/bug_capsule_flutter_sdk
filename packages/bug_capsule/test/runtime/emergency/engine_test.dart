@@ -786,6 +786,210 @@ void main() {
     });
   });
 
+  group('runtime reports', () {
+    Map<String, Object?> hotfix(String state, {int? current, int? next}) => {
+      'hotfix': {
+        'provider': 'shorebird',
+        'available': true,
+        'releaseVersion': '2.4.1+42',
+        'currentPatch': current,
+        'nextPatch': next,
+        'state': state,
+      },
+    };
+
+    List<Map<String, Object?>> reports() =>
+        transport.receipts.where((r) => r['status'] == 'RUNTIME').toList();
+
+    test(
+      'a report is a RUNTIME receipt with the highest accepted revision',
+      () {
+        fakeAsync((async) {
+          final gate = Completer<EmergencyFetchResult>();
+          transport.script.add(() => gate.future);
+          final e = engine(async);
+          e.updateRuntime(hotfix('up_to_date', current: 3));
+          expect(transport.receipts, isEmpty, reason: 'not before start');
+          unawaited(e.start());
+          async.flushMicrotasks();
+          expect(transport.receipts, [
+            {
+              'environment': 'production',
+              'platform': 'FLUTTER_ANDROID',
+              'installationId': 'AAAAAAAAAAAAAAAAAAAAAA',
+              'appVersion': '2.4.1',
+              'sdkVersion': '0.0.0-test',
+              'revision': 0,
+              'status': 'RUNTIME',
+              'errorCode': null,
+              'runtime': hotfix('up_to_date', current: 3),
+            },
+          ]);
+
+          gate.complete(served(doc(revision: 7)));
+          async.flushMicrotasks();
+          final applied = transport.receipts.last;
+          expect(applied['status'], 'APPLIED');
+          expect(
+            applied['runtime'],
+            hotfix('up_to_date', current: 3),
+            reason: 'APPLIED carries the latest runtime',
+          );
+
+          async.elapse(const Duration(seconds: 60));
+          e.updateRuntime(hotfix('restart_required', current: 3, next: 4));
+          async.flushMicrotasks();
+          expect(reports().last['revision'], 7);
+          expect(
+            reports().last['runtime'],
+            hotfix('restart_required', current: 3, next: 4),
+          );
+          e.dispose();
+        });
+      },
+    );
+
+    test('never the same object twice in a row; an object can come back', () {
+      fakeAsync((async) {
+        final e = engine(async);
+        unawaited(e.start());
+        async.flushMicrotasks();
+        e.updateRuntime(hotfix('up_to_date'));
+        e.updateRuntime(hotfix('up_to_date'));
+        async.elapse(const Duration(minutes: 2));
+        e.updateRuntime(hotfix('outdated'));
+        async.elapse(const Duration(minutes: 2));
+        e.updateRuntime(hotfix('failed'));
+        async.elapse(const Duration(minutes: 2));
+        e.updateRuntime(hotfix('outdated'));
+        e.updateRuntime(hotfix('outdated'));
+        async.elapse(const Duration(minutes: 2));
+        expect(reports().map((r) => (r['runtime']! as Map)['hotfix']), [
+          containsPair('state', 'up_to_date'),
+          containsPair('state', 'outdated'),
+          containsPair('state', 'failed'),
+          containsPair('state', 'outdated'),
+        ]);
+        expect(
+          reports().map((r) => r['revision']),
+          everyElement(0),
+          reason: 'several RUNTIME receipts for one revision',
+        );
+        e.dispose();
+      });
+    });
+
+    test('at most one report per 60 s; changes within it coalesce to the '
+        'latest', () {
+      fakeAsync((async) {
+        final e = engine(async);
+        unawaited(e.start());
+        async.flushMicrotasks();
+        e.updateRuntime(hotfix('outdated'));
+        expect(reports(), hasLength(1));
+
+        async.elapse(const Duration(seconds: 10));
+        e.updateRuntime(hotfix('downloading'));
+        async.elapse(const Duration(seconds: 10));
+        e.updateRuntime(hotfix('restart_required', next: 4));
+        async.elapse(const Duration(seconds: 39));
+        expect(reports(), hasLength(1), reason: 'still within 60 s');
+        async.elapse(const Duration(seconds: 1));
+        expect(reports(), hasLength(2));
+        expect(
+          reports().last['runtime'],
+          hotfix('restart_required', next: 4),
+          reason: 'only the latest object, downloading is never sent',
+        );
+
+        // Changes that end on the object last sent: nothing more.
+        async.elapse(const Duration(seconds: 5));
+        e.updateRuntime(hotfix('failed'));
+        e.updateRuntime(hotfix('restart_required', next: 4));
+        async.elapse(const Duration(minutes: 5));
+        expect(reports(), hasLength(2));
+
+        // An object sent earlier comes back: sent once the interval allows.
+        e.updateRuntime(hotfix('outdated'));
+        async.flushMicrotasks();
+        expect(reports(), hasLength(3));
+        expect(reports().last['runtime'], hotfix('outdated'));
+        async.elapse(const Duration(seconds: 1));
+        e.updateRuntime(hotfix('failed'));
+        async.elapse(const Duration(seconds: 58));
+        expect(reports(), hasLength(3));
+        async.elapse(const Duration(seconds: 1));
+        expect(reports(), hasLength(4));
+        expect(reports().last['runtime'], hotfix('failed'));
+        e.dispose();
+      });
+    });
+
+    test('a report waits for a connection', () {
+      fakeAsync((async) {
+        connection = null;
+        final e = engine(async);
+        unawaited(e.start());
+        async.flushMicrotasks();
+        e.updateRuntime(hotfix('up_to_date'));
+        expect(transport.receipts, isEmpty);
+        connection = _backend;
+        async.elapse(const Duration(seconds: 60));
+        expect(reports(), hasLength(1));
+        e.dispose();
+      });
+    });
+
+    test('no timer runs in the background; resume sends what is due', () {
+      fakeAsync((async) {
+        transport.otherwise = () => const EmergencyNotModified();
+        final e = engine(async);
+        unawaited(e.start());
+        async.flushMicrotasks();
+        e.updateRuntime(hotfix('outdated'));
+        async.elapse(const Duration(seconds: 5));
+        e.updateRuntime(hotfix('restart_required', next: 2));
+        e.onPaused();
+        expect(async.pendingTimers, isEmpty);
+        async.elapse(const Duration(minutes: 10));
+        expect(reports(), hasLength(1));
+        e.onResumed();
+        async.flushMicrotasks();
+        expect(reports(), hasLength(2));
+        expect(reports().last['runtime'], hotfix('restart_required', next: 2));
+        e.dispose();
+      });
+    });
+
+    test('replay: nothing is reported', () {
+      fakeAsync((async) {
+        replaying = true;
+        final e = engine(async);
+        unawaited(e.start());
+        async.flushMicrotasks();
+        e.updateRuntime(hotfix('outdated'));
+        async.elapse(const Duration(minutes: 5));
+        e.updateRuntime(hotfix('up_to_date'));
+        async.elapse(const Duration(minutes: 5));
+        expect(transport.receipts, isEmpty);
+        e.dispose();
+      });
+    });
+
+    test('a failing receipt endpoint drops the report', () {
+      fakeAsync((async) {
+        transport.failReceipts = true;
+        final e = engine(async);
+        unawaited(e.start());
+        async.flushMicrotasks();
+        e.updateRuntime(hotfix('outdated'));
+        async.elapse(const Duration(minutes: 5));
+        expect(reports(), hasLength(1), reason: 'never retried');
+        e.dispose();
+      });
+    });
+  });
+
   group('snapshots', () {
     test('observers get each new document whole, after the swap', () {
       fakeAsync((async) {

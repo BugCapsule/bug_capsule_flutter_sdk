@@ -55,6 +55,9 @@ class EmergencyEngine {
   static const grace = Duration(seconds: 300);
   static const maxBackoff = Duration(minutes: 15);
 
+  /// At most one runtime report per this interval (§7.6).
+  static const runtimeReportInterval = Duration(seconds: 60);
+
   final EmergencyTrustAnchor anchor;
   final String environment;
   final EmergencyPlatform platform;
@@ -83,6 +86,7 @@ class EmergencyEngine {
   bool _credentialRejected = false;
   bool _paused = false;
   bool _disposed = false;
+  bool _started = false;
   DateTime? _lastFetchAt;
   DateTime? _lastAttemptAt;
   EmergencyError? _lastError;
@@ -93,6 +97,11 @@ class EmergencyEngine {
   Future<void>? _inFlight;
   Future<void> _persisting = Future.value();
   final Set<String> _receiptsSent = {};
+  Map<String, Object?>? _runtime;
+  String? _runtimeKey;
+  String? _runtimeSentKey;
+  DateTime? _runtimeSentAt;
+  Timer? _runtimeTimer;
   final Set<String> _warned = {};
   EmergencySnapshot _snapshot = EmergencySnapshot.empty;
 
@@ -115,7 +124,9 @@ class EmergencyEngine {
   Future<void> start() async {
     await _loadCache();
     if (_disposed) return;
+    _started = true;
     _publish();
+    _sendRuntime(); // Waited for the highest revision of the cache.
     _scheduleBoundary();
     if (!_paused) unawaited(refresh());
   }
@@ -237,6 +248,7 @@ class EmergencyEngine {
       _schedule(refreshInterval);
       return;
     }
+    _sendRuntime(); // A report that waited for a connection.
     final current = _current;
     EmergencyFetchResult result;
     try {
@@ -397,6 +409,8 @@ class EmergencyEngine {
     _paused = true;
     _timer?.cancel();
     _boundaryTimer?.cancel();
+    _runtimeTimer?.cancel();
+    _runtimeTimer = null;
   }
 
   /// Back in the foreground: decisions that changed meanwhile are
@@ -409,6 +423,7 @@ class EmergencyEngine {
     final boundary = _boundaryAt;
     if (boundary != null && !now.isBefore(boundary)) _publish();
     _scheduleBoundary();
+    _sendRuntime();
     if (_credentialRejected || _inFlight != null || isReplaying()) return;
     final due = _nextDueAt;
     final last = _lastAttemptAt;
@@ -426,6 +441,7 @@ class EmergencyEngine {
     _disposed = true;
     _timer?.cancel();
     _boundaryTimer?.cancel();
+    _runtimeTimer?.cancel();
   }
 
   // ---------------------------------------------------- snapshots, storage
@@ -508,11 +524,62 @@ class EmergencyEngine {
   // -------------------------------------------------------------- receipts
 
   /// Fire-and-forget, at most once per (revision, status, code) and process.
+  /// Carries the latest runtime object when there is one (§7.6).
   void _receipt(int revision, String status, String? errorCode) {
     if (isReplaying()) return;
     final backend = connection();
     if (backend == null) return;
     if (!_receiptsSent.add('$revision|$status|${errorCode ?? ''}')) return;
+    _post(backend, revision, status, errorCode, _runtime);
+  }
+
+  /// The adapters' state changed: [runtime] is the validated `runtime`
+  /// object of §7.6. Never the same object twice in a row, and at most one
+  /// report per [runtimeReportInterval]; an object that changes again
+  /// within the interval is sent once, as it is when the interval ends.
+  void updateRuntime(Map<String, Object?> runtime) {
+    if (_disposed) return;
+    _runtime = runtime;
+    _runtimeKey = jsonEncode(runtime);
+    _sendRuntime();
+  }
+
+  /// The latest runtime object, for diagnostics and tests.
+  @visibleForTesting
+  Map<String, Object?>? get runtime => _runtime;
+
+  void _sendRuntime() {
+    final runtime = _runtime;
+    final key = _runtimeKey;
+    if (runtime == null || key == null || key == _runtimeSentKey) return;
+    if (!_started || _disposed || _paused || _runtimeTimer != null) return;
+    if (isReplaying()) return;
+    final backend = connection();
+    if (backend == null) return; // Sent once there is a connection.
+    final now = _now();
+    final last = _runtimeSentAt;
+    if (last != null) {
+      final wait = last.add(runtimeReportInterval).difference(now);
+      if (wait > Duration.zero) {
+        _runtimeTimer = Timer(wait, () {
+          _runtimeTimer = null;
+          _sendRuntime();
+        });
+        return;
+      }
+    }
+    _runtimeSentKey = key;
+    _runtimeSentAt = now;
+    _post(backend, _highestRevision, 'RUNTIME', null, runtime);
+  }
+
+  void _post(
+    BugCapsuleBackendConfig backend,
+    int revision,
+    String status,
+    String? errorCode,
+    Map<String, Object?>? runtime,
+  ) {
     final version = appVersion();
     final body = <String, Object?>{
       'environment': environment,
@@ -523,6 +590,7 @@ class EmergencyEngine {
       'revision': revision,
       'status': status,
       'errorCode': errorCode,
+      'runtime': ?runtime,
     };
     unawaited(
       Future.sync(

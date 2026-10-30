@@ -1,0 +1,23 @@
+name: bug_capsule_shorebird
+description: Shorebird hotfix adapter for BugCapsule emergency recovery. Reports which Shorebird patch a release runs and downloads an available patch on request; the patch becomes active on the next app start.
+version: 0.1.0-dev.1
+homepage: https://bugcapsule.com
+documentation: https://docs.bugcapsule.com
+repository: https://github.com/BugCapsule/bug_capsule_flutter_sdk
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.9.0
+  flutter: ">=3.35.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  bug_capsule:
+    path: ../bug_capsule
+  shorebird_code_push: ^2.0.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
