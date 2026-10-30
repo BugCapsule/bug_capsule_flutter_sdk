@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Emergency recovery (feature guards): `BugCapsule.emergency` fetches signed emergency policies (ES256, verified against the trust anchor in `EmergencyConfig`), caches and re-verifies them across launches, refreshes them in the foreground with backoff, and answers `evaluate`, `isFeatureAllowed` and `getPolicy` synchronously. Per-key failure modes (`failOpen` by default, `failClosed`, `useLastValidPolicy`), anti-replay of older revisions, receipts, `changes` and `status`. Android and iOS only; works with capture disabled or remotely switched off; allows everything during capsule replay. Implements `spec/emergency-client-v1.md`. Adds a dependency on `pointycastle`.
 - Crash capsules keep at most 98 app labels, so the two crash labels fit and an app with 99 or more labels no longer loses its crash capsule to validation.
 
 ## 0.4.1-beta.7 — 2026-10-27
