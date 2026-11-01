@@ -19,7 +19,9 @@ Defaults remain `dev.bugcapsule.patchlab.flutter`, `staging`, and
 the operating system bundle identifier. Distribution profile remains development.
 
 The existing private `Documents/patch-config.json` accepts `projectId`,
-`baseUrl`, `deliveryToken`, and `trustRoot` (a public `bcpk.v1.*` pin).
+`baseUrl`, `deliveryToken`, and `trustRoots` (a nonempty array of public
+`bcpk.v1.*` pins). The legacy single `trustRoot` remains supported when
+`trustRoots` is absent; malformed explicit lists are refused.
 Use a real scoped delivery credential matching the compiled application and
 environment. Never commit that file or a token. An absent config uses the
 existing local file inbox. The runtime store is kept in application support.

@@ -5,6 +5,7 @@ import 'package:bug_capsule_patch/bug_capsule_patch.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'performance_harness.dart';
+import 'trust_config.dart';
 
 const baseBuildId = String.fromEnvironment(
   'BCPATCH_BASE_BUILD',
@@ -147,7 +148,7 @@ Future<void> main() async {
       distributionProfile: 'development',
       baseBuildId: baseBuildId,
       installationId: 'device-1',
-      trustRoots: [remote?['trustRoot'] as String? ?? trustAnchor],
+      trustRoots: labTrustRoots(remote, trustAnchor),
     ),
     modules: [coupon],
     surfaces: const [summarySurface],
