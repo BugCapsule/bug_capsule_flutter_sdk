@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stage a hosted Flutter patch package with verified, prebuilt native payloads."""
-import argparse, hashlib, json, pathlib, shutil, subprocess, tarfile
+import argparse, hashlib, json, pathlib, plistlib, shutil, subprocess, tarfile
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--candidate', type=pathlib.Path, required=True, help='Reviewed flutter-patch-sdk candidate root')
@@ -15,6 +15,15 @@ sha = lambda f: hashlib.sha256(f.read_bytes()).hexdigest()
 prefixes = ['packages/bug_capsule_patch/android/src/main/jniLibs/', 'packages/bug_capsule_patch/ios/Frameworks/']
 expected = {k: v for k,v in meta['files'].items() if any(k.startswith(prefix) for prefix in prefixes)}
 actual = {str(f.relative_to(a.candidate)): sha(f) for prefix in prefixes for f in (a.candidate/prefix).rglob('*') if f.is_file()}
+required = {prefixes[0]+abi+'/libbcpatch.so' for abi in ['arm64-v8a','armeabi-v7a','x86_64']}
+required.add(prefixes[1]+'BcpatchRuntime.xcframework/Info.plist')
+if not required.issubset(actual):
+    raise SystemExit('Missing required native platform payload')
+framework = a.candidate/prefixes[1]/'BcpatchRuntime.xcframework'
+libraries = plistlib.loads((framework/'Info.plist').read_bytes())['AvailableLibraries']
+slices = {entry.get('SupportedPlatformVariant','device'): set(entry['SupportedArchitectures']) for entry in libraries if entry['SupportedPlatform']=='ios'}
+if slices != {'device':{'arm64'},'simulator':{'arm64','x86_64'}}:
+    raise SystemExit('Missing required Apple architecture slice')
 if not expected or actual != expected:
     raise SystemExit('Native candidate file inventory/hash mismatch')
 if any(f.is_symlink() for prefix in prefixes for f in (a.candidate/prefix).rglob('*')):
