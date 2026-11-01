@@ -1,0 +1,55 @@
+{
+  "engineRepository": "https://github.com/BugCapsule/bug_capsule_patch_enigne",
+  "engineCommit": "8dd6d43ff95c80a959799ccbe20b11ce702426bf",
+  "nodeMinimumMajor": 24,
+  "files": {
+    "compiler/package.json": {
+      "sha256": "e5e77688e393d6deed8399e107fd742c66d12d23b867421a249f48c65e59c133",
+      "bytes": 183
+    },
+    "compiler/src/ast.ts": {
+      "sha256": "0b0ade10a324622d2a8d172c852e4a3df6f0b9a6c170392ac01f9c434c361863",
+      "bytes": 1831
+    },
+    "compiler/src/bcir.ts": {
+      "sha256": "f584ed15ff946e9c528c3206be31781207308bdeab03aca3f12e9530f97b9633",
+      "bytes": 4505
+    },
+    "compiler/src/compile.ts": {
+      "sha256": "d56dfdd9dc956744c42f2fd6a990c2609aaf12ce484a6ea09980e109a2f74dad",
+      "bytes": 29122
+    },
+    "compiler/src/lexer.ts": {
+      "sha256": "1c68054373b22e5327456f1e2db4d2799ec7ea0688622598d2725a222e1ee136",
+      "bytes": 5427
+    },
+    "compiler/src/parser.ts": {
+      "sha256": "4997ae0c6fb2b98fc8b0dcf2c468a00db6003dc4c65cbfbf59bf1f7620b528fb",
+      "bytes": 10345
+    },
+    "compiler/src/types.ts": {
+      "sha256": "d514e26acb532ef347abc5d47e932e34e70b5652c15b7b978702b9db4f6ca4a5",
+      "bytes": 1520
+    },
+    "package.json": {
+      "sha256": "89c47db7851f89caec72da4f215ebc21cf1e294aeef3b45d2583562d846ab035",
+      "bytes": 33
+    },
+    "tools/bcpatch.ts": {
+      "sha256": "0d3e0e2fa7eddce57536b8358f8f93cc8dcc997c8aa0bf26ba0f39237def4597",
+      "bytes": 8256
+    },
+    "tools/classify.ts": {
+      "sha256": "c100c8f705814c7054d38d5bb850df5c48ab0d6f848e7e31f670c0f30b6e05c9",
+      "bytes": 4568
+    },
+    "tools/lib.ts": {
+      "sha256": "d5309877eeeb0eabf3a7a7496aeb1976798583c87d5678de9e3a0c61320c318a",
+      "bytes": 7904
+    },
+    "tools/provenance.ts": {
+      "sha256": "f6f51922e616b5faa8f107062345e3c4437c1dcc31514f1da24ec638fb375e45",
+      "bytes": 6814
+    }
+  }
+}
