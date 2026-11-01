@@ -1,4 +1,6 @@
-## Unreleased
+## 0.4.1-beta.10
+
+- Add signed patch capture/replay identity, actual session-health attribution, patch management CLI commands, and bounded launcher cleanup. The optional bug_capsule_patch package supplies the native runtime.
 
 - Capsules with screenshots are no longer rejected: `capturedAtT` now moves with the event time when a capsule is rebased to its anchor. In release builds with a first frame over 1 s the backend answered `invalid_capsule` and dropped the whole capsule.
 - Release-health sessions report `patchBaseBuildId` and `patchSetDigest`, so patch rollouts can be judged from real sessions. A session recovered on the next launch reports the patch it ran, not the current one.
