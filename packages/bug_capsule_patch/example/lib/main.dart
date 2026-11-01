@@ -5,10 +5,20 @@ import 'package:bug_capsule_patch/bug_capsule_patch.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'performance_harness.dart';
+import 'trust_config.dart';
 
 const baseBuildId = String.fromEnvironment(
   'BCPATCH_BASE_BUILD',
   defaultValue: 'flutter-demo-1',
+);
+const moduleOnly = bool.fromEnvironment('BCPATCH_MODULE_ONLY');
+const applicationId = String.fromEnvironment(
+  'BCPATCH_APPLICATION_ID',
+  defaultValue: 'dev.bugcapsule.patchlab.flutter',
+);
+const environment = String.fromEnvironment(
+  'BCPATCH_ENVIRONMENT',
+  defaultValue: 'staging',
 );
 const trustAnchor =
     'bcpk.v1.dev-root-1.BA4PNvbk7UmdPR93U56lG_Bpqwq3WgzIrI3zk7IuT-hKhRymUfOY4eQFQGei0tjUkzmpyqaHCZf3MtgxbBxq68U';
@@ -82,6 +92,8 @@ const summarySurface = PatchSurfaceContract(
   requiredActions: ['lab.pay'],
 );
 
+const labSurfaces = moduleOnly ? <PatchSurfaceContract>[] : [summarySurface];
+
 Future<Directory> _exchangeDir() async {
   // Android: readable by adb on a release build. iOS: reachable with devicectl.
   if (Platform.isAndroid) return (await getExternalStorageDirectory())!;
@@ -128,22 +140,21 @@ Future<void> main() async {
   final remote = remoteFile.existsSync()
       ? jsonDecode(remoteFile.readAsStringSync()) as Map<String, Object?>
       : null;
-  const applicationId = 'dev.bugcapsule.patchlab.flutter';
   final platform = Platform.isAndroid ? 'flutter_android' : 'flutter_ios';
   BugCapsulePatch openPatch() => BugCapsulePatch.open(
     PatchConfig(
       storeDir: '${support.path}/bcpatch',
       projectId: remote?['projectId'] as String? ?? 'demo',
       applicationId: applicationId,
-      environment: 'staging',
+      environment: environment,
       platform: platform,
       distributionProfile: 'development',
       baseBuildId: baseBuildId,
       installationId: 'device-1',
-      trustRoots: [remote?['trustRoot'] as String? ?? trustAnchor],
+      trustRoots: labTrustRoots(remote, trustAnchor),
     ),
     modules: [coupon],
-    surfaces: const [summarySurface],
+    surfaces: labSurfaces,
   );
   if (PerformanceHarness.enabled(exchange)) {
     try {
@@ -285,7 +296,7 @@ class PatchLab extends StatelessWidget {
             Text('Total: ${output['total']}'),
             Text('Eval: ${record['evalMicros']} µs'),
             const SizedBox(height: 24),
-            if (patch != null)
+            if (patch != null && !moduleOnly)
               PatchSurfaceView(
                 patch: patch!,
                 id: summarySurface.id,

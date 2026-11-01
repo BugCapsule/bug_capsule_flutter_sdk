@@ -1,17 +1,42 @@
-# bug_capsule_patch_example
+# Flutter patch lab
 
-A new Flutter project.
+This test application exercises the signed patch runtime and delivery transport.
+It is not a customer production application.
 
-## Getting Started
+Its immutable runtime scope can be selected at build time:
 
-This project is a starting point for a Flutter application.
+```sh
+flutter build ios --simulator --debug \
+  --dart-define=BCPATCH_APPLICATION_ID=com.bugcapsule.qualification \
+  --dart-define=BCPATCH_ENVIRONMENT=qa \
+  --dart-define=BCPATCH_BASE_BUILD=qualification-host-20261101 \
+  --dart-define=BCPATCH_MODULE_ONLY=true
+```
 
-A few resources to get you started if this is your first Flutter project:
+Run from this example directory after resolving workspace dependencies and
+installing the reviewed runtime XCFramework required by the patch plugin.
+Defaults remain `dev.bugcapsule.patchlab.flutter`, `staging`, and
+`flutter-demo-1`. These define the patch protocol identity; they do not change
+the operating system bundle identifier. Distribution profile remains development.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+The existing private `Documents/patch-config.json` accepts `projectId`,
+`baseUrl`, `deliveryToken`, and `trustRoots` (a nonempty array of public
+`bcpk.v1.*` pins). The legacy single `trustRoot` remains supported when
+`trustRoots` is absent; malformed explicit lists are refused.
+Use a real scoped delivery credential matching the compiled application and
+environment. Never commit that file or a token. An absent config uses the
+existing local file inbox. The runtime store is kept in application support.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+After staging, terminate and relaunch the same installed app to activate.
+Check the written result and exact runtime identity, then publish a signed
+rollback through the normal operator workflow and relaunch again. Preserve
+the same installation and store across both transitions. Do not interpret
+publication or a successful HTTP check as confirmed activation. Simulator
+execution is not physical device or public distribution qualification.
+
+For a registered module-only base, `BCPATCH_MODULE_ONLY=true` omits the lab
+summary surface from both the runtime inventory and UI. The default remains
+the module plus summary surface. This is a different compiled capability
+inventory: it must match the registered base and signed artifact exactly.
+Changing only an application ID/base label cannot make different inventories
+compatible. The runtime verifier remains authoritative.
