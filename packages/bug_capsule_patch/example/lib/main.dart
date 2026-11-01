@@ -11,6 +11,7 @@ const baseBuildId = String.fromEnvironment(
   'BCPATCH_BASE_BUILD',
   defaultValue: 'flutter-demo-1',
 );
+const moduleOnly = bool.fromEnvironment('BCPATCH_MODULE_ONLY');
 const applicationId = String.fromEnvironment(
   'BCPATCH_APPLICATION_ID',
   defaultValue: 'dev.bugcapsule.patchlab.flutter',
@@ -91,6 +92,8 @@ const summarySurface = PatchSurfaceContract(
   requiredActions: ['lab.pay'],
 );
 
+const labSurfaces = moduleOnly ? <PatchSurfaceContract>[] : [summarySurface];
+
 Future<Directory> _exchangeDir() async {
   // Android: readable by adb on a release build. iOS: reachable with devicectl.
   if (Platform.isAndroid) return (await getExternalStorageDirectory())!;
@@ -151,7 +154,7 @@ Future<void> main() async {
       trustRoots: labTrustRoots(remote, trustAnchor),
     ),
     modules: [coupon],
-    surfaces: const [summarySurface],
+    surfaces: labSurfaces,
   );
   if (PerformanceHarness.enabled(exchange)) {
     try {
@@ -293,7 +296,7 @@ class PatchLab extends StatelessWidget {
             Text('Total: ${output['total']}'),
             Text('Eval: ${record['evalMicros']} µs'),
             const SizedBox(height: 24),
-            if (patch != null)
+            if (patch != null && !moduleOnly)
               PatchSurfaceView(
                 patch: patch!,
                 id: summarySurface.id,

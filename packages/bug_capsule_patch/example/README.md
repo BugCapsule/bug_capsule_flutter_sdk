@@ -9,7 +9,8 @@ Its immutable runtime scope can be selected at build time:
 flutter build ios --simulator --debug \
   --dart-define=BCPATCH_APPLICATION_ID=com.bugcapsule.qualification \
   --dart-define=BCPATCH_ENVIRONMENT=qa \
-  --dart-define=BCPATCH_BASE_BUILD=qualification-host-20261101
+  --dart-define=BCPATCH_BASE_BUILD=qualification-host-20261101 \
+  --dart-define=BCPATCH_MODULE_ONLY=true
 ```
 
 Run from this example directory after resolving workspace dependencies and
@@ -32,3 +33,10 @@ rollback through the normal operator workflow and relaunch again. Preserve
 the same installation and store across both transitions. Do not interpret
 publication or a successful HTTP check as confirmed activation. Simulator
 execution is not physical device or public distribution qualification.
+
+For a registered module-only base, `BCPATCH_MODULE_ONLY=true` omits the lab
+summary surface from both the runtime inventory and UI. The default remains
+the module plus summary surface. This is a different compiled capability
+inventory: it must match the registered base and signed artifact exactly.
+Changing only an application ID/base label cannot make different inventories
+compatible. The runtime verifier remains authoritative.
