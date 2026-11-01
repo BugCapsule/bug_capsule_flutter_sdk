@@ -308,10 +308,16 @@ No Dart or Flutter installation is needed for the CLI. On first use it downloads
 and verifies a standalone executable for macOS (Apple Silicon or Intel), Linux
 (ARM64 or x64), or Windows x64. Later runs use the cached executable, including
 offline inspection. Direct executable downloads are available in the
-[CLI release](https://github.com/BugCapsule/bug_capsule_flutter_sdk/releases/tag/v0.4.1-beta.7).
+[CLI release](https://github.com/BugCapsule/bug_capsule_flutter_sdk/releases/tag/v0.4.1-beta.10).
 
 Replay needs the toolchain of the app being tested: Flutter for Flutter apps,
 Android SDK/JDK for Android, Xcode on macOS for iOS, or Node/Playwright for web.
+Local `bugcapsule patch build`, `inspect`, `classify` and `doctor` commands
+require Node.js 24 or newer. The reviewed patch compiler is embedded in the
+CLI and extracted only for the command; no engine repository checkout or
+automatic compiler download is needed. `--engine` remains an explicit override.
+Patch upload and management requests do not require Node.
+
 Existing Flutter projects can still use `dart run bug_capsule:bugcapsule`.
 If an old Dart installation owns the `bugcapsule` command, deactivate it with
 `dart pub global deactivate bug_capsule` before installing the npm CLI.

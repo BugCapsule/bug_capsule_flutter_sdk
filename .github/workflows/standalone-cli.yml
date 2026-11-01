@@ -8,6 +8,9 @@ on:
       - 'packages/bug_capsule/lib/src/cli/**'
       - 'packages/bug_capsule/lib/src/core/**'
       - 'tool/build_cli.py'
+      - 'tool/smoke_patch_cli.py'
+      - 'tool/fixtures/patch_cli/**'
+      - 'tool/vendor_patch_toolchain.py'
       - '.github/workflows/standalone-cli.yml'
 permissions:
   contents: read
@@ -26,6 +29,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - run: python tool/build_cli.py
       - name: Test without Dart or Flutter on PATH
         shell: python
@@ -35,8 +41,14 @@ jobs:
           with tempfile.TemporaryDirectory() as empty:
               env = {**os.environ, 'PATH': empty}
               subprocess.run([str(binary), '--version'], env=env, check=True)
-              for command in ['login', 'inspect', 'run', 'verify', 'regress', 'gate', 'symbols']:
+              for command in ['login', 'inspect', 'run', 'verify', 'regress', 'gate', 'symbols', 'patch']:
                   subprocess.run([str(binary), command, '--help'], env=env, check=True)
+      - name: Build a signed patch outside the source checkout
+        shell: python
+        run: |
+          import pathlib, subprocess
+          binary = next(p.resolve() for p in pathlib.Path('dist/cli').iterdir() if p.suffix != '.sha256')
+          subprocess.run(['python', 'tool/smoke_patch_cli.py', str(binary)], check=True)
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.os }}

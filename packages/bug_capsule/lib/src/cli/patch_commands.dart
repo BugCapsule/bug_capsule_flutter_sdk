@@ -3,16 +3,17 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
+
 import 'backend_client.dart';
 import 'patch_client.dart';
+import 'patch_toolchain.dart';
 
 const _json = JsonEncoder.withIndent('  ');
-typedef PatchProcess =
-    Future<ProcessResult> Function(
-      String executable,
-      List<String> arguments,
-      String directory,
-    );
+typedef PatchProcess = Future<ProcessResult> Function(
+  String executable,
+  List<String> arguments,
+  String directory,
+);
 
 class PatchCommand extends Command<int> {
   PatchCommand({
@@ -122,7 +123,7 @@ class _PatchOperation extends Command<int> {
       )
       ..addOption(
         'engine',
-        help: 'Explicit patch-engine checkout (or BUGCAPSULE_PATCH_ENGINE).',
+        help: 'Override the bundled compiler with an explicit engine checkout.',
       )
       ..addOption(
         'project',
@@ -132,7 +133,7 @@ class _PatchOperation extends Command<int> {
       ..addOption(
         'node',
         defaultsTo: 'node',
-        help: 'Node executable capable of running the engine TypeScript tools.',
+        help: 'Node.js 24+ executable for local patch compiler commands.',
       )
       ..addOption(
         'idempotency-key',
@@ -232,22 +233,20 @@ class _PatchOperation extends Command<int> {
     'init':
         'Create patch configuration without modifying native application code.',
     'register': 'Register an exact base manifest JSON.',
-    'build':
-        'Classify committed changes, then compile and sign a patch for an exact base.',
+    'build': 'Classify committed changes, then compile and sign a patch for an exact base.',
     'inspect': 'Inspect a local .bcpatch using the installed engine.',
     'classify': 'Report patchability of all changes between two commits.',
-    'validate':
-        'Start/read exact-patch validation or submit real replay evidence; never infer a pass.',
+    'validate': 'Start/read exact-patch validation or submit real replay evidence; never infer a pass.',
     'upload':
         'Resume an authenticated artifact upload and immutable source review.',
     'plan': 'Create a deployment plan without publishing it.',
-    'deploy':
-        'Explicitly request deployment, respecting approval and expected version.',
+    'deploy': 'Explicitly request deployment, respecting approval and expected version.',
     'status': 'Read deployment state and receipt coverage.',
     'rollback':
         'Publish a version-checked rollback; devices may still be offline.',
   }[operation]!;
   Map<String, Object?> config = {};
+  Directory? _bundledEngine;
   String? requestKey;
   String? option(String name) =>
       argResults!.options.contains(name) ? argResults![name] as String? : null;
@@ -280,9 +279,7 @@ class _PatchOperation extends Command<int> {
         context.environment['BUGCAPSULE_PATCH_ENGINE'] ??
         config['engine'] as String?;
     if (value == null || value.isEmpty) {
-      throw StateError(
-        'Set --engine, BUGCAPSULE_PATCH_ENGINE or engine in bugcapsule.patch.json to an installed patch-engine checkout. No tools are downloaded automatically.',
-      );
+      return (_bundledEngine ??= materializePatchToolchain()).path;
     }
     final path = context.path(value);
     if (!File('$path/tools/bcpatch.ts').existsSync()) {
@@ -343,8 +340,7 @@ class _PatchOperation extends Command<int> {
         client.sessionToken == null) {
       throw PatchApiException(403, {
         'code': 'person_session_required',
-        'detail':
-            'This action requires a signed-in person, not a persistent CLI/CI credential. Use Emergency Recovery in the dashboard, or supply an ephemeral BUGCAPSULE_PATCH_SESSION_TOKEN from POST /v1/console/auth/login and select --project / BUGCAPSULE_PATCH_PROJECT_ID. It is not saved; backend roles, expiry and second-person approval still apply.',
+        'detail': 'This action requires a signed-in person, not a persistent CLI/CI credential. Use Emergency Recovery in the dashboard, or supply an ephemeral BUGCAPSULE_PATCH_SESSION_TOKEN from POST /v1/console/auth/login and select --project / BUGCAPSULE_PATCH_PROJECT_ID. It is not saved; backend roles, expiry and second-person approval still apply.',
       });
     }
     return client.request(
@@ -441,6 +437,9 @@ class _PatchOperation extends Command<int> {
       );
     } on ArgumentError catch (e) {
       return error(64, 'invalid_input', e.message.toString());
+    } finally {
+      _bundledEngine?.deleteSync(recursive: true);
+      _bundledEngine = null;
     }
   }
 
@@ -487,7 +486,9 @@ class _PatchOperation extends Command<int> {
         }
         final creds = context.credentials ?? Credentials.load();
         return {
-          'engine': enginePath,
+          'engine': _bundledEngine == null
+              ? enginePath
+              : 'bundled@$bundledPatchEngineCommit',
           'node': node.stdout.toString().trim(),
           'tokenConfigured': creds?.token != null,
           'capabilityProbe': capability,
@@ -607,8 +608,7 @@ class _PatchOperation extends Command<int> {
         return {
           'deployment': response(await call('GET', '/deployments/$id')),
           'receipts': response(await call('GET', '/deployments/$id/receipts')),
-          'note':
-              'Publication is not activation or fleet health. Missing and stale installation reports remain unknown.',
+          'note': 'Publication is not activation or fleet health. Missing and stale installation reports remain unknown.',
         };
       case 'rollback':
         if ((option('to-digest') == null) == (argResults!['to-base'] != true)) {
@@ -664,18 +664,15 @@ class _PatchOperation extends Command<int> {
     return {
       'config': configFile.path,
       'registered': registry.path,
-      'note':
-          'Populate contracts from the actual installed binary, configure an explicit engine checkout and integrate its SDK binding before registering a base. No native application or signing keys were modified.',
+      'note': 'Populate contracts from the actual installed binary and integrate its SDK binding before registering a base. Local compilation uses the bundled compiler and Node.js 24+. No native application or signing keys were modified.',
     };
   }
 
   Future<Map<String, Object?>> build() async {
-    final repo = Directory(
-      context.path(need('repo')),
-    ).resolveSymbolicLinksSync();
-    final source = Directory(
-      context.path(need('source')),
-    ).resolveSymbolicLinksSync();
+    final repo = Directory(context.path(need('repo')))
+        .resolveSymbolicLinksSync();
+    final source = Directory(context.path(need('source')))
+        .resolveSymbolicLinksSync();
     final head = (await git(repo, [
       'rev-parse',
       '--verify',
@@ -762,7 +759,7 @@ class _PatchOperation extends Command<int> {
           'No module sources or explicit assets/surfaces were selected.',
         );
       }
-      if (included.any((p) => !p.startsWith('$repo/'))) {
+      if (included.any((p) => !p.startsWith('$repo${Platform.pathSeparator}'))) {
         throw StateError(
           'All build inputs must be inside the classified repository.',
         );
@@ -771,7 +768,7 @@ class _PatchOperation extends Command<int> {
         final finding = (raw as Map).cast<String, Object?>();
         if (finding['verdict'] == 'PATCHABLE' &&
             !included.contains(
-              File('$repo/${finding['path']}').absolute.path,
+              File('$repo/${finding['path']}').resolveSymbolicLinksSync(),
             )) {
           throw StateError(
             'Classified change ${finding['path']} was not included in the patch; expand --source or add --surface/--asset.',
@@ -841,9 +838,7 @@ class _PatchOperation extends Command<int> {
         'artifact': out,
         'classification': report,
         'sourceDiff': diffFile?.path,
-        if (diffFile == null)
-          'sourceReviewNote':
-              'Development provenance is content-bound, not a Git commit. No commit-bound diff was produced; use a non-development profile for release source review.',
+        if (diffFile == null) 'sourceReviewNote': 'Development provenance is content-bound, not a Git commit. No commit-bound diff was produced; use a non-development profile for release source review.',
       };
     } finally {
       temp.deleteSync(recursive: true);

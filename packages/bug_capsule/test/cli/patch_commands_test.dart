@@ -64,6 +64,39 @@ void main() {
       (output.last['result'] as Map).cast<String, Object?>();
 
   test(
+    'bundled compiler works without a checkout and is removed after use',
+    () async {
+      String? extracted;
+      process = (exe, args, cwd) async {
+        if (args.singleOrNull == '--version') {
+          return ProcessResult(1, 0, 'v24.0.0', '');
+        }
+        extracted = File(args.first).parent.parent.path;
+        expect(File('$extracted/compiler/src/compile.ts').existsSync(), isTrue);
+        return ProcessResult(1, 0, '{"baseCapabilityHash":"test"}', '');
+      };
+      expect(await run(['doctor']), 0);
+      expect(result()['engine'], startsWith('bundled@'));
+      expect(Directory(extracted!).existsSync(), isFalse);
+      expect(calls, isEmpty);
+    },
+  );
+
+  test(
+    'bundled compiler directory is removed after subprocess failure',
+    () async {
+      String? extracted;
+      process = (exe, args, cwd) async {
+        extracted = File(args.first).parent.parent.path;
+        throw ProcessException(exe, args, 'deliberate fixture failure');
+      };
+      expect(await run(['inspect', 'unused.bcpatch']), 1);
+      expect(Directory(extracted!).existsSync(), isFalse);
+      expect(calls, isEmpty);
+    },
+  );
+
+  test(
     'local engine subprocesses do not inherit management credentials',
     () async {
       if (Platform.isWindows) return;
@@ -131,40 +164,35 @@ fi
     },
   );
 
-  test(
-    'all proposed commands are registered without replacing existing command names',
-    () async {
-      final root = PatchCommand();
-      expect(
-        root.subcommands.keys,
-        containsAll([
-          'doctor',
-          'init',
-          'base',
-          'build',
-          'inspect',
-          'classify',
-          'validate',
-          'upload',
-          'plan',
-          'deploy',
-          'status',
-          'rollback',
-        ]),
-      );
-      expect(root.subcommands['base']!.subcommands.keys, ['register']);
-      expect(await run(['init', '--platform', 'android']), 0);
-      expect(File('${dir.path}/bugcapsule.patch.json').existsSync(), isTrue);
-      final before = File(
-        '${dir.path}/bugcapsule.patch.json',
-      ).readAsStringSync();
-      expect(await run(['init', '--platform', 'ios']), 1);
-      expect(
-        File('${dir.path}/bugcapsule.patch.json').readAsStringSync(),
-        before,
-      );
-    },
-  );
+  test('all proposed commands are registered without replacing existing command names', () async {
+    final root = PatchCommand();
+    expect(
+      root.subcommands.keys,
+      containsAll([
+        'doctor',
+        'init',
+        'base',
+        'build',
+        'inspect',
+        'classify',
+        'validate',
+        'upload',
+        'plan',
+        'deploy',
+        'status',
+        'rollback',
+      ]),
+    );
+    expect(root.subcommands['base']!.subcommands.keys, ['register']);
+    expect(await run(['init', '--platform', 'android']), 0);
+    expect(File('${dir.path}/bugcapsule.patch.json').existsSync(), isTrue);
+    final before = File('${dir.path}/bugcapsule.patch.json').readAsStringSync();
+    expect(await run(['init', '--platform', 'ios']), 1);
+    expect(
+      File('${dir.path}/bugcapsule.patch.json').readAsStringSync(),
+      before,
+    );
+  });
   test(
     'creates exact validation pending and submits only supplied evidence',
     () async {
@@ -261,37 +289,34 @@ fi
       });
     },
   );
-  test(
-    'plans do not publish, reject bad stage order and retain honest receipt counts',
-    () async {
-      handle = (r, b) async {
-        r.response.write(
-          r.uri.path.endsWith('/receipts')
-              ? '{"reportingInstallations":0,"rollback":{"devicesPending":4}}'
-              : '{"state":"planned"}',
-        );
-        await r.response.close();
-      };
-      expect(
-        await run([
-          'plan',
-          'artifact-1',
-          '--environment',
-          'staging',
-          '--stages',
-          '500,100,10000',
-        ]),
-        64,
+  test('plans do not publish, reject bad stage order and retain honest receipt counts', () async {
+    handle = (r, b) async {
+      r.response.write(
+        r.uri.path.endsWith('/receipts')
+            ? '{"reportingInstallations":0,"rollback":{"devicesPending":4}}'
+            : '{"state":"planned"}',
       );
-      expect(calls, isEmpty);
-      expect(await run(['plan', 'artifact-1', '--environment', 'staging']), 0);
-      expect(calls.single.$2, '/v1/patches/deployments');
-      expect(calls.single.$3['rolloutStages'], [100, 500, 2500, 10000]);
-      expect(await run(['status', 'plan-1']), 0);
-      expect((result()['receipts'] as Map)['reportingInstallations'], 0);
-      expect(result()['note'], contains('not activation'));
-    },
-  );
+      await r.response.close();
+    };
+    expect(
+      await run([
+        'plan',
+        'artifact-1',
+        '--environment',
+        'staging',
+        '--stages',
+        '500,100,10000',
+      ]),
+      64,
+    );
+    expect(calls, isEmpty);
+    expect(await run(['plan', 'artifact-1', '--environment', 'staging']), 0);
+    expect(calls.single.$2, '/v1/patches/deployments');
+    expect(calls.single.$3['rolloutStages'], [100, 500, 2500, 10000]);
+    expect(await run(['status', 'plan-1']), 0);
+    expect((result()['receipts'] as Map)['reportingInstallations'], 0);
+    expect(result()['note'], contains('not activation'));
+  });
   test(
     'upload resumes a lost finalize response using its stored phase key',
     () async {
