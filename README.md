@@ -33,6 +33,7 @@ timing, so races and data-dependent bugs come back.
 - [Replay, verify and keep a regression test](#replay-verify-and-keep-a-regression-test)
 - [Monitoring](#monitoring)
 - [Privacy](#privacy)
+- [Emergency recovery (feature guards)](#emergency-recovery-feature-guards)
 - [Going to production](#going-to-production)
 - [Limitations](#limitations)
 - [Demo app](#demo-app)
@@ -307,10 +308,16 @@ No Dart or Flutter installation is needed for the CLI. On first use it downloads
 and verifies a standalone executable for macOS (Apple Silicon or Intel), Linux
 (ARM64 or x64), or Windows x64. Later runs use the cached executable, including
 offline inspection. Direct executable downloads are available in the
-[CLI release](https://github.com/BugCapsule/bug_capsule_flutter_sdk/releases/tag/v0.4.1-beta.7).
+[CLI release](https://github.com/BugCapsule/bug_capsule_flutter_sdk/releases/tag/v0.4.1-beta.10).
 
 Replay needs the toolchain of the app being tested: Flutter for Flutter apps,
 Android SDK/JDK for Android, Xcode on macOS for iOS, or Node/Playwright for web.
+Local `bugcapsule patch build`, `inspect`, `classify` and `doctor` commands
+require Node.js 24 or newer. The reviewed patch compiler is embedded in the
+CLI and extracted only for the command; no engine repository checkout or
+automatic compiler download is needed. `--engine` remains an explicit override.
+Patch upload and management requests do not require Node.
+
 Existing Flutter projects can still use `dart run bug_capsule:bugcapsule`.
 If an old Dart installation owns the `bugcapsule` command, deactivate it with
 `dart pub global deactivate bug_capsule` before installing the npm CLI.
@@ -467,6 +474,112 @@ credential (names, emails, addresses) or secrets in URL paths. Inspect real
 capsules with `bugcapsule inspect` before a wider rollout. More:
 [Privacy and redaction](https://docs.bugcapsule.com/privacy.html).
 
+## Emergency recovery (feature guards)
+
+When a release misbehaves in production, emergency policies let you switch a
+named feature off, make it read-only, ask for an update or show a maintenance
+message from the BugCapsule dashboard, without shipping a new build. The app
+asks before running a guarded feature:
+
+```dart
+await BugCapsule.emergency.initialize(const EmergencyConfig(
+  trustAnchor: 'bcek.v1.…', // from the dashboard; compile it into the app
+  environment: 'production',
+  failureModes: {'checkout.*': EmergencyFailureMode.failClosed},
+));
+
+final decision = BugCapsule.emergency.evaluate('checkout.confirm_order');
+if (!decision.allowed) {
+  // decision.action: BLOCK, READ_ONLY, REQUIRE_UPDATE, SHOW_MAINTENANCE,
+  // DISABLE_FEATURE or USE_SAFE_FALLBACK (with decision.fallback).
+  showUnavailable(decision.publicUserMessage);
+  return;
+}
+```
+
+How it works:
+
+- **Signed policies, nothing executable.** The SDK downloads a policy document
+  signed with ECDSA P-256 and verifies it against the trust anchor compiled
+  into your app. A document that does not verify, is older than one already
+  seen, or has expired is rejected. No code is ever downloaded or run: a
+  policy only says whether a feature may run and what to show instead.
+- **Local, synchronous decisions.** `evaluate`, `isFeatureAllowed` and
+  `getPolicy` answer from memory and never wait for the network or throw.
+  Policies can target platforms, app version ranges and a percentage rollout;
+  the rollout subject is a random installation id unless you pass
+  `subject:` (a stable pseudonymous id, never an email address or other
+  personal data).
+- **Cached and refreshed.** The last verified document is stored on the
+  device and checked again at startup, so guards work offline from the first
+  frame. Policies refresh every `refreshInterval` (60 s by default, at least
+  15 s) while the app is in the foreground, when it returns to the
+  foreground, and when you call `BugCapsule.emergency.refreshPolicies()`.
+  `BugCapsule.emergency.changes` emits a snapshot when a new document arrives
+  or a document or policy expires; `BugCapsule.emergency.status` reports the
+  revision, expiry, last fetch and last error.
+- **Failure modes.** Without a usable document (none yet, expired, invalid
+  anchor, unsupported platform) each feature uses its failure mode:
+  `failOpen` (the default: allow), `failClosed` (block; use it for actions
+  that move money) or `useLastValidPolicy` (keep applying the expired
+  document). Keys can be exact (`checkout.confirm_order`) or prefixes
+  (`checkout.*`); an exact key wins, then the longest prefix.
+- **Same connection as capture.** The module uses the token or backend from
+  `BugCapsule.init` (or its own `token:` / `backend:`). It keeps working when
+  capture is disabled or switched off remotely, and can be initialized before
+  or after `BugCapsule.init`.
+
+### Hotfixes (Shorebird)
+
+A guard switches a broken feature off; a hotfix fixes it. With a hotfix
+adapter, the module also tells the BugCapsule backend which patch each
+installation runs, so you can see whether a recovery can reach the installed
+builds and follow it once it ships. The adapter for Shorebird is the separate
+`bug_capsule_shorebird` package:
+
+```dart
+await BugCapsule.emergency.initialize(EmergencyConfig(
+  trustAnchor: 'bcek.v1.…',
+  hotfixProvider: BugCapsuleShorebird(),
+));
+
+final result = await BugCapsule.emergency.hotfix!.downloadAvailablePatch();
+if (result is HotfixRestartRequired) {
+  // The patch is active after the next start. When that is, is up to you.
+}
+```
+
+- `checkAvailability()`, `downloadAvailablePatch()` and `getStatus()` return
+  the provider's status: whether the build can be patched at all, the running
+  patch (`currentPatch`), a downloaded one waiting for the next start
+  (`nextPatch`) and the state (`up_to_date`, `outdated`, `downloading`,
+  `restart_required`, `unavailable`, `failed`). They never throw.
+- The SDK never restarts the app and never reports a downloaded patch as
+  active.
+- Only builds made with `shorebird release` can be patched; any other build
+  reports `available: false` and needs a store release. Code push changes Dart
+  code only.
+- Each new status is sent with the module's receipts (`RUNTIME`), at most one
+  per minute, and not during capsule replay. Other code push services can
+  implement `HotfixProvider`.
+
+**The client guard is a user-experience measure, not a security control.** A
+modified or outdated app can ignore it. Anything that moves money or data must
+be refused by your own server at the transactional boundary, using the same
+policies, with idempotency keys so retries never charge twice.
+
+Limits:
+
+- Android and iOS only. On web and desktop the module stays in failure mode
+  and logs once.
+- Policies are not code push: they cannot change app behavior beyond the
+  guards you wrote. A code fix arrives through a store release or a hotfix
+  adapter.
+- Guard decisions are recorded into capsules. While a capsule replays, each
+  evaluation returns what the user saw, with `source: replay`, and the module
+  makes no network calls. A feature the capsule has no decision for is allowed,
+  and so is every feature in a capsule from an older SDK.
+
 ## Going to production
 
 Production capture works, but it is the riskiest mode. Before rollout:
@@ -542,8 +655,6 @@ package, `bug_capsule`, with the same API:
   [install the CLI](#install-the-cli) again.
 
 Older upgrades: [docs/upgrading.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/upgrading.md).
-
-Module patch workflows are available through `bugcapsule patch`: build and inspect exact artifacts, resume uploads, start validation, and review versioned deployment requests. See [Patch CLI](docs/patch-cli.md) for authentication, source review, replay evidence and rollback.
 
 ## More documentation
 
