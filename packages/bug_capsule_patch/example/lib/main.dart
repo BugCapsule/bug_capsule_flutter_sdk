@@ -10,6 +10,14 @@ const baseBuildId = String.fromEnvironment(
   'BCPATCH_BASE_BUILD',
   defaultValue: 'flutter-demo-1',
 );
+const applicationId = String.fromEnvironment(
+  'BCPATCH_APPLICATION_ID',
+  defaultValue: 'dev.bugcapsule.patchlab.flutter',
+);
+const environment = String.fromEnvironment(
+  'BCPATCH_ENVIRONMENT',
+  defaultValue: 'staging',
+);
 const trustAnchor =
     'bcpk.v1.dev-root-1.BA4PNvbk7UmdPR93U56lG_Bpqwq3WgzIrI3zk7IuT-hKhRymUfOY4eQFQGei0tjUkzmpyqaHCZf3MtgxbBxq68U';
 
@@ -128,14 +136,13 @@ Future<void> main() async {
   final remote = remoteFile.existsSync()
       ? jsonDecode(remoteFile.readAsStringSync()) as Map<String, Object?>
       : null;
-  const applicationId = 'dev.bugcapsule.patchlab.flutter';
   final platform = Platform.isAndroid ? 'flutter_android' : 'flutter_ios';
   BugCapsulePatch openPatch() => BugCapsulePatch.open(
     PatchConfig(
       storeDir: '${support.path}/bcpatch',
       projectId: remote?['projectId'] as String? ?? 'demo',
       applicationId: applicationId,
-      environment: 'staging',
+      environment: environment,
       platform: platform,
       distributionProfile: 'development',
       baseBuildId: baseBuildId,
