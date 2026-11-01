@@ -150,7 +150,7 @@ void main() {
             isRecording: () => true,
             patchIdentity: () => b.identity,
           ),
-          sdkVersion: 'host-proof-74e6aad',
+          sdkVersion: 'host-proof-${p['flutterCommit'] ?? 'unrecorded'}',
           startedAt: DateTime.now(),
           storage: Directory('${root.path}/$id/monitor')
             ..createSync(recursive: true),
@@ -260,7 +260,7 @@ void main() {
         File('${p['directory']}/sdk-$phase-evidence.json').writeAsStringSync(
           const JsonEncoder.withIndent('  ').convert({
             'scope':
-                'actual Flutter SDK monitoring hub/outbox/HTTP and actual native engine on macOS host; synthetic installations; not device fleet',
+                'actual Flutter SDK monitoring hub/outbox/HTTP and actual native engine on ${Platform.operatingSystem} host; synthetic installations; not device fleet',
             'phase': phase,
             'observations': observations,
           }),
