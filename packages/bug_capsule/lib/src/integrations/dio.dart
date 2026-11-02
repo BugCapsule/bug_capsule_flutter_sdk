@@ -44,7 +44,7 @@ class BugCapsuleDio extends BugCapsuleIntegration {
       'cachebust',
     },
     Set<String> ignoreBodyFields = const {},
-    this.maxBinaryBytes = 64 * 1024,
+    this.maxBinaryBytes = 0,
     this.maxKeyBodyBytes = 64 * 1024,
     this.maxBodyWait = const Duration(seconds: 30),
     this.exclude,
@@ -55,6 +55,11 @@ class BugCapsuleDio extends BugCapsuleIntegration {
        );
 
   final RequestKeyBuilder keys;
+
+  /// Binary (and non-UTF-8 text) bodies up to this size are kept as base64.
+  /// Off by default: redaction can't read binary, so a token inside one would
+  /// be kept as is. Such bodies are recorded by size only (`truncated`), and
+  /// replay reports `network.noBody` when it serves one.
   final int maxBinaryBytes;
 
   /// Request bodies up to this size take part in the request key. Fixed

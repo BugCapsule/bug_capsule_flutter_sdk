@@ -590,14 +590,19 @@ Production capture works, but it is the riskiest mode. Before rollout:
 2. **Set sampling.** A production session records with probability
    `productionSampleRate` (default `0.1`), capped by your project's rate.
 3. **Review redaction** with a real login and payment flow.
-4. **Decide on bodies.** Turn off `captureNetworkBodies` (also possible
-   remotely) for endpoints you can't send.
+4. **Decide on bodies.** Production builds record no request or response
+   bodies unless you set `captureNetworkBodies: true` (the backend can turn
+   them off again, never on); debug and QA builds record them. Binary bodies
+   are recorded by size only unless you raise `maxBinaryBytes` on the Dio or
+   http integration.
 5. **Measure** cold start, frame times and memory on a low-end device with and
    without BugCapsule.
 6. **Upload symbols** for every release build.
 
 Capture never crashes the app: if setup fails the app starts without it, and
-storage errors drop the capsule. Release builds never enter replay mode. Full
+storage errors drop the capsule. Replay runs only in debug builds (or profile
+builds compiled with `--dart-define=BUGCAPSULE_ALLOW_PROFILE_REPLAY=true`), and
+when it can't start it shows why instead of launching the app. Full
 details: [docs/how-it-works.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/how-it-works.md) and the
 [production checklist](https://docs.bugcapsule.com/production.html).
 
