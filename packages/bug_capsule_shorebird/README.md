@@ -29,7 +29,7 @@ installed builds, and to follow it once it ships.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.7
+  bug_capsule: ^0.4.1-beta.10
   bug_capsule_shorebird: ^0.1.0-dev.1
 ```
 
