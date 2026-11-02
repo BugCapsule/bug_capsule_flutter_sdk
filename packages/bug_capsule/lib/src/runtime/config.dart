@@ -51,7 +51,6 @@ class BugCapsuleConfig {
     this.autoCaptureOnFailure = true,
     this.maxCapsulesPerSession = 3,
     this.crashJournal = true,
-    this.captureNetworkBodies = true,
     this.maxBodyBytes = 256 * 1024,
     this.redactKeys = const [],
     this.redactHeaders = const [],
@@ -61,6 +60,7 @@ class BugCapsuleConfig {
     this.outboxLimits = const OutboxLimits(),
     this.maxStaleConfig = const Duration(days: 7),
     bool? showOverlay,
+    bool? captureNetworkBodies,
     this.ignoreError,
     this.labels = const {},
     this.replayUrl,
@@ -69,7 +69,8 @@ class BugCapsuleConfig {
        _appBuild = appBuild,
        _mode = mode,
        _gitSha = gitSha,
-       _showOverlay = showOverlay;
+       _showOverlay = showOverlay,
+       _captureNetworkBodies = captureNetworkBodies;
 
   /// SDK connection token from the BugCapsule dashboard
   /// (`bcsdk.v1.<payload>`): the API URL and an upload-only credential in one
@@ -142,7 +143,13 @@ class BugCapsuleConfig {
   /// `bug_capsule_native`) still gives a capsule, built on the next launch.
   /// Crash capsules do not count against [maxCapsulesPerSession].
   final bool crashJournal;
-  final bool captureNetworkBodies;
+
+  /// HTTP and WebSocket request and response bodies. Defaults to on in debug
+  /// and QA builds and **off in production**, where bodies carry customer
+  /// data; set it explicitly to choose. The backend can turn it off, never on.
+  bool get captureNetworkBodies =>
+      _captureNetworkBodies ?? mode != CaptureMode.production;
+  final bool? _captureNetworkBodies;
   final int maxBodyBytes;
   final List<String> redactKeys;
   final List<String> redactHeaders;
