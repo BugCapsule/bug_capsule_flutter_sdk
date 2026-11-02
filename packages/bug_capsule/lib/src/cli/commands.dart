@@ -1187,7 +1187,7 @@ class _RegressAdd extends Command<int> {
     final project = argResults!['project'] as String;
     final suite = RegressionSuite(project);
     final tests = suite.load();
-    final relative = 'bugcapsule/regressions/${m.capsuleId}.bugcapsule';
+    final relative = 'bugcapsule/regressions/${capsuleFileName(m.capsuleId)}';
     File('$project/$relative')
       ..parent.createSync(recursive: true)
       ..writeAsBytesSync(loaded.bytes);
@@ -1751,7 +1751,7 @@ class PullCommand extends Command<int> {
     final loaded = await loadCapsule(_rest(this, 'capsule id or share URL'));
     final out =
         argResults!['output'] as String? ??
-        '${loaded.capsule.manifest.capsuleId}.bugcapsule';
+        capsuleFileName(loaded.capsule.manifest.capsuleId);
     File(out).writeAsBytesSync(loaded.bytes);
     stdout.writeln('${green('✓')} $out (${loaded.bytes.length} bytes)');
     return 0;
