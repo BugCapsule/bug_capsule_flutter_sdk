@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import '../core/core.dart';
 
@@ -36,10 +37,12 @@ class ArmedAttempt {
   void close() => _closed = true;
 
   /// Accepts [r] when the attempt is open and [r] belongs to it. Returns the
-  /// HTTP status the app gets.
-  int _offer(ReplayReport r) {
+  /// HTTP status the app gets. Over HTTP the URL token already proves the
+  /// sender, so a report without an attemptId (Flutter 0.2) is accepted; a
+  /// stdout line has no token, so it must carry this attempt's id.
+  int _offer(ReplayReport r, {bool requireAttemptId = false}) {
     if (_closed || _report.isCompleted) return HttpStatus.gone;
-    if (r.attemptId != null && r.attemptId != attemptId) {
+    if (r.attemptId != attemptId && (requireAttemptId || r.attemptId != null)) {
       return HttpStatus.conflict;
     }
     _report.complete(r);
@@ -135,7 +138,10 @@ class ReplayServer {
 
   /// Fallback channel: a `BUGCAPSULE_RESULT::{json}` line from the output of
   /// the process launched for [attempt] (stdout, instrumentation status, test
-  /// log). Ignored once the attempt is closed.
+  /// log). Ignored once the attempt is closed, and unless the report names
+  /// this attempt's random id: anything else in the app's output (a logged
+  /// string from the capsule, another process, an earlier attempt) can print
+  /// the prefix, but can't know the id of an attempt that started after it.
   bool offerLine(ArmedAttempt attempt, String line) {
     final i = line.indexOf(ReplayProtocol.stdoutPrefix);
     if (i < 0) return false;
@@ -145,6 +151,7 @@ class ReplayServer {
       );
       return attempt._offer(
             ReplayReport.fromJson((json as Map).cast<String, Object?>()),
+            requireAttemptId: true,
           ) ==
           HttpStatus.noContent;
     } catch (_) {
@@ -207,10 +214,8 @@ class ReplayServer {
             ..headers.set('cache-control', 'no-store')
             ..write(jsonEncode(attempt.settings.toJson()));
         case ('POST', ReplayProtocol.resultPath):
-          final body = await utf8
-              .decodeStream(req)
-              .timeout(const Duration(seconds: 30));
-          if (body.length > 16 * 1024 * 1024) {
+          final body = await _readCapped(req, _maxReportBytes);
+          if (body == null) {
             res.statusCode = HttpStatus.requestEntityTooLarge;
             return;
           }
@@ -229,6 +234,20 @@ class ReplayServer {
         await res.close();
       } catch (_) {}
     }
+  }
+
+  static const _maxReportBytes = 16 * 1024 * 1024;
+
+  /// The request body as text, or null once it exceeds [limit] bytes (the
+  /// rest is not read into memory).
+  static Future<String?> _readCapped(HttpRequest req, int limit) async {
+    if (req.contentLength > limit) return null;
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in req.timeout(const Duration(seconds: 30))) {
+      if (bytes.length + chunk.length > limit) return null;
+      bytes.add(chunk);
+    }
+    return utf8.decode(bytes.takeBytes());
   }
 
   static bool _sameToken(String a, String b) {
