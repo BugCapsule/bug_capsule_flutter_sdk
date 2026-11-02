@@ -209,37 +209,40 @@ Map<String, Object?> _redaction() {
   };
 }
 
+ReplayReport _report(Map<String, Object?> r) => ReplayReport(
+  outcome: ReplayOutcome.parse(r['outcome'] as String),
+  attempt: 1,
+  durationMs: 100,
+  strategy: ReplayStrategy.auto,
+  expectedSignature: r['expectedSignature'] as String?,
+  eventsDispatched: r['eventsDispatched'] as int? ?? 0,
+  eventsExpected: r['eventsExpected'] as int?,
+  divergences: [
+    for (final d in (r['divergences'] as List? ?? const []).cast<String>())
+      Divergence(d, 'x'),
+  ],
+  otherFailures: [
+    for (final f in (r['otherFailures'] as List? ?? const []).cast<String>())
+      FailureRecord(
+        kind: FailureKind.exception,
+        signature: f,
+        type: 'E',
+        message: '',
+        t: 0,
+      ),
+  ],
+  message: r['message'] as String?,
+  evidence: r['evidence'] is Map
+      ? ReplayEvidence.fromJson((r['evidence'] as Map).cast<String, Object?>())
+      : null,
+);
+
 Map<String, Object?> _verdicts() {
   final cases = <Map<String, Object?>>[];
   for (final c in verdictCases) {
     final reports = [
       for (final r in (c['reports'] as List).cast<Map<String, Object?>>())
-        ReplayReport(
-          outcome: ReplayOutcome.parse(r['outcome'] as String),
-          attempt: 1,
-          durationMs: 100,
-          strategy: ReplayStrategy.auto,
-          expectedSignature: r['expectedSignature'] as String?,
-          eventsDispatched: r['eventsDispatched'] as int? ?? 0,
-          eventsExpected: r['eventsExpected'] as int?,
-          divergences: [
-            for (final d
-                in (r['divergences'] as List? ?? const []).cast<String>())
-              Divergence(d, 'x'),
-          ],
-          otherFailures: [
-            for (final f
-                in (r['otherFailures'] as List? ?? const []).cast<String>())
-              FailureRecord(
-                kind: FailureKind.exception,
-                signature: f,
-                type: 'E',
-                message: '',
-                t: 0,
-              ),
-          ],
-          message: r['message'] as String?,
-        ),
+        _report(r),
     ];
     final e = evaluateRun(
       RunKind.values.byName(c['kind'] as String),
@@ -263,6 +266,45 @@ Map<String, Object?> _verdicts() {
     ),
     'expectedDivergences': DivergencePolicy.expected.toList()..sort(),
     'cases': cases,
+    'verifyV2': [
+      for (final c in verifyV2Cases)
+        () {
+          final e = evaluateVerifyV2(
+            requestedAttempts: c['requested'] as int,
+            candidate: [
+              for (final r
+                  in (c['reports'] as List).cast<Map<String, Object?>>())
+                _report(r),
+            ],
+            baseline: c['baseline'] == null
+                ? null
+                : BaselineResult.fromJson(
+                    (c['baseline'] as Map).cast<String, Object?>(),
+                  ),
+            eligibility: EligibilityStatus.values.byName(
+              c['eligibility'] as String,
+            ),
+          );
+          return {
+            ...c,
+            'verdict': e.verdict.name,
+            'wire': e.verdict.wire,
+            'exitCode': e.exitCode,
+            'reasonCodes': e.reasonCodes,
+          };
+        }(),
+    ],
+    'requiredAttempts': [
+      for (final p in requiredAttemptCases)
+        {
+          'baselineReproduced': p[0],
+          'baselineAttempts': p[1],
+          'wilsonLower': double.parse(
+            wilsonLower(p[0], p[1]).toStringAsFixed(4),
+          ),
+          'required': requiredCandidateAttempts(p[0], p[1]),
+        },
+    ],
   };
 }
 

@@ -103,8 +103,13 @@ abstract final class Baggage {
 /// `tracePropagationTargets`: plain strings match as substrings of the URL,
 /// `/pattern/` strings as regular expressions.
 class PropagationTargets {
-  PropagationTargets(List<String> targets)
-    : _substrings = [
+  /// [targets] come from the app. [narrowedBy] (the server's list) can only
+  /// remove destinations: a URL must match both. Its entries are plain
+  /// substrings, never patterns, so a server can't add hosts or run a regex
+  /// on every request URL.
+  PropagationTargets(List<String> targets, {List<String>? narrowedBy})
+    : _narrowedBy = narrowedBy,
+      _substrings = [
         for (final t in targets)
           if (!_isRegex(t)) t,
       ],
@@ -115,12 +120,15 @@ class PropagationTargets {
 
   final List<String> _substrings;
   final List<RegExp> _patterns;
+  final List<String>? _narrowedBy;
 
   static bool _isRegex(String t) =>
       t.length >= 2 && t.startsWith('/') && t.endsWith('/');
 
   bool matches(String url) =>
-      _substrings.any(url.contains) || _patterns.any((p) => p.hasMatch(url));
+      (_substrings.any(url.contains) ||
+          _patterns.any((p) => p.hasMatch(url))) &&
+      (_narrowedBy?.any(url.contains) ?? true);
 }
 
 /// Span statuses of monitoring-v1 §8.

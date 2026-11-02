@@ -126,14 +126,45 @@ String? _decodeBase64Url(String s) {
   }
 }
 
-/// An absolute http(s) URL without user info, query or fragment, with
-/// trailing slashes removed; else null.
+/// An absolute https URL (http only to a local development host) without
+/// user info, query or fragment, with trailing slashes removed; else null.
 String? _apiUrl(Object? api) {
   if (api is! String || api.isEmpty || api.length > 2000) return null;
   final uri = Uri.tryParse(api);
   if (uri == null) return null;
   if (uri.scheme != 'http' && uri.scheme != 'https') return null;
   if (!uri.hasAuthority || uri.host.isEmpty) return null;
+  if (uri.scheme == 'http' && !isLocalDevelopmentHost(uri.host)) return null;
   if (uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment) return null;
   return api.replaceAll(RegExp(r'/+$'), '');
+}
+
+/// Hosts plain http may reach: loopback, and the Android emulator's alias for
+/// the development machine. Anything else must be https, because the ingest
+/// credential travels in every request.
+bool isLocalDevelopmentHost(String host) {
+  final h = host.toLowerCase();
+  if (h == 'localhost' || h == '::1' || h == '[::1]' || h == '10.0.2.2') {
+    return true;
+  }
+  return RegExp(r'^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(h);
+}
+
+/// Why an explicit backend config can't be used, or null when it can. The
+/// ingest key travels in every request, so it needs https except on a local
+/// development host, and a `bcs_` secret key must never ship in an app.
+String? explicitBackendRefusal(BugCapsuleBackendConfig backend) {
+  if (backend.ingestKey.startsWith('bcs_')) {
+    return 'a bcs_ secret key is not an ingest key; use an SDK token';
+  }
+  final uri = Uri.tryParse(backend.url);
+  if (uri == null ||
+      !uri.hasAuthority ||
+      (uri.scheme != 'https' && uri.scheme != 'http')) {
+    return 'url must be an absolute https URL';
+  }
+  if (uri.scheme == 'http' && !isLocalDevelopmentHost(uri.host)) {
+    return 'plain http is only allowed to localhost, 127.0.0.1 or 10.0.2.2; use https';
+  }
+  return null;
 }

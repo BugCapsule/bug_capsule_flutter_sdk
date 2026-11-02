@@ -5,6 +5,9 @@ import 'package:flutter/foundation.dart';
 
 /// Capture config the backend can change at runtime (kill switch, sampling,
 /// bodies, redaction).
+/// Ceiling for the server's `maxCapsuleBytes` (the backend's own maximum).
+const maxRemoteCapsuleBytes = 50 * 1024 * 1024;
+
 class RemoteCaptureConfig {
   const RemoteCaptureConfig({
     required this.enabled,
@@ -48,7 +51,10 @@ class RemoteCaptureConfig {
     return RemoteCaptureConfig(
       enabled: field<bool>('enabled') ?? true,
       sampleRate: rate.isNaN ? 0 : rate.clamp(0, 1).toDouble(),
-      maxCapsuleBytes: maxBytes < 1 ? 1 : maxBytes,
+      // The backend accepts at most 50 MiB per capsule; a larger value can only
+      // come from a misconfigured or compromised server, and also sizes the
+      // on-disk crash journal (2x).
+      maxCapsuleBytes: maxBytes.clamp(1, maxRemoteCapsuleBytes),
       captureNetworkBodies: field<bool>('captureNetworkBodies') ?? true,
       redactKeys: [
         for (final k in field<List<Object?>>('redactKeys') ?? const []) '$k',

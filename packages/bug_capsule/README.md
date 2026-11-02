@@ -328,9 +328,9 @@ If an old Dart installation owns the `bugcapsule` command, deactivate it with
 bugcapsule list                                   # capsules in your project
 bugcapsule inspect <id|file|share-url>            # failure, eligibility, network, timeline
 bugcapsule run <id> -d <simulator> -n 3          # replays on the capsule's commit (temporary git worktree)
-bugcapsule verify <id> -n 5                       # replays your working tree; FIXED when the bug is gone
+bugcapsule verify <id>                            # baseline on the capsule's commit, then your working tree
 bugcapsule regress add <id>                       # keep it as a regression test
-bugcapsule regress run                            # in CI: exit 1 when a regression fails
+bugcapsule regress run                            # in CI: exit 1 when a regression fails or can't be verified
 bugcapsule gate --release com.shop.app@1.5.0+60 --platform android   # release gate in CI
 bugcapsule share <id>                             # expiring download link
 bugcapsule capture --on | --off | --sample-rate 0.05   # kill switch and production sampling
@@ -343,10 +343,27 @@ armed in release builds.
 
 | `bugcapsule run` | `bugcapsule verify` | Exit code |
 |---|---|---|
-| `REPRODUCED`: every attempt hit the original failure | `FIXED`: every attempt ran cleanly | 0 |
-| `NOT REPRODUCED`: every attempt ran cleanly | `STILL FAILING`: the failure came back, no clean attempt | 1 |
-| `FLAKY`: some attempts reproduced, some didn't | `FLAKY` | 2 |
+| `REPRODUCED`: every attempt hit the original failure | `FIXED`: see below | 0 |
+| `NOT REPRODUCED`: every attempt ran cleanly | `STILL FAILING`: the failure came back, or a postcondition did not hold | 1 |
+| `FLAKY`: some attempts reproduced, some didn't | `FLAKY`, also when the baseline was | 2 |
 | `INCONCLUSIVE` / `INCOMPATIBLE`: anything else | `INCONCLUSIVE` / `INCOMPATIBLE` | 3 |
+| | `FIXED (QUALIFIED)`: as FIXED, with weak evidence or a partial capsule (`--accept-qualified` exits 0) | 4 |
+| `UNSAFE`: live traffic was allowed | `UNSAFE` | 5 |
+
+`verify` first replays the capsule on its own commit (the **baseline**, built
+clean in a temporary worktree, 3 attempts by default and reused for 7 days).
+`FIXED` needs that baseline to reproduce every time, enough clean attempts on
+your working tree for that baseline (8 after 3/3; `verify` raises `--runs`),
+and evidence that the failing path ran: the capsule's own
+`BugCapsule.check(...)` held, or a postcondition you registered with
+`BugCapsule.expect('name', () => ...)` held. Without a baseline (no git SHA,
+commit not in the repo, prebuilt artifacts) the result is `INCONCLUSIVE`.
+`regress run` applies the same rules per test and keeps each test's baseline
+in its entry, so CI doesn't rebuild old commits. `gate` takes the baseline
+from the newest complete `bugcapsule run` recorded for the capsule; a capsule
+without one stays `INCONCLUSIVE` and blocks the gate only with
+`--fail-on unverified`. `--verdict-v1` keeps the old rules on all three
+commands (refused in CI unless `BUGCAPSULE_ALLOW_VERDICT_V1=1`).
 
 An attempt only counts as clean when every recorded input was replayed and
 nothing important diverged (an unregistered action, a request without a
@@ -590,14 +607,19 @@ Production capture works, but it is the riskiest mode. Before rollout:
 2. **Set sampling.** A production session records with probability
    `productionSampleRate` (default `0.1`), capped by your project's rate.
 3. **Review redaction** with a real login and payment flow.
-4. **Decide on bodies.** Turn off `captureNetworkBodies` (also possible
-   remotely) for endpoints you can't send.
+4. **Decide on bodies.** Production builds record no request or response
+   bodies unless you set `captureNetworkBodies: true` (the backend can turn
+   them off again, never on); debug and QA builds record them. Binary bodies
+   are recorded by size only unless you raise `maxBinaryBytes` on the Dio or
+   http integration.
 5. **Measure** cold start, frame times and memory on a low-end device with and
    without BugCapsule.
 6. **Upload symbols** for every release build.
 
 Capture never crashes the app: if setup fails the app starts without it, and
-storage errors drop the capsule. Release builds never enter replay mode. Full
+storage errors drop the capsule. Replay runs only in debug builds (or profile
+builds compiled with `--dart-define=BUGCAPSULE_ALLOW_PROFILE_REPLAY=true`), and
+when it can't start it shows why instead of launching the app. Full
 details: [docs/how-it-works.md](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/docs/how-it-works.md) and the
 [production checklist](https://docs.bugcapsule.com/production.html).
 

@@ -189,7 +189,7 @@ void main() {
     expect(
       server.offerLine(
         armed,
-        'I/flutter: ${ReplayProtocol.stdoutPrefix}${_report()}',
+        'I/flutter: ${ReplayProtocol.stdoutPrefix}${_report(attemptId: armed.attemptId)}',
       ),
       isTrue,
     );
@@ -198,6 +198,55 @@ void main() {
       isFalse,
     );
   });
+
+  test(
+    'a stdout line without this attempt\'s id is never a verdict (log injection)',
+    () async {
+      final armed = server.arm([1], const ReplaySettings());
+      // What a logged string from the capsule, or another process, can print.
+      expect(
+        server.offerLine(
+          armed,
+          'I/flutter: user note: ${ReplayProtocol.stdoutPrefix}${_report(outcome: 'clean')}',
+        ),
+        isFalse,
+      );
+      expect(
+        server.offerLine(
+          armed,
+          '${ReplayProtocol.stdoutPrefix}${_report(outcome: 'clean', attemptId: 'guessed')}',
+        ),
+        isFalse,
+      );
+      expect(armed.isClosed, isFalse, reason: 'the real report still counts');
+      expect(
+        server.offerLine(
+          armed,
+          '${ReplayProtocol.stdoutPrefix}${_report(attemptId: armed.attemptId)}',
+        ),
+        isTrue,
+      );
+      expect((await armed.report).outcome.name, 'reproduced');
+    },
+  );
+
+  test(
+    'an oversized result body is refused without completing the attempt',
+    () async {
+      final armed = server.arm([1], const ReplaySettings());
+      final big = '{"x":"${'a' * (17 * 1024 * 1024)}"}';
+      // The server answers 413 without reading the rest, so the client may see
+      // the connection close before it finishes sending.
+      try {
+        expect((await _req('POST', '${armed.url}/result', body: big)).$1, 413);
+      } on HttpException {
+        // refused mid-upload
+      } on SocketException {
+        // refused mid-upload
+      }
+      expect(armed.isClosed, isFalse);
+    },
+  );
 
   test('binds loopback only by default', () async {
     expect(server.host, '127.0.0.1');

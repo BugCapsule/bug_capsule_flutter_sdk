@@ -249,6 +249,15 @@ class ReplayEngine implements ReplayContext {
   /// What this attempt runs, reported with every result.
   CapsulePatchIdentity? patch;
 
+  final Set<String> _passedChecks = {};
+
+  /// `BugCapsule.check(assertionId, true)` ran during this replay.
+  void checkPassed(String assertionId) => _passedChecks.add(assertionId);
+
+  /// Evaluates the app's `BugCapsule.expect` postconditions; set by the
+  /// runtime. Called once, after replay settled without the failure.
+  Map<String, bool> Function()? postconditions;
+
   /// capsule-v2 §2 preflight: every required dependency has an installed
   /// adapter that supports its schema, and nothing open at a periodic
   /// checkpoint needs restoring. Returns why the capsule cannot replay, or
@@ -418,7 +427,22 @@ class ReplayEngine implements ReplayContext {
         : observed != null
         ? ReplayOutcome.reproduced
         : ReplayOutcome.notReproduced;
+    final clean = outcome == ReplayOutcome.notReproduced;
+    final evidence = ReplayEvidence(
+      assertionPassed:
+          clean &&
+              expected!.kind == FailureKind.assertion &&
+              _passedChecks.contains(expected.assertionId)
+          ? true
+          : null,
+      postconditions: clean ? (postconditions?.call() ?? const {}) : const {},
+      failurePointPassed:
+          clean &&
+          _dispatched == toDispatch.length &&
+          elapsed() >= expected!.t - base,
+    );
     return ReplayReport(
+      evidence: evidence,
       patch: patch,
       outcome: outcome,
       attempt: settings.attempt,
