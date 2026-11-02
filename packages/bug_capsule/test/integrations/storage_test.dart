@@ -115,4 +115,42 @@ void main() {
       containsAll(['storage.redacted auth_token', 'storage.redacted pin']),
     );
   });
+
+  test(
+    'restore writes only keys the capture policy allows (an imported capsule is untrusted)',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final replay = FakeReplay();
+      final storage = BugCapsuleSharedPreferences(
+        allowPrefixes: const ['cart.'],
+        denyPrefixes: const ['cart.secret', 'flutter.bugcapsule.'],
+      );
+      await storage.restore({
+        'cart.items': {'type': 'string', 'value': '[1,2]'},
+        'cart.secret.token': {'type': 'string', 'value': 'injected'},
+        'session.admin': {'type': 'bool', 'value': true},
+        'flutter.bugcapsule.kill': {'type': 'bool', 'value': true},
+      }, FakeSession(replay: replay));
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('cart.items'), '[1,2]');
+      expect(prefs.containsKey('cart.secret.token'), isFalse);
+      expect(prefs.containsKey('session.admin'), isFalse);
+      expect(prefs.containsKey('flutter.bugcapsule.kill'), isFalse);
+      expect(
+        replay.divergences,
+        containsAll([
+          'restore.disallowed cart.secret.token',
+          'restore.disallowed session.admin',
+          'restore.disallowed flutter.bugcapsule.kill',
+        ]),
+      );
+      expect(
+        DivergencePolicy.isMaterial(
+          const Divergence('restore.disallowed', 'x'),
+        ),
+        isTrue,
+        reason: 'a refused write makes the attempt not clean',
+      );
+    },
+  );
 }
