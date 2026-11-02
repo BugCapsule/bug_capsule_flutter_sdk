@@ -201,7 +201,11 @@ class Redactor {
     r'|gh[pousr]_[A-Za-z0-9]{20,}'
     r'|xox[abprs]-[A-Za-z0-9-]{10,}'
     r'|AIza[0-9A-Za-z_-]{30,}'
-    r'|bc[is]_[A-Za-z0-9_-]{20,})',
+    // Every BugCapsule credential: project bci_/bcs_, SDK bct_ and
+    // bcsdk.v<n>., agent bca_, console bcw_/bcp_/bcv_, patch delivery bcpd_.
+    // Trust anchors (bcek./bcpk.) are public keys and stay readable.
+    r'|bc(?:[isawpvt]|pd)_[A-Za-z0-9_-]{20,}'
+    r'|bcsdk\.v[0-9]+\.[A-Za-z0-9_-]{20,})',
   );
   static final _quotedPair = RegExp(
     r'''(["'])([^"'\\]{1,100})\1(\s*[:=]\s*)(["'])((?:[^"'\\]|\\.)*)\4''',
