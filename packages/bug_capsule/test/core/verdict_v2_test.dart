@@ -19,8 +19,7 @@ void main() {
     'too few candidate attempts after a 3/3 baseline': 'inconclusive',
     'pre-v2 SDK reports carry no evidence: inconclusive': 'inconclusive',
     'only the failure point was passed: FIXED_QUALIFIED': 'fixedQualified',
-    'disabled code path: failure point never passed, no evidence':
-        'inconclusive',
+    'replay ended before the failure point: no evidence': 'inconclusive',
     'partial capsule with strong evidence: FIXED_QUALIFIED': 'fixedQualified',
     'ineligible capsule is inconclusive': 'inconclusive',
     'a postcondition that did not hold is still failing': 'stillFailing',

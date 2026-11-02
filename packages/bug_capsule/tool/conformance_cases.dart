@@ -1135,7 +1135,7 @@ final verifyV2Cases = <Map<String, Object?>>[
     'reports': List.filled(8, _v2ok()),
   },
   {
-    'name': 'disabled code path: failure point never passed, no evidence',
+    'name': 'replay ended before the failure point: no evidence',
     'requested': 8,
     'baseline': _baseline(3, 3),
     'eligibility': 'eligible',
