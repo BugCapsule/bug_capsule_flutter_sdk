@@ -1,8 +1,10 @@
-# Verdict v2 (DRAFT, needs owner sign-off)
+# Verdict v2
 
-Status: **draft for review** (BC-ENT-010). Nothing implements it yet. When it
-is accepted, `spec/fixtures/conformance/verdicts.json` gains v2 vectors and
-every evaluator (Dart CLI, web, Android, iOS mapping, backend) must pass them.
+Status: **accepted 2026-11-02** with the defaults below (BC-ENT-010). The
+vectors are the `verifyV2` and `requiredAttempts` sections of
+`spec/fixtures/conformance/verdicts.json`; every evaluator must pass them.
+The Dart CLI implements it for `bugcapsule verify`; `regress run` and `gate`
+still use v1 rules (follow-up).
 
 ## Why
 
@@ -71,16 +73,23 @@ and reused for 7 days, so CI runs one baseline per capsule and revision.
 
 ## Positive evidence
 
-* SDKs emit `failure.site.reached` in the report when execution reaches the
-  frame of the recorded failure (exception or assertion) during replay, with
-  `failed: true|false`.
-* A postcondition is registered with
-  `BugCapsule.expect('<name>', () => <bool>)` (each SDK's equivalent) and is
-  named in the regression entry or `--expect <name>`. It is evaluated after
-  replay settles.
-* Reports from SDKs that predate v2 carry neither: their clean attempts are
-  INCONCLUSIVE (`no_positive_evidence`) unless `--expect` names a
-  postcondition the app registered.
+A v2 report carries `evidence`:
+
+```json
+{"assertionPassed": true, "postconditions": {"cart.total_positive": true}, "failurePointPassed": true}
+```
+
+| Level | When | Best verdict |
+|---|---|---|
+| strong | `assertionPassed` (the capsule's own `BugCapsule.check(id, condition)` ran during replay and held) or every registered postcondition held | FIXED |
+| weak | only `failurePointPassed`: every recorded input was dispatched and replay settled past the recorded failure time | FIXED_QUALIFIED |
+| none | no `evidence` (SDKs before v2), a postcondition did not hold or threw, or a reproduction | INCONCLUSIVE (STILL_FAILING when a postcondition failed) |
+
+Postconditions are registered with `BugCapsule.expect('<name>', () => <bool>)`
+(each SDK's equivalent); they are evaluated only in replay, after it settled
+without the failure. Generic "failure site reached" detection for exceptions
+needs per-frame instrumentation and is not part of v2: an exception capsule
+reaches FIXED only with a postcondition.
 
 ## Divergence changes
 
@@ -116,9 +125,10 @@ upgraded to a v2 FIXED.
   revision), the result is INCONCLUSIVE with `baseline_unavailable`, unless
   `--baseline-artifact` supplies one.
 
-## Open decisions for the owner
+## Decisions (accepted 2026-11-02)
 
 1. Thresholds: N_b ≥ 3 at 100%, N_c from the table, cap 30.
 2. FIXED_QUALIFIED exits 4 unless `--accept-qualified`.
-3. No baseline ⇒ INCONCLUSIVE (not FIXED) by default.
-4. Pre-v2 SDK reports without positive evidence ⇒ INCONCLUSIVE by default.
+3. No baseline ⇒ INCONCLUSIVE (not FIXED). Prebuilt artifacts have no
+   baseline build yet (`--baseline-artifact` is a follow-up).
+4. Pre-v2 SDK reports without positive evidence ⇒ INCONCLUSIVE.

@@ -328,7 +328,7 @@ If an old Dart installation owns the `bugcapsule` command, deactivate it with
 bugcapsule list                                   # capsules in your project
 bugcapsule inspect <id|file|share-url>            # failure, eligibility, network, timeline
 bugcapsule run <id> -d <simulator> -n 3          # replays on the capsule's commit (temporary git worktree)
-bugcapsule verify <id> -n 5                       # replays your working tree; FIXED when the bug is gone
+bugcapsule verify <id>                            # baseline on the capsule's commit, then your working tree
 bugcapsule regress add <id>                       # keep it as a regression test
 bugcapsule regress run                            # in CI: exit 1 when a regression fails
 bugcapsule gate --release com.shop.app@1.5.0+60 --platform android   # release gate in CI
@@ -343,10 +343,23 @@ armed in release builds.
 
 | `bugcapsule run` | `bugcapsule verify` | Exit code |
 |---|---|---|
-| `REPRODUCED`: every attempt hit the original failure | `FIXED`: every attempt ran cleanly | 0 |
-| `NOT REPRODUCED`: every attempt ran cleanly | `STILL FAILING`: the failure came back, no clean attempt | 1 |
-| `FLAKY`: some attempts reproduced, some didn't | `FLAKY` | 2 |
+| `REPRODUCED`: every attempt hit the original failure | `FIXED`: see below | 0 |
+| `NOT REPRODUCED`: every attempt ran cleanly | `STILL FAILING`: the failure came back, or a postcondition did not hold | 1 |
+| `FLAKY`: some attempts reproduced, some didn't | `FLAKY`, also when the baseline was | 2 |
 | `INCONCLUSIVE` / `INCOMPATIBLE`: anything else | `INCONCLUSIVE` / `INCOMPATIBLE` | 3 |
+| | `FIXED (QUALIFIED)`: as FIXED, with weak evidence or a partial capsule (`--accept-qualified` exits 0) | 4 |
+| `UNSAFE`: live traffic was allowed | `UNSAFE` | 5 |
+
+`verify` first replays the capsule on its own commit (the **baseline**, built
+clean in a temporary worktree, 3 attempts by default and reused for 7 days).
+`FIXED` needs that baseline to reproduce every time, enough clean attempts on
+your working tree for that baseline (8 after 3/3; `verify` raises `--runs`),
+and evidence that the failing path ran: the capsule's own
+`BugCapsule.check(...)` held, or a postcondition you registered with
+`BugCapsule.expect('name', () => ...)` held. Without a baseline (no git SHA,
+commit not in the repo, prebuilt artifacts) the result is `INCONCLUSIVE`.
+`--verdict-v1` keeps the old rules (refused in CI unless
+`BUGCAPSULE_ALLOW_VERDICT_V1=1`).
 
 An attempt only counts as clean when every recorded input was replayed and
 nothing important diverged (an unregistered action, a request without a
