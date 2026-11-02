@@ -34,6 +34,38 @@ class BrowserLoginResult {
   final String email;
 }
 
+/// Loopback, and the Android emulator's alias for this machine (same rule
+/// as the SDKs' connection tokens; the CLI doesn't import the Flutter runtime).
+bool _localDevelopmentHost(String host) {
+  final h = host.toLowerCase();
+  return h == 'localhost' ||
+      h == '::1' ||
+      h == '[::1]' ||
+      h == '10.0.2.2' ||
+      RegExp(r'^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(h);
+}
+
+/// Whether the sign-in page the server sent may be opened automatically:
+/// https (http only on a local development host), no user info, and the same
+/// site as the API ([api] `api.example.com` allows `app.example.com`).
+bool isTrustedLoginPage(Uri? page, Uri api) {
+  if (page == null || !page.hasAuthority || page.userInfo.isNotEmpty) {
+    return false;
+  }
+  if (page.scheme == 'http') {
+    return _localDevelopmentHost(page.host) && _localDevelopmentHost(api.host);
+  }
+  if (page.scheme != 'https') return false;
+  String site(String host) {
+    final labels = host.toLowerCase().split('.');
+    return labels.length <= 2
+        ? labels.join('.')
+        : labels.sublist(labels.length - 2).join('.');
+  }
+
+  return site(page.host) == site(api.host);
+}
+
 /// Opens [url] in the default browser; false when nothing could.
 Future<bool> openInBrowser(String url) async {
   final (exe, args) = Platform.isMacOS
@@ -124,7 +156,15 @@ class BrowserLogin {
       ..writeln('  Your code: ${bold(userCode)}')
       ..writeln('  ${launch ? 'Opening' : 'Open'} ${cyan(page)}')
       ..writeln();
-    if (launch && !await _open(page)) {
+    final pageUri = Uri.tryParse(page);
+    if (launch && !isTrustedLoginPage(pageUri, Uri.parse(url))) {
+      _out.writeln(
+        yellow(
+          'Not opening that address automatically: it is not an https page of '
+          '${Uri.parse(url).host}. Open it yourself only if you recognise it.',
+        ),
+      );
+    } else if (launch && !await _open(page)) {
       _out.writeln(
         yellow(
           'Couldn’t open a browser here: open the address above on any device.',
