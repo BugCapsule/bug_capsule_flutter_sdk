@@ -1,3 +1,9 @@
+## Unreleased
+
+- Local data lifecycle (BC-ENT-038): `BugCapsule.clearLocalData()` deletes the upload outbox, queued monitoring envelopes, saved captures, crash journals, the cached remote config and the monitoring install id and session, plus the in-memory buffer, last failure and breadcrumbs; recording continues from a fresh start. `BugCapsule.setCollectionEnabled(bool)` is a consent switch persisted under the storage root, defaulting to the new `BugCapsuleConfig.collectionEnabled` (default true): off stops capture, monitoring, uploads and config fetches and deletes collected data, and an app started with it off never contacts the backend; on takes effect at the next launch. `BugCapsule.collectionEnabled` reads it, and `status` reports `disabled` with reason `collection_disabled`. Both work before `init`.
+- Saved captures expire after `BugCapsuleConfig.savedCaptureMaxAge` (7 days by default), at startup and whenever they are listed.
+- Android: the storage root moves to `noBackupFilesDir/bugcapsule`, out of Auto Backup; a root an older SDK left in `files/bugcapsule` is moved on the first launch. iOS: `BugCapsuleStorageProtection`, implemented by `bug_capsule_native`, excludes the root from backups and sets its file protection class.
+
 ## 0.4.1-beta.10
 
 - Add signed patch capture/replay identity, actual session-health attribution, patch management CLI commands, and bounded launcher cleanup. The optional bug_capsule_patch package supplies the native runtime.
