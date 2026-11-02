@@ -15,7 +15,7 @@ resolution are not simulated.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.7
+  bug_capsule: ^0.4.1-beta.10
   bug_capsule_firebase: ^0.1.0-dev.1
 ```
 
@@ -26,11 +26,14 @@ import 'package:bug_capsule_firebase/bug_capsule_firebase.dart';
 final auth = BugCapsuleFirebaseAuth();
 final firestore = BugCapsuleFirestore();
 
-Future<void> main() async {
-  await Firebase.initializeApp();
-  await BugCapsule.init(integrations: [auth, firestore /*, ... */]);
-  runApp(const MyApp());
-}
+void main() => BugCapsule.init(
+      config: const BugCapsuleConfig(token: 'bcsdk.v1.…'),
+      integrations: [auth, firestore /*, ... */],
+      appRunner: () async {
+        await Firebase.initializeApp();
+        runApp(const MyApp());
+      },
+    );
 ```
 
 Then read identity state and Firestore data through the adapters:

@@ -17,7 +17,7 @@ sheet or a declined card comes back as it happened.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.7
+  bug_capsule: ^0.4.1-beta.10
   bug_capsule_stripe: ^0.1.0-dev.1
   flutter_stripe: ^14.2.0
 ```
@@ -26,11 +26,14 @@ dependencies:
 import 'package:bug_capsule/bug_capsule.dart';
 import 'package:bug_capsule_stripe/bug_capsule_stripe.dart';
 
-Future<void> main() async {
-  await BugCapsule.init(integrations: [BugCapsuleStripe() /*, ... */]);
-  Stripe.publishableKey = 'pk_live_...'; // after BugCapsule.init
-  runApp(const MyApp());
-}
+void main() => BugCapsule.init(
+      config: const BugCapsuleConfig(token: 'bcsdk.v1.…'),
+      integrations: [BugCapsuleStripe() /*, ... */],
+      appRunner: () {
+        Stripe.publishableKey = 'pk_live_...'; // after BugCapsule.init
+        runApp(const MyApp());
+      },
+    );
 ```
 
 `Stripe.instance` is used unchanged. `BugCapsule.init` installs a delegating
