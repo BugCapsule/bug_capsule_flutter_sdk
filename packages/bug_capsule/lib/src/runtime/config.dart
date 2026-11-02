@@ -40,6 +40,7 @@ class BugCapsuleConfig {
     this.flavor,
     CaptureMode? mode,
     this.enabled = true,
+    this.collectionEnabled = true,
     this.backend,
     String? gitSha,
     this.stateSchemaVersion = 1,
@@ -59,6 +60,7 @@ class BugCapsuleConfig {
     this.beforeCheckpoint,
     this.outboxLimits = const OutboxLimits(),
     this.maxStaleConfig = const Duration(days: 7),
+    this.savedCaptureMaxAge = const Duration(days: 7),
     bool? showOverlay,
     bool? captureNetworkBodies,
     this.ignoreError,
@@ -114,6 +116,12 @@ class BugCapsuleConfig {
 
   /// Local master switch. The backend kill switch can also disable capture.
   final bool enabled;
+
+  /// Consent default: whether this device collects anything until the user
+  /// chooses with `BugCapsule.setCollectionEnabled`, whose persisted choice
+  /// wins. False: nothing is captured, uploaded or fetched (no network
+  /// contact at startup) and data left on the device is deleted.
+  final bool collectionEnabled;
 
   /// Explicit backend URL and ingest key (self-hosted / advanced). Wins over
   /// [token].
@@ -178,6 +186,11 @@ class BugCapsuleConfig {
   /// when the backend cannot be reached. A cached kill switch applies however
   /// old it is.
   final Duration maxStaleConfig;
+
+  /// Saved captures (`BugCapsule.savedCaptures`, the QA overlay's history)
+  /// are deleted once older than this: at startup and whenever they are
+  /// listed. The newest 20 are kept at most.
+  final Duration savedCaptureMaxAge;
   final bool? _showOverlay;
 
   /// Return true for errors that should not count as failures.

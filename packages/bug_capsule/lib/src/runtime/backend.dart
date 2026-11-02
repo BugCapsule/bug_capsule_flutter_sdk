@@ -4,11 +4,10 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
-
-import '../core/core.dart' show EnvelopeResponse;
+import '../core/core.dart' show CrashJournals, EnvelopeResponse;
 import 'config.dart';
 import 'remote_config.dart';
+import 'storage_root.dart';
 
 enum UploadStatus { uploaded, rejected, retryLater }
 
@@ -230,33 +229,66 @@ class _Mutex {
 /// On-device files: saved capsules (the QA overlay's history) and the
 /// cached remote config. Uploads go through [UploadOutbox].
 class CapsuleStore {
-  CapsuleStore._(this.root);
+  CapsuleStore._(this.root, this.savedCaptureMaxAge);
 
-  /// Opens `<application support>/bugcapsule`, or [root] when given (tests).
-  /// Leftover temporary files from an interrupted write are removed.
-  static Future<CapsuleStore> open({Directory? root}) async {
-    final dir =
-        root ??
-        Directory(
-          '${(await getApplicationSupportDirectory()).path}/bugcapsule',
-        );
-    final store = CapsuleStore._(dir);
+  /// Opens the SDK storage root ([sdkStorageRoot]), or [root] when given
+  /// (tests). Leftover temporary files from an interrupted write and saved
+  /// captures older than [savedCaptureMaxAge] are removed.
+  static Future<CapsuleStore> open({
+    Directory? root,
+    Duration savedCaptureMaxAge = defaultSavedCaptureMaxAge,
+  }) async {
+    final dir = root ?? await sdkStorageRoot();
+    final store = CapsuleStore._(dir, savedCaptureMaxAge);
     await store._captures.create(recursive: true);
     await _removeTemporaryFiles(store._captures);
+    await store.savedCaptures();
     return store;
   }
 
   final Directory root;
   static const maxSavedCaptures = 20;
+  static const defaultSavedCaptureMaxAge = Duration(days: 7);
+
+  /// Saved captures last modified longer ago are deleted.
+  final Duration savedCaptureMaxAge;
 
   /// Written by `bugcapsule run` to start the next launch in replay mode.
   static Future<File> replayRequestFile({Directory? root}) async {
-    final dir =
-        root ??
-        Directory(
-          '${(await getApplicationSupportDirectory()).path}/bugcapsule',
-        );
+    final dir = root ?? await sdkStorageRoot();
     return File('${dir.path}/replay_request.json');
+  }
+
+  /// Deletes what the SDK collected under [root] (BC-ENT-038): saved
+  /// captures, queued capsules and envelopes, crash journals, the cached
+  /// remote config, the monitoring install id and session. Kept: the
+  /// collection choice, emergency policies (the app's own safety config)
+  /// and a pending replay request. Directories stay, so an outbox that is
+  /// open keeps working. Temporary files are left alone: they belong to a
+  /// write in progress (whose result is new data), and leftovers of an
+  /// interrupted one are removed at the next open. Never throws.
+  static Future<void> clearCollected(Directory root) async {
+    for (final name in const ['captures', 'outbox', 'envelopes']) {
+      final dir = Directory('${root.path}/$name');
+      try {
+        if (!await dir.exists()) continue;
+        await for (final e in dir.list()) {
+          if (e is File && !e.path.endsWith('.tmp')) await _deleteQuietly(e);
+        }
+      } on FileSystemException {
+        // Gone meanwhile, or unreadable: nothing more to do here.
+      }
+    }
+    try {
+      CrashJournals.sweep(root);
+    } catch (_) {}
+    for (final name in const [
+      'remote_config.json',
+      'install_id',
+      'session.json',
+    ]) {
+      await _deleteQuietly(File('${root.path}/$name'));
+    }
   }
 
   Directory get _captures => Directory('${root.path}/captures');
@@ -272,11 +304,19 @@ class CapsuleStore {
     return file;
   }
 
+  /// Newest first; captures older than [savedCaptureMaxAge] are deleted
+  /// on the way.
   Future<List<File>> savedCaptures() async {
-    final files = [
-      await for (final e in _captures.list())
-        if (e is File && e.path.endsWith('.bugcapsule')) e,
-    ];
+    final cutoff = DateTime.now().subtract(savedCaptureMaxAge);
+    final files = <File>[];
+    await for (final e in _captures.list()) {
+      if (e is! File || !e.path.endsWith('.bugcapsule')) continue;
+      if (_modified(e).isBefore(cutoff)) {
+        await _deleteQuietly(e);
+      } else {
+        files.add(e);
+      }
+    }
     files.sort((a, b) => _modified(b).compareTo(_modified(a)));
     return files;
   }

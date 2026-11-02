@@ -24,7 +24,9 @@ enum BugCapsuleConnectionState {
   /// Capture and uploads are off for this session.
   rejected('rejected'),
 
-  /// `enabled: false`, or capture switched off by the backend.
+  /// `enabled: false`, capture switched off by the backend, or collection
+  /// switched off on this device (`reason`: `collection_disabled`, see
+  /// `BugCapsule.setCollectionEnabled`).
   disabled('disabled');
 
   const BugCapsuleConnectionState(this.code);
