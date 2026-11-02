@@ -8,6 +8,9 @@ import 'package:test/test.dart';
 
 /// A backend that answers the CLI sign-in routes from a script.
 class FakeBackend {
+  /// The sign-in page the fake server sends back.
+  String page = 'http://127.0.0.1:5173/cli/login?code=BCDF-GHJK';
+
   FakeBackend(this.polls, {this.startStatus = 201});
 
   /// Answers to successive polls, last one repeated.
@@ -34,9 +37,8 @@ class FakeBackend {
                 ? {
                     'deviceCode': 'd' * 43,
                     'userCode': 'BCDF-GHJK',
-                    'verificationUrl': 'http://dash.test/cli/login',
-                    'verificationUrlComplete':
-                        'http://dash.test/cli/login?code=BCDF-GHJK',
+                    'verificationUrl': 'http://127.0.0.1:5173/cli/login',
+                    'verificationUrlComplete': page,
                     'expiresAt': DateTime.now()
                         .add(const Duration(minutes: 10))
                         .toUtc()
@@ -106,7 +108,7 @@ void main() {
       expect(r.token, 'bcp_new');
       expect(r.projectName, 'Shop');
       expect(r.email, 'dev@example.test');
-      expect(opened, ['http://dash.test/cli/login?code=BCDF-GHJK']);
+      expect(opened, ['http://127.0.0.1:5173/cli/login?code=BCDF-GHJK']);
       expect(out.toString(), contains('BCDF-GHJK'));
       expect(backend.requests.first.$1, '/v1/console/cli/logins');
       expect(backend.requests.first.$2['clientName'], isNotEmpty);
@@ -118,6 +120,16 @@ void main() {
     },
   );
 
+  test('never opens a sign-in page on another site', () async {
+    backend = FakeBackend([approved])
+      ..page = 'https://evil.example/cli/login?code=BCDF-GHJK';
+    await backend.start();
+    final r = await login().run();
+    expect(r.token, 'bcp_new');
+    expect(opened, isEmpty);
+    expect(out.toString(), contains('Not opening that address automatically'));
+  });
+
   test('--no-browser only prints the address', () async {
     backend = FakeBackend([approved]);
     await backend.start();
@@ -125,7 +137,7 @@ void main() {
     expect(opened, isEmpty);
     expect(
       out.toString(),
-      contains('Open http://dash.test/cli/login?code=BCDF-GHJK'),
+      contains('Open http://127.0.0.1:5173/cli/login?code=BCDF-GHJK'),
     );
   });
 

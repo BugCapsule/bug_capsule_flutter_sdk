@@ -491,6 +491,54 @@ credential (names, emails, addresses) or secrets in URL paths. Inspect real
 capsules with `bugcapsule inspect` before a wider rollout. More:
 [Privacy and redaction](https://docs.bugcapsule.com/privacy.html).
 
+### Consent and local data
+
+```dart
+// Collect nothing until the user agrees:
+BugCapsule.init(
+  config: const BugCapsuleConfig(token: 'bcsdk.v1.…', collectionEnabled: false),
+  appRunner: () => runApp(const MyApp()),
+);
+
+// When the user accepts, withdraws, or asks to erase their data:
+await BugCapsule.setCollectionEnabled(true);
+await BugCapsule.setCollectionEnabled(false);
+await BugCapsule.clearLocalData();
+```
+
+- `setCollectionEnabled(false)` stops recording and monitoring at once,
+  uploads nothing more, and deletes queued capsules, queued events, saved
+  captures and crash journals. An app that starts with collection off
+  captures nothing and does not contact the backend.
+- `setCollectionEnabled(true)` takes effect at the next launch: capture is set
+  up before the app starts, so it does not restart in a running process.
+  Until then `status` says so.
+- The choice is stored on the device under the SDK storage root and wins over
+  `collectionEnabled` in the config, which is only the default for a device
+  where no choice was made (default `true`). If it can't be stored, it lasts
+  for the process only.
+- `clearLocalData()` deletes everything the SDK collected on the device
+  (queued capsules and events, saved captures, crash journals, the cached
+  project settings, the monitoring install id and session) and the in-memory
+  event buffer, last failure and breadcrumbs. Recording, if on, continues
+  from a fresh start; an upload already on the wire finishes. The consent
+  choice and emergency policies are kept.
+- Both work before `init` (once the Flutter binding is up).
+- `BugCapsule.collectionEnabled` reports the current choice; `status` shows
+  `disabled` with reason `collection_disabled` while collection is off.
+- Saved captures (`savedCaptures()`, for in-app QA tools) keep the newest 20
+  and are deleted after 7 days (`savedCaptureMaxAge`), at startup and
+  whenever they are listed.
+- Backups: on Android the SDK keeps its files in `noBackupFilesDir`, out of
+  Auto Backup (files an older SDK left in `files/bugcapsule` move there on
+  the first launch). On iOS, add
+  [`bug_capsule_native`](https://pub.dev/packages/bug_capsule_native): it
+  excludes the storage root from iCloud and device backups and sets its file
+  protection to `completeUntilFirstUserAuthentication`. Without it the root
+  (`Library/Application Support/bugcapsule`) is included in backups.
+- Native crash reports held by `bug_capsule_native`'s platform SDKs are
+  stored by those SDKs and are not deleted by `clearLocalData`.
+
 ## Emergency recovery (feature guards)
 
 When a release misbehaves in production, emergency policies let you switch a

@@ -65,8 +65,48 @@ public final class BugCapsuleNativePlugin: NSObject, FlutterPlugin, FlutterStrea
             #else
                 result([String]())
             #endif
+        case "protectStorage":
+            guard let path = call.arguments as? String else {
+                result(FlutterError(code: "bad_arguments", message: "protectStorage takes a directory path", details: nil))
+                return
+            }
+            DispatchQueue.global(qos: .utility).async {
+                let failure = Self.protectStorage(atPath: path)
+                DispatchQueue.main.async {
+                    result(failure.map { FlutterError(code: "protect_failed", message: $0, details: nil) })
+                }
+            }
         default:
             result(FlutterMethodNotImplemented)
+        }
+    }
+
+    /// Keeps the Dart SDK's storage root out of iCloud and device backups
+    /// (`NSURLIsExcludedFromBackupKey`, which covers everything in it) and
+    /// sets `completeUntilFirstUserAuthentication` on it and what it holds
+    /// (BC-ENT-038). Files created later get the directory's class, which
+    /// is also the system default for app files. Returns why it failed.
+    static func protectStorage(atPath path: String) -> String? {
+        let fm = FileManager.default
+        let protection: [FileAttributeKey: Any] = [
+            .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication
+        ]
+        do {
+            try fm.createDirectory(atPath: path, withIntermediateDirectories: true, attributes: protection)
+            try fm.setAttributes(protection, ofItemAtPath: path)
+            if let items = fm.enumerator(atPath: path) {
+                for case let item as String in items {
+                    // Best effort per item: a file may go while we walk.
+                    try? fm.setAttributes(protection, ofItemAtPath: (path as NSString).appendingPathComponent(item))
+                }
+            }
+            var url = URL(fileURLWithPath: path, isDirectory: true)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try url.setResourceValues(values)
+            return nil
+        } catch {
+            return "\(error)"
         }
     }
 

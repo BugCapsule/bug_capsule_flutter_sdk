@@ -32,8 +32,42 @@ Future<String> pinnedProjectDir(
   String sha,
 ) async {
   final short = sha.substring(0, sha.length < 12 ? sha.length : 12);
-  final worktree = '${Directory.systemTemp.path}/bugcapsule-pin-$short';
-  if (!Directory(worktree).existsSync()) {
+  // Under the user's own home, not the shared temp directory: another local
+  // user could otherwise create the directory first and have their code
+  // built and run as this user (C3).
+  final home =
+      Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+  if (home == null) throw StateError('no home directory for pinned worktrees');
+  final repo = git.root.hashCode.toUnsigned(32).toRadixString(16);
+  final parent = Directory('$home/.bugcapsule/pins');
+  parent.createSync(recursive: true);
+  if (!Platform.isWindows) Process.runSync('chmod', ['700', parent.path]);
+  final worktree = '${parent.path}/$repo-$short';
+  if (Directory(worktree).existsSync()) {
+    // Reuse only a worktree of this repository checked out at [sha].
+    final head = await Process.run('git', ['-C', worktree, 'rev-parse', 'HEAD']);
+    final common = await Process.run('git', [
+      '-C',
+      worktree,
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-common-dir',
+    ]);
+    final ours = await Process.run('git', [
+      '-C',
+      git.root,
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-common-dir',
+    ]);
+    if (head.exitCode != 0 ||
+        '${head.stdout}'.trim() != sha ||
+        '${common.stdout}'.trim() != '${ours.stdout}'.trim()) {
+      throw StateError(
+        '$worktree exists but is not this repository at ${sha.substring(0, 12)}; remove it and retry',
+      );
+    }
+  } else {
     final res = await Process.run('git', [
       '-C',
       git.root,

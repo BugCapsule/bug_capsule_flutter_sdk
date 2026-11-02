@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:bug_capsule/bug_capsule.dart';
 import 'package:bug_capsule_native/bug_capsule_native.dart';
@@ -35,6 +36,7 @@ void main() {
     messenger.setMockMethodCallHandler(channel, null);
     messenger.setMockStreamHandler(liveChannel, null);
     NativeCrashReporter.instance = null;
+    BugCapsuleStorageProtection.instance = null;
   });
 
   const settings = NativeCrashSettings(
@@ -50,6 +52,28 @@ void main() {
     final first = NativeCrashReporter.instance;
     BugCapsuleNative.registerWith();
     expect(NativeCrashReporter.instance, same(first));
+    expect(BugCapsuleStorageProtection.instance, isA<BugCapsuleNative>());
+  });
+
+  test('protect asks iOS to protect the storage root', () async {
+    await BugCapsuleNative(
+      protectsStorage: true,
+    ).protect(Directory('/app/Library/Application Support/bugcapsule'));
+    expect(calls.single.method, 'protectStorage');
+    expect(
+      calls.single.arguments,
+      '/app/Library/Application Support/bugcapsule',
+    );
+  });
+
+  test('protect does nothing on Android and never throws', () async {
+    await BugCapsuleNative(protectsStorage: false).protect(Directory('/x'));
+    expect(calls, isEmpty);
+    messenger.setMockMethodCallHandler(
+      channel,
+      (call) async => throw PlatformException(code: 'protect_failed'),
+    );
+    await BugCapsuleNative(protectsStorage: true).protect(Directory('/x'));
   });
 
   test(

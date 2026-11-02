@@ -7,9 +7,13 @@
 /// BugCapsule Android and iOS SDKs' crash bridges and sent with the Dart
 /// errors, in the same session. Turn it off with
 /// `MonitoringOptions(enableNativeCrashHandling: false)`.
+///
+/// On iOS it also keeps the SDK's storage root out of backups and sets its
+/// file protection class ([BugCapsuleStorageProtection]).
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:bug_capsule/bug_capsule.dart';
 import 'package:flutter/services.dart';
@@ -18,21 +22,28 @@ import 'package:flutter/widgets.dart';
 /// The platform side of [NativeCrashReporter]; see the library comment.
 class BugCapsuleNative
     with WidgetsBindingObserver
-    implements NativeCrashReporter {
+    implements NativeCrashReporter, BugCapsuleStorageProtection {
   BugCapsuleNative({
     MethodChannel channel = const MethodChannel('dev.bugcapsule/native_crash'),
     EventChannel liveEvents = const EventChannel(
       'dev.bugcapsule/native_crash/events',
     ),
+    bool? protectsStorage,
   }) : _channel = channel,
-       _liveEvents = liveEvents;
+       _liveEvents = liveEvents,
+       _protectsStorage = protectsStorage ?? Platform.isIOS;
 
   /// Called by Flutter's plugin registrant (`dartPluginClass`).
   static void registerWith() {
-    NativeCrashReporter.instance ??= BugCapsuleNative();
+    final native = BugCapsuleNative();
+    NativeCrashReporter.instance ??= native;
+    BugCapsuleStorageProtection.instance ??= native;
   }
 
   final MethodChannel _channel;
+
+  /// iOS only: on Android the SDK keeps its root in `noBackupFilesDir`.
+  final bool _protectsStorage;
   final EventChannel _liveEvents;
   final StreamController<NativeCrashEvent> _events =
       StreamController.broadcast();
@@ -115,6 +126,18 @@ class BugCapsuleNative
       }
     } catch (e) {
       debugPrint('[bugcapsule] could not read pending native events: $e');
+    }
+  }
+
+  /// Excludes [root] from backups and sets its file protection class to
+  /// `completeUntilFirstUserAuthentication` (iOS).
+  @override
+  Future<void> protect(Directory root) async {
+    if (!_protectsStorage) return;
+    try {
+      await _channel.invokeMethod<void>('protectStorage', root.path);
+    } catch (e) {
+      debugPrint('[bugcapsule] could not protect local storage: $e');
     }
   }
 

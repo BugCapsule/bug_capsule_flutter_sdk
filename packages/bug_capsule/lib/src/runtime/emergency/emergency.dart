@@ -4,11 +4,11 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../../version.dart';
 import '../config.dart' show BugCapsuleBackendConfig;
 import '../connection_token.dart';
+import '../storage_root.dart';
 import 'contract.dart';
 import 'decisions.dart';
 import 'engine.dart';
@@ -203,9 +203,7 @@ final class BugCapsuleEmergency {
       final root =
           overrides?.storageDirectory ??
           _host.storageDirectory ??
-          Directory(
-            '${(await getApplicationSupportDirectory()).path}/bugcapsule',
-          );
+          await sdkStorageRoot();
       store = await EmergencyStore.open(Directory('${root.path}/emergency'));
     } catch (e) {
       _warnOnce('storage unavailable, policies are kept in memory only: $e');

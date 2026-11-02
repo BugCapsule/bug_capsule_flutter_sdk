@@ -53,6 +53,7 @@ export 'overlay.dart';
 export 'patch_binding.dart';
 export 'state_tracker.dart';
 export 'status.dart';
+export 'storage_root.dart' show BugCapsuleStorageProtection;
 export 'remote_config.dart'
     show
         ConfigFetchFailed,
