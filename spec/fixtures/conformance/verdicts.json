@@ -1831,7 +1831,7 @@
       ]
     },
     {
-      "name": "disabled code path: failure point never passed, no evidence",
+      "name": "replay ended before the failure point: no evidence",
       "requested": 8,
       "baseline": {
         "revision": "abc1234",

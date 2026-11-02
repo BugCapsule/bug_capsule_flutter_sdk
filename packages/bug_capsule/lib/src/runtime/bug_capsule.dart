@@ -241,10 +241,39 @@ abstract final class BugCapsule {
     if (prepared != null) rt.hub!.submit(prepared, capsule: capsule);
   }
 
-  /// Raises [assertionId] when [condition] is false.
+  /// Raises [assertionId] when [condition] is false. During replay a passing
+  /// check of the capsule's assertion is the evidence a fix verification
+  /// needs (spec/verdict-v2.md).
   static void check(String assertionId, bool condition, [String message = '']) {
-    if (!condition) fail(assertionId, message);
+    if (!condition) {
+      fail(assertionId, message);
+    } else {
+      _rt?.engine?.checkPassed(assertionId);
+    }
   }
+
+  static final Map<String, bool Function()> _postconditions = {};
+
+  /// Registers a postcondition: what must be true after the scenario of a
+  /// capsule replays without its failure ("the cart total is positive").
+  /// Evaluated only in replay, after the replay settled; every registered
+  /// postcondition is reported, and `bugcapsule verify` needs them to hold
+  /// (or the capsule's own `check` to pass) to call a fix FIXED. Registering
+  /// the same [name] again replaces it.
+  static void expect(String name, bool Function() condition) =>
+      _postconditions[name] = condition;
+
+  /// Postcondition results; one that throws counts as not holding.
+  static Map<String, bool> _evaluatePostconditions() => {
+    for (final e in _postconditions.entries)
+      e.key: () {
+        try {
+          return e.value();
+        } catch (_) {
+          return false;
+        }
+      }(),
+  };
 
   static void log(String message, {String level = 'info'}) =>
       _rt?.record(EventTypes.log, {'level': level, 'message': message});
@@ -2184,7 +2213,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       settings: settings,
       actions: BugCapsule._actions,
       buildGitSha: config.gitSha,
-    );
+    )..postconditions = BugCapsule._evaluatePostconditions;
     random = Random(capsule.manifest.session.seed);
     // The capture's redaction rules, so request keys of redacted bodies match.
     _redactor = Redactor(
