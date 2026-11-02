@@ -683,13 +683,13 @@ void main() {
       await restart(f);
 
       final token =
-          'bcsdk.v1.${base64Url.encode(utf8.encode(jsonEncode({'api': 'http://tok.example', 'key': 'bct_tok0123456789abcdef'}))).replaceAll('=', '')}';
+          'bcsdk.v1.${base64Url.encode(utf8.encode(jsonEncode({'api': 'https://tok.example', 'key': 'bct_tok0123456789abcdef'}))).replaceAll('=', '')}';
       final g = facade();
       await g.initialize(
         EmergencyConfig(trustAnchor: signer.anchor(), token: token),
       );
       await g.refreshPolicies();
-      expect(transport.requests.last.backend.url, 'http://tok.example');
+      expect(transport.requests.last.backend.url, 'https://tok.example');
       expect(
         transport.requests.last.backend.ingestKey,
         'bct_tok0123456789abcdef',
