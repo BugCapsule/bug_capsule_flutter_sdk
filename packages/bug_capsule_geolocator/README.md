@@ -16,7 +16,7 @@ how the platform computes locations.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.7
+  bug_capsule: ^0.4.1-beta.10
   bug_capsule_geolocator: ^0.1.0-dev.1
   geolocator: ^14.1.0
 ```
@@ -25,10 +25,11 @@ dependencies:
 import 'package:bug_capsule/bug_capsule.dart';
 import 'package:bug_capsule_geolocator/bug_capsule_geolocator.dart';
 
-Future<void> main() async {
-  await BugCapsule.init(integrations: [BugCapsuleGeolocator() /*, ... */]);
-  runApp(const MyApp());
-}
+void main() => BugCapsule.init(
+      config: const BugCapsuleConfig(token: 'bcsdk.v1.…'),
+      integrations: [BugCapsuleGeolocator() /*, ... */],
+      appRunner: () => runApp(const MyApp()),
+    );
 ```
 
 Your app code does not change. `BugCapsule.init` installs a delegating

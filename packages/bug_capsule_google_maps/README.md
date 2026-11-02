@@ -17,7 +17,7 @@ camera.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.7
+  bug_capsule: ^0.4.1-beta.10
   bug_capsule_google_maps: ^0.1.0-dev.1
   google_maps_flutter: ^2.19.0
 ```
@@ -26,10 +26,11 @@ dependencies:
 import 'package:bug_capsule/bug_capsule.dart';
 import 'package:bug_capsule_google_maps/bug_capsule_google_maps.dart';
 
-Future<void> main() async {
-  await BugCapsule.init(integrations: [BugCapsuleGoogleMaps() /*, ... */]);
-  runApp(const MyApp());
-}
+void main() => BugCapsule.init(
+      config: const BugCapsuleConfig(token: 'bcsdk.v1.…'),
+      integrations: [BugCapsuleGoogleMaps() /*, ... */],
+      appRunner: () => runApp(const MyApp()),
+    );
 ```
 
 `GoogleMap` and `GoogleMapController` are used unchanged. `BugCapsule.init`

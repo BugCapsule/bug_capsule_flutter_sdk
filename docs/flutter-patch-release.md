@@ -28,3 +28,23 @@ The native binary source is recorded separately from the Dart source. Reusing
 an earlier binary is allowed only after proving its compiled inputs equivalent;
 never relabel its original source commit. Publication is not customer rollout
 or platform-store approval. CLI/compiler release packaging has its own workflow.
+
+## Optional adapters
+
+`bug_capsule_firebase`, `bug_capsule_geolocator`, `bug_capsule_google_maps`,
+`bug_capsule_shorebird` and `bug_capsule_stripe` are published the same way,
+after the core version they depend on is on pub.dev.
+
+1. `python3 tool/package_adapter_release.py ADAPTER --output /new/staging
+   --core-version CORE_VERSION` copies `lib`, the README, changelog and
+   licence, swaps the workspace path for the hosted core, and drops the
+   development dependencies. It refuses a README that installs another core
+   version, or a `lib/src/version.dart` that disagrees with the pubspec.
+2. Run `flutter pub publish --dry-run` in the staged directory.
+3. Before uploading, build a fresh app that uses the README snippets and the
+   real plugins, and run it on a simulator or emulator. A pub.dev version can
+   never be deleted.
+4. Publish, then repeat the consumer with hosted dependencies only and compare
+   the downloaded archive with the staged files.
+
+`bug_capsule_patch_gen` is a research tool and is not published.
