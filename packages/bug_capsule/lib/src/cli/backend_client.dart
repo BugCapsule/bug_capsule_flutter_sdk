@@ -82,14 +82,23 @@ class Credentials {
     );
   }
 
-  void save() {
-    file.parent.createSync(recursive: true);
-    file.writeAsStringSync(
-      const JsonEncoder.withIndent('  ').convert(toJson()),
-    );
-    if (!Platform.isWindows) Process.runSync('chmod', ['600', file.path]);
+  void save() => saveTo(file);
+
+  /// Writes to [target], restricted to its owner before the token is in it.
+  void saveTo(File target) {
+    target.parent.createSync(recursive: true);
+    final tmp = File('${target.path}.tmp')..createSync();
+    if (!Platform.isWindows) Process.runSync('chmod', ['600', tmp.path]);
+    tmp.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(toJson()));
+    tmp.renameSync(target.path);
   }
 }
+
+/// Largest response the CLI reads (capsules are at most 64 MiB decompressed).
+const maxResponseBytes = 256 * 1024 * 1024;
+
+/// Longest pause between two chunks of a response.
+const maxResponseStall = Duration(seconds: 60);
 
 class ApiException implements Exception {
   ApiException(this.status, this.code, this.detail);
@@ -163,7 +172,16 @@ class BackendClient {
       }
       final res = await req.close();
       final body = <int>[];
-      await for (final chunk in res) {
+      // Bounded: a server (or anything in between) can't fill memory, and a
+      // stalled transfer ends instead of hanging the CLI.
+      await for (final chunk in res.timeout(maxResponseStall)) {
+        if (body.length + chunk.length > maxResponseBytes) {
+          throw ApiException(
+            res.statusCode,
+            'response_too_large',
+            'the response is larger than ${maxResponseBytes ~/ (1024 * 1024)} MiB',
+          );
+        }
         body.addAll(chunk);
       }
       if (res.statusCode >= 400) {

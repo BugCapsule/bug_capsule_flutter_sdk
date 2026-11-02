@@ -17,6 +17,7 @@ import 'backend.dart';
 import 'binding.dart';
 import 'config.dart';
 import 'connection_token.dart';
+import 'consent.dart';
 import 'emergency/contract.dart' show EmergencyDecision;
 import 'emergency/decisions.dart';
 import 'emergency/emergency.dart';
@@ -31,6 +32,7 @@ import 'remote_config.dart';
 import 'replay_engine.dart';
 import 'state_tracker.dart';
 import 'status.dart';
+import 'storage_root.dart';
 
 // The capsule's `sdk.name`: the backend and CLI read it to pick the Flutter
 // runtime, so it keeps the old package name.
@@ -283,8 +285,70 @@ abstract final class BugCapsule {
   static Future<CaptureResult?> capture({String? note}) async =>
       _rt?.writeCapsule(failure: _rt?.lastFailure, labels: {'note': ?note});
 
+  /// Captures saved on this device, newest first: the newest 20, none
+  /// older than `BugCapsuleConfig.savedCaptureMaxAge` (7 days by default).
   static Future<List<File>> savedCaptures() async =>
       (await _rt?.store)?.savedCaptures() ?? const [];
+
+  // --------------------------------------------------- local data lifecycle
+
+  /// The collection choice made in this process before [init].
+  static bool? _consentBeforeInit;
+
+  /// Whether this device collects: the user's persisted choice
+  /// ([setCollectionEnabled]), else `BugCapsuleConfig.collectionEnabled`
+  /// (default true). Before [init] it is the choice made in this process,
+  /// else true; the persisted choice is read by [init].
+  static bool get collectionEnabled =>
+      _rt?.collectionEnabled ?? _consentBeforeInit ?? true;
+
+  /// The consent switch, persisted under the SDK storage root (for this
+  /// process only when it cannot be stored), and winning over
+  /// `BugCapsuleConfig.collectionEnabled` from then on.
+  ///
+  /// `false`: recording and monitoring stop, nothing more is uploaded, and
+  /// queued capsules and events, saved captures and crash journals are
+  /// deleted. An app started with collection off captures nothing and does
+  /// not contact the backend. `true`: collection resumes at the next launch
+  /// (capture setup runs before the app starts, so it does not restart in a
+  /// running process). Works before [init].
+  static Future<void> setCollectionEnabled(bool enabled) async {
+    final rt = _rt;
+    if (rt != null) return rt.setCollectionEnabled(enabled);
+    _consentBeforeInit = enabled;
+    final root = await _storageRootOrNull(debugOverrides);
+    if (root == null) return;
+    if (!await writeConsent(root, enabled)) {
+      debugPrint(
+        '[bugcapsule] could not store the collection choice; it lasts for this process',
+      );
+    }
+    if (!enabled) await CapsuleStore.clearCollected(root);
+  }
+
+  /// Deletes what the SDK keeps on this device: queued capsules and events,
+  /// saved captures, crash journals, the cached remote config and the
+  /// monitoring install id and session, plus the in-memory event buffer,
+  /// last failure and breadcrumbs. Recording, if on, continues from a fresh
+  /// start. Kept: the collection choice and emergency policies. An upload
+  /// already on the wire finishes. Works before [init]; never throws.
+  static Future<void> clearLocalData() async {
+    final rt = _rt;
+    if (rt != null) return rt.clearLocalData();
+    final root = await _storageRootOrNull(debugOverrides);
+    if (root != null) await CapsuleStore.clearCollected(root);
+  }
+
+  static Future<Directory?> _storageRootOrNull(
+    BugCapsuleTestOverrides? overrides,
+  ) async {
+    try {
+      return overrides?.storageDirectory ?? await sdkStorageRoot();
+    } catch (e) {
+      debugPrint('[bugcapsule] local storage is unavailable: $e');
+      return null;
+    }
+  }
 
   /// Fetches the remote capture config now (it is otherwise refreshed after
   /// its TTL and when the app resumes). The returned future completes with
@@ -522,6 +586,7 @@ abstract final class BugCapsule {
   static Future<void> resetForTest() async {
     await _rt?.dispose();
     _rt = null;
+    _consentBeforeInit = null;
     Scope.root.clear();
     // ignore: invalid_use_of_visible_for_testing_member
     await _emergency.resetForTest();
@@ -745,6 +810,18 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
 
   /// The kill switch fired: captures still being written are discarded.
   bool _killed = false;
+
+  /// The collection choice (BC-ENT-038): persisted, else the config's
+  /// default. Read in [_prepareCapture] before anything is captured.
+  late bool _consent = config.collectionEnabled;
+  bool _consentChosen = false;
+
+  /// Collection is off for this process: it started off, or was switched
+  /// off. Switching it on again takes effect at the next launch.
+  late bool _collectionStopped = !config.collectionEnabled;
+
+  /// Nothing more may be written or sent.
+  bool get _halted => _killed || _collectionStopped;
   int? _anchorMs;
   int? _wallAtAnchorMs;
   Timer? _checkpointTimer;
@@ -1037,6 +1114,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
 
   Future<void> _prepareCapture(WidgetsBinding binding) async {
     _redactor = _baseRedactor();
+    if (!await _readConsent()) return;
     if (!config.enabled) return;
 
     // No backend (none configured, or an unusable token): capture still runs
@@ -1047,6 +1125,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         (backend == null ? null : BugCapsuleBackendClient(backend));
     final storeFuture = store = CapsuleStore.open(
       root: _overrides?.storageDirectory,
+      savedCaptureMaxAge: config.savedCaptureMaxAge,
     );
     final s = await storeFuture;
     _storageRoot = s.root;
@@ -1089,7 +1168,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     _maxCapsuleBytes = cached?.maxCapsuleBytes ?? _maxCapsuleBytes;
     _applyInteractionPolicy(cached);
     _recording = _decideRecording(cached);
-    if (_setupAbandoned) return _stopRecording();
+    if (_abandoned) return _stopRecording();
 
     for (final integration in integrations) {
       try {
@@ -1099,7 +1178,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       }
     }
 
-    if (_setupAbandoned) return _stopRecording();
+    if (_abandoned) return _stopRecording();
     // Monitoring starts once capture setup has finished (a setup that never
     // finishes leaves the app without capture and without monitoring).
     final baseEnvelopes =
@@ -1145,7 +1224,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         appPackage: _appPackage,
       );
       await h.start(lifecycle: binding.lifecycleState);
-      if (_setupAbandoned) {
+      if (_abandoned) {
         await h.dispose();
         return _stopRecording();
       }
@@ -1175,13 +1254,8 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         afterSeq: 0,
         data: await _snapshot(CheckpointKind.launch),
       );
-      if (_setupAbandoned) return _stopRecording();
-      final recorder = _recorder = FlightRecorder(
-        launch: launch,
-        maxEvents: config.maxEvents,
-        windowMs: config.window.inMilliseconds,
-      );
-      _startJournal(s.root, recorder);
+      if (_abandoned) return _stopRecording();
+      _startJournal(s.root, _recorder = _newRecorder(launch));
       _installCapture();
       _writeTrackedDecisions();
     }
@@ -1192,6 +1266,33 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       _refreshJournalHeader();
     });
   }
+
+  /// Setup must stop: it timed out, or collection was switched off meanwhile.
+  bool get _abandoned => _setupAbandoned || _collectionStopped;
+
+  FlightRecorder _newRecorder(Checkpoint launch) => FlightRecorder(
+    launch: launch,
+    maxEvents: config.maxEvents,
+    windowMs: config.window.inMilliseconds,
+  );
+
+  /// Reads the persisted collection choice. With collection off nothing is
+  /// set up (no store, no remote config, no network) and data an earlier
+  /// run left is deleted. Returns whether collection is on.
+  Future<bool> _readConsent() async {
+    final root = await _storageRootOrNull();
+    final persisted = root == null ? null : await readConsent(root);
+    if (persisted != null && !_consentChosen) {
+      _consent = persisted;
+      _collectionStopped = !persisted;
+    }
+    if (!_collectionStopped) return true;
+    if (root != null) await CapsuleStore.clearCollected(root);
+    return false;
+  }
+
+  Future<Directory?> _storageRootOrNull() async =>
+      _storageRoot ?? await BugCapsule._storageRootOrNull(_overrides);
 
   // ---------------------------------------------------------- crash journal
 
@@ -1320,7 +1421,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         s == null ||
         !config.enabled ||
         !config.crashJournal ||
-        _killed ||
+        _halted ||
         remote?.current?.enabled == false) {
       return null;
     }
@@ -1368,7 +1469,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       final build = await (_overrides == null
           ? _buildInBackground(journal.path, request)
           : Future.sync(() => _buildFromJournal(journal.path, request)));
-      if (build == null || _killed) return null;
+      if (build == null || _halted) return null;
       final id = request.capsuleId;
       final s = await storeFuture;
       await s.save(id, build.bytes);
@@ -1376,7 +1477,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       if (outbox == null || !await outbox.enqueue(id, build.bytes)) {
         return null;
       }
-      if (_killed) {
+      if (_halted) {
         await outbox.purge();
         return null;
       }
@@ -1398,7 +1499,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
   }
 
   void _afterAppStarted() {
-    if (_disposed || remote == null) return;
+    if (_disposed || remote == null || _collectionStopped) return;
     unawaited(
       remote!
           .refresh()
@@ -1596,7 +1697,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     }
     _guard(() => hub?.onLifecycle(state));
     final controller = remote;
-    if (controller == null) return;
+    if (controller == null || _collectionStopped) return;
     if (state == AppLifecycleState.resumed) {
       controller.onResumed();
       unawaited(flushOutbox());
@@ -1812,11 +1913,12 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     final bytes =
         await (_overrides?.encodeCapsule?.call(capsule) ??
             compute(_encodeCapsule, capsule));
-    // The kill switch fired while encoding: drop the capsule.
-    if (_killed) return null;
+    // The kill switch fired or collection was switched off while encoding:
+    // drop the capsule.
+    if (_halted) return null;
     final s = await store!;
     final file = await s.save(capsule.manifest.capsuleId, bytes);
-    if (_killed) {
+    if (_halted) {
       await s.clearSavedCaptures();
       return null;
     }
@@ -1844,7 +1946,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
           UploadStatus.rejected,
           message: 'not queued (outbox limit or disk error)',
         );
-      } else if (_killed) {
+      } else if (_halted) {
         await outbox.purge();
         return null;
       } else {
@@ -1921,7 +2023,8 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
   static String? _cutOrNull(String? s, int max) =>
       s == null ? null : _cut(s, max);
 
-  bool get _uploadsAllowed => !_disposed && (remote?.uploadsAllowed ?? false);
+  bool get _uploadsAllowed =>
+      !_disposed && !_collectionStopped && (remote?.uploadsAllowed ?? false);
 
   /// Uploads pending capsules; returns the result for [onlyId] if given.
   /// The remote config is refreshed first when it is older than its TTL, so
@@ -1933,7 +2036,8 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     if (outbox == null ||
         transport == null ||
         controller == null ||
-        _disposed) {
+        _disposed ||
+        _collectionStopped) {
       return null;
     }
     try {
@@ -2143,6 +2247,84 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         ).then((_) {}, onError: (Object _) {}),
       );
     }
+  }
+
+  // --------------------------------------------------- local data lifecycle
+
+  bool get collectionEnabled => _consent;
+
+  /// The consent switch (BC-ENT-038). Off: like the kill switch, and
+  /// monitoring and remote config stop too, so nothing more is sent. On:
+  /// persisted only; collection resumes at the next launch.
+  Future<void> setCollectionEnabled(bool enabled) async {
+    _consent = enabled;
+    _consentChosen = true;
+    final root = await _storageRootOrNull();
+    if (root != null && !await writeConsent(root, enabled)) {
+      _warnOnce(
+        'could not store the collection choice; it lasts for this process',
+      );
+    }
+    if (enabled) return;
+    if (!_collectionStopped) {
+      _collectionStopped = true;
+      final wasRecording = _recording;
+      _stopRecording();
+      lastFailure = null;
+      final controller = remote;
+      remote = null;
+      controller?.dispose();
+      final h = hub;
+      hub = null;
+      await h?.dispose();
+      if (wasRecording) debugPrint('[bugcapsule] collection switched off');
+    }
+    await _deleteCollected(root);
+  }
+
+  /// See [BugCapsule.clearLocalData].
+  Future<void> clearLocalData() async {
+    lastFailure = null;
+    _guard(() => hub?.clearBreadcrumbs());
+    // This process's journal goes too; a fresh one follows the new buffer.
+    final journal = _journal;
+    _journal = null;
+    if (journal != null) {
+      await journal.discard();
+      _guard(() => hub?.onJournalChanged());
+    }
+    try {
+      await hub?.purge();
+    } catch (_) {}
+    await _deleteCollected(await _storageRootOrNull());
+    final recorder = _recorder;
+    if (!_recording || recorder == null) return;
+    final epoch = _captureEpoch;
+    final t = now();
+    final data = await _snapshot(CheckpointKind.launch);
+    final root = _storageRoot;
+    if (epoch != _captureEpoch || !identical(recorder, _recorder)) return;
+    final fresh = _recorder = _newRecorder(
+      Checkpoint(
+        kind: CheckpointKind.launch,
+        t: t,
+        wallClockMs: DateTime.now().millisecondsSinceEpoch,
+        afterSeq: 0,
+        data: data,
+      ),
+    );
+    if (root != null) _startJournal(root, fresh);
+    _writeTrackedDecisions();
+  }
+
+  /// Queued capsules through the outbox's lock (an upload on the wire
+  /// finishes), then every other collected file under [root].
+  Future<void> _deleteCollected(Directory? root) async {
+    try {
+      await _outbox?.purge();
+    } catch (_) {}
+    if (root == null) return;
+    await CapsuleStore.clearCollected(root);
   }
 
   // ---------------------------------------------------------------- replay
@@ -2366,6 +2548,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         BugCapsuleConnectionState.unsupportedTokenVersion,
       null when _backend == null && _overrides?.transport == null =>
         BugCapsuleConnectionState.notConfigured,
+      null when _collectionStopped => BugCapsuleConnectionState.disabled,
       null when !config.enabled => BugCapsuleConnectionState.disabled,
       null when controller?.rejected ?? false =>
         BugCapsuleConnectionState.rejected,
@@ -2377,6 +2560,8 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         BugCapsuleConnectionState.offline,
       null => BugCapsuleConnectionState.connecting,
     };
+    final collectionOff =
+        state == BugCapsuleConnectionState.disabled && _collectionStopped;
     final names = [for (final i in integrations) i.name];
     final network = names.any(_networkIntegrations.contains);
     final navigation = names.any(_navigationIntegrations.contains);
@@ -2390,6 +2575,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         apiUrl: _backend?.url.replaceAll(RegExp(r'/+$'), ''),
         reason:
             tokenError?.error.code ??
+            (collectionOff ? 'collection_disabled' : null) ??
             switch (state) {
               BugCapsuleConnectionState.rejected =>
                 failure?.reason ?? failure?.message,
@@ -2399,6 +2585,12 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
             },
         message:
             tokenError?.message ??
+            (collectionOff
+                ? _consent
+                      ? 'collection was switched on again; it resumes at the next launch'
+                      : 'collection is off on this device '
+                            '(BugCapsule.setCollectionEnabled); nothing is captured or sent'
+                : null) ??
             switch (state) {
               BugCapsuleConnectionState.rejected =>
                 failure?.detail ?? 'the backend refused the credential',
