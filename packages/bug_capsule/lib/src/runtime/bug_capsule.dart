@@ -544,6 +544,12 @@ class _NoopSink implements TransactionSink {
   void transactionFinished(TransactionImpl transaction) {}
 }
 
+/// Replay runs in debug builds, or in profile builds compiled with
+/// `--dart-define=BUGCAPSULE_ALLOW_PROFILE_REPLAY=true`; never in release.
+const bool _replayAllowedInThisBuild =
+    kDebugMode ||
+    (kProfileMode && bool.fromEnvironment('BUGCAPSULE_ALLOW_PROFILE_REPLAY'));
+
 /// How [BugCapsuleConfig.token] and [BugCapsuleConfig.backend] resolve
 /// (spec/connection-token-v1.md): an explicit backend wins; an unusable
 /// token leaves no backend, so the app runs without BugCapsule instead of
@@ -922,9 +928,10 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       debugPrint('[bugcapsule] could not read replay request: $e');
     }
     if (replayUrl != null) {
-      if (kReleaseMode) {
+      if (!_replayAllowedInThisBuild) {
         debugPrint(
-          '[bugcapsule] ignoring replay request: replay is disabled in release builds',
+          '[bugcapsule] ignoring replay request: replay runs only in debug builds '
+          '(or profile builds compiled with --dart-define=BUGCAPSULE_ALLOW_PROFILE_REPLAY=true)',
         );
       } else {
         debugPrint('[bugcapsule] replay mode: $replayUrl');
@@ -967,7 +974,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     if (fromDefine.isNotEmpty) return fromDefine;
     final fromEnv = Platform.environment[ReplayProtocol.envUrl];
     if (fromEnv != null && fromEnv.isNotEmpty) return fromEnv;
-    if (kReleaseMode) return null;
+    if (!_replayAllowedInThisBuild) return null;
     try {
       final file = await CapsuleStore.replayRequestFile(root: root);
       if (!await file.exists()) return null;
@@ -2111,6 +2118,41 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
 
   // ---------------------------------------------------------------- replay
 
+  /// Replay failed before the engine could take over: the failure is already
+  /// reported. The app's own startup must not run, because without the engine
+  /// nothing stands between it and live services (BC-ENT-014).
+  void _refuseReplay(String reason) {
+    debugPrint(
+      '[bugcapsule] replay did not start, the app was not launched: $reason',
+    );
+    // Showing the reason is a courtesy; if it fails, the app still must not run.
+    try {
+      _showReplayRefusal(reason);
+    } catch (e) {
+      debugPrint('[bugcapsule] could not show the replay error: $e');
+    }
+  }
+
+  static void _showReplayRefusal(String reason) {
+    runApp(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: ColoredBox(
+          color: const Color(0xFF1E1E1E),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'BugCapsule replay did not start, so the app was not launched.\n\n$reason',
+                style: const TextStyle(color: Color(0xFFFFFFFF), fontSize: 14),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _startReplay(
     String url,
     FutureOr<void> Function() appRunner,
@@ -2133,7 +2175,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
           message: 'could not load capsule: $e',
         ),
       );
-      await appRunner();
+      _refuseReplay('could not load the capsule: $e');
       return;
     }
 
@@ -2169,7 +2211,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         ),
       );
       engine = null;
-      await appRunner();
+      _refuseReplay('the capsule needs a state migration');
       return;
     }
     replay.precheck();
@@ -2192,7 +2234,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       );
       engine = null;
       interactions.replay = null;
-      await appRunner();
+      _refuseReplay(blocked);
       return;
     }
 
