@@ -11,6 +11,7 @@ import 'backend_client.dart';
 import 'browser_login.dart';
 import 'capsule_source.dart';
 import 'gate.dart';
+import 'baseline.dart';
 import 'git.dart';
 import 'inspect.dart';
 import 'launcher.dart';
@@ -315,6 +316,28 @@ class ReplayCommand extends Command<int> {
         defaultsTo: true,
         help: "Build the capsule's git commit in a temporary worktree.",
       );
+    } else {
+      argParser
+        ..addOption(
+          'baseline-runs',
+          defaultsTo: '$minBaselineAttempts',
+          help:
+              "Attempts on the capsule's own commit first: FIXED needs it to "
+              'reproduce every time (verdict v2). Reused for 7 days.',
+        )
+        ..addFlag(
+          'accept-qualified',
+          negatable: false,
+          help:
+              'Exit 0 for FIXED (QUALIFIED) too: weak evidence or a partial capsule.',
+        )
+        ..addFlag(
+          'verdict-v1',
+          negatable: false,
+          help:
+              'Old rules: FIXED when no attempt failed, no baseline. Refused '
+              'in CI unless BUGCAPSULE_ALLOW_VERDICT_V1=1.',
+        );
     }
     argParser.addOption(
       'report-to',
@@ -379,6 +402,52 @@ class ReplayCommand extends Command<int> {
     }
 
     final artifacts = _artifacts(args);
+    final device = runtime == 'flutter'
+        ? await pickDevice(args['device'] as String?)
+        : null;
+    if (device != null) stdout.writeln('${bold('Device')} $device');
+
+    final v1 = kind == ReplayKind.verify && (args['verdict-v1'] as bool);
+    if (v1 &&
+        Platform.environment['CI'] == 'true' &&
+        Platform.environment['BUGCAPSULE_ALLOW_VERDICT_V1'] != '1') {
+      stderr.writeln(
+        red(
+          '--verdict-v1 is refused in CI (set BUGCAPSULE_ALLOW_VERDICT_V1=1 to override)',
+        ),
+      );
+      return 64;
+    }
+    final v2 = kind == ReplayKind.verify && !v1;
+    var runs = attempts;
+    BaselineResult? baseline;
+    if (v2) {
+      baseline = await _baseline(
+        loaded,
+        args,
+        project: project,
+        config: config,
+        runtime: runtime,
+        device: device,
+        artifacts: artifacts,
+      );
+      if (baseline != null && baseline.reproduced == baseline.attempts) {
+        final needed = requiredCandidateAttempts(
+          baseline.reproduced,
+          baseline.attempts,
+        );
+        if (runs < needed) {
+          stdout.writeln(
+            dim(
+              'Running $needed attempts (not $runs): after a '
+              '${baseline.reproduced}/${baseline.attempts} baseline fewer could miss a remaining failure',
+            ),
+          );
+          runs = needed;
+        }
+      }
+    }
+
     final (projectDir, buildSha, dirty) = artifacts.isNotEmpty
         ? (project, null, false)
         : await resolveTree(
@@ -387,11 +456,138 @@ class ReplayCommand extends Command<int> {
             kind: kind,
             pin: kind == ReplayKind.replay ? args['pin'] as bool : false,
           );
-    final device = runtime == 'flutter'
-        ? await pickDevice(args['device'] as String?)
-        : null;
-    if (device != null) stdout.writeln('${bold('Device')} $device');
+    if (v2) stdout.writeln(bold('Candidate'));
+    final run = await _replayOn(
+      loaded,
+      args,
+      config: config,
+      runtime: runtime,
+      device: device,
+      artifacts: artifacts,
+      projectDir: projectDir,
+      buildSha: buildSha,
+      dirty: dirty,
+      kind: kind,
+      attempts: runs,
+    );
+    var summary = run.summary;
+    if (v2) {
+      summary = summary.withEvaluation(
+        evaluateVerifyV2(
+          requestedAttempts: runs,
+          candidate: summary.reports,
+          baseline: baseline,
+          eligibility: loaded.capsule.manifest.eligibility.status,
+        ),
+        baseline: baseline,
+      );
+    }
+    printSummary(summary, loaded.capsule);
+    await _report(loaded, summary, run.target, run.release);
+    final code = exitCodeFor(summary);
+    return code == 4 &&
+            kind == ReplayKind.verify &&
+            (args['accept-qualified'] as bool)
+        ? 0
+        : code;
+  }
 
+  /// Replays the capsule on its own commit, built clean in a worktree (also
+  /// when the working tree is at that commit with an uncommitted fix). Null
+  /// when there is no such build: no git SHA, a commit missing here, or
+  /// prebuilt artifacts.
+  Future<BaselineResult?> _baseline(
+    LoadedCapsule loaded,
+    ArgResults args, {
+    required String project,
+    required ProjectConfig config,
+    required String runtime,
+    required Device? device,
+    required Map<String, String> artifacts,
+  }) async {
+    final sha = loaded.capsule.manifest.gitSha;
+    final runs = int.parse(args['baseline-runs'] as String);
+    void unavailable(String why) => stdout.writeln(
+      yellow('! no baseline: $why; FIXED cannot be concluded'),
+    );
+    if (artifacts.isNotEmpty) {
+      unavailable('prebuilt artifacts replay one build only');
+      return null;
+    }
+    if (sha == null) {
+      unavailable('the capsule has no git SHA (build with BUGCAPSULE_GIT_SHA)');
+      return null;
+    }
+    final harness = [
+      runtime,
+      args['strategy'],
+      !(args['lenient-network'] as bool),
+      args['settle'],
+      runs,
+    ].join('|');
+    final cache = BaselineCache(project);
+    final key = baselineKey(
+      capsuleBytes: loaded.bytes,
+      revision: sha,
+      harness: harness,
+    );
+    final cached = cache.read(key);
+    if (cached != null) {
+      stdout.writeln(
+        '${bold('Baseline')} ${shortId(sha)}: ${cached.reproduced}/${cached.attempts} reproduced ${dim('(cached)')}',
+      );
+      return cached;
+    }
+    final git = await gitInfo(project);
+    if (git == null || !await commitExists(git.root, sha)) {
+      unavailable('commit ${shortId(sha)} is not in this repository');
+      return null;
+    }
+    final dir = await pinnedProjectDir(git, project, sha);
+    stdout.writeln('${bold('Baseline')} ${shortId(sha)} ${dim('($dir)')}');
+    final run = await _replayOn(
+      loaded,
+      args,
+      config: config,
+      runtime: runtime,
+      device: device,
+      artifacts: artifacts,
+      projectDir: dir,
+      buildSha: sha,
+      dirty: false,
+      kind: ReplayKind.replay,
+      attempts: runs,
+    );
+    final result = BaselineResult(
+      revision: sha,
+      attempts: runs,
+      reproduced: run.summary.evaluation.reproductions,
+    );
+    // Only a complete baseline is reused.
+    if (run.summary.evaluation.attempts.length == runs) {
+      cache.write(key, result);
+    }
+    stdout.writeln(
+      '${bold('Baseline')} ${result.reproduced}/${result.attempts} reproduced',
+    );
+    return result;
+  }
+
+  /// Builds [projectDir], launches it and replays [attempts] times.
+  Future<({ReplaySummary summary, String target, AppRelease? release})>
+  _replayOn(
+    LoadedCapsule loaded,
+    ArgResults args, {
+    required ProjectConfig config,
+    required String runtime,
+    required Device? device,
+    required Map<String, String> artifacts,
+    required String projectDir,
+    required String? buildSha,
+    required bool dirty,
+    required ReplayKind kind,
+    required int attempts,
+  }) async {
     final server = await ReplayServer.start(lan: args['lan'] as bool);
     final launcher = AppLauncher.forOptions(
       LaunchOptions(
@@ -432,11 +628,13 @@ class ReplayCommand extends Command<int> {
         buildSha: buildSha,
         runtime: runtime,
         attemptTimeout: _attemptTimeout(args, config),
-            patch: _patchArchive(args),
+        patch: _patchArchive(args),
       );
-      printSummary(summary, loaded.capsule);
-      await _report(loaded, summary, launcher.target, launcher.release);
-      return exitCodeFor(summary);
+      return (
+        summary: summary,
+        target: launcher.target,
+        release: launcher.release,
+      );
     } finally {
       await interrupt.cancel();
       await launcher.dispose();
