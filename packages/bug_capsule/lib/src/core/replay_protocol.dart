@@ -319,6 +319,60 @@ class ObservedCrash {
   static String signalName(int signal) => _signals[signal] ?? 'SIG$signal';
 }
 
+/// How strongly a clean attempt shows the failing path ran and now behaves
+/// (spec/verdict-v2.md).
+enum EvidenceLevel { none, weak, strong }
+
+/// What a v2 SDK observed beyond "the failure did not fire".
+class ReplayEvidence {
+  const ReplayEvidence({
+    this.assertionPassed,
+    this.postconditions = const {},
+    this.failurePointPassed = false,
+  });
+
+  factory ReplayEvidence.fromJson(Map<String, Object?> j) => ReplayEvidence(
+    assertionPassed: j['assertionPassed'] as bool?,
+    postconditions: {
+      for (final e in ((j['postconditions'] as Map?) ?? const {}).entries)
+        '${e.key}': e.value == true,
+    },
+    failurePointPassed: j['failurePointPassed'] == true,
+  );
+
+  /// The capsule's failure assertion was evaluated during replay and held
+  /// (`BugCapsule.check`); null when it was never evaluated or the failure is
+  /// not an assertion.
+  final bool? assertionPassed;
+
+  /// `BugCapsule.expect` postconditions, evaluated after replay settled.
+  final Map<String, bool> postconditions;
+
+  /// Every recorded input up to the recorded failure point was dispatched and
+  /// replay settled past that point: the path was reached, nothing more.
+  final bool failurePointPassed;
+
+  /// Postconditions that did not hold.
+  List<String> get failedPostconditions => [
+    for (final e in postconditions.entries)
+      if (!e.value) e.key,
+  ];
+
+  EvidenceLevel get level {
+    if (failedPostconditions.isNotEmpty) return EvidenceLevel.none;
+    if (assertionPassed == true || postconditions.isNotEmpty) {
+      return EvidenceLevel.strong;
+    }
+    return failurePointPassed ? EvidenceLevel.weak : EvidenceLevel.none;
+  }
+
+  Map<String, Object?> toJson() => {
+    if (assertionPassed != null) 'assertionPassed': assertionPassed,
+    if (postconditions.isNotEmpty) 'postconditions': postconditions,
+    'failurePointPassed': failurePointPassed,
+  };
+}
+
 class ReplayReport {
   const ReplayReport({
     required this.outcome,
@@ -340,6 +394,7 @@ class ReplayReport {
     this.runtime,
     this.crash,
     this.patch,
+    this.evidence,
   });
 
   factory ReplayReport.fromJson(Map<String, Object?> j) => ReplayReport(
@@ -377,6 +432,9 @@ class ReplayReport {
         ? CapsulePatchIdentity.fromJson(
             (j['patch'] as Map).cast<String, Object?>(),
           )
+        : null,
+    evidence: j['evidence'] is Map
+        ? ReplayEvidence.fromJson((j['evidence'] as Map).cast<String, Object?>())
         : null,
   );
 
@@ -416,6 +474,9 @@ class ReplayReport {
   /// What this attempt actually ran; null when the app has no patch runtime.
   final CapsulePatchIdentity? patch;
 
+  /// Positive evidence (verdict v2); null from SDKs that predate it.
+  final ReplayEvidence? evidence;
+
   /// A copy with the given fields replaced.
   ReplayReport copyWith({
     ReplayOutcome? outcome,
@@ -426,6 +487,7 @@ class ReplayReport {
     String? message,
     ObservedCrash? crash,
     CapsulePatchIdentity? patch,
+    ReplayEvidence? evidence,
   }) => ReplayReport(
     outcome: outcome ?? this.outcome,
     attempt: attempt,
@@ -446,6 +508,7 @@ class ReplayReport {
     runtime: runtime,
     crash: crash ?? this.crash,
     patch: patch ?? this.patch,
+    evidence: evidence ?? this.evidence,
   );
 
   /// Same report with [divergences] appended (e.g. by a runner that saw
@@ -473,5 +536,6 @@ class ReplayReport {
     if (runtime != null) 'runtime': runtime,
     if (crash != null) 'crash': crash!.toJson(),
     if (patch != null) 'patch': patch!.toJson(),
+    if (evidence != null) 'evidence': evidence!.toJson(),
   };
 }

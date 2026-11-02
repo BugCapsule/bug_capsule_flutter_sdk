@@ -1118,7 +1118,9 @@ class _RegressRun extends Command<int> {
             failed++;
           case Verdict.inconclusive ||
               Verdict.reproduced ||
-              Verdict.notReproduced:
+              Verdict.notReproduced ||
+              Verdict.fixedQualified ||
+              Verdict.unsafe:
             // A regression test only passes on a valid run without the failure.
             result = 'inconclusive';
             failed++;

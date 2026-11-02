@@ -276,6 +276,10 @@ List<String> summaryLines(ReplaySummary s) {
     Verdict.flaky => yellow('FLAKY $k/$n'),
     Verdict.fixed => green('FIXED — failure gone in $n/$n valid runs'),
     Verdict.stillFailing => red('STILL FAILING $k/$n'),
+    Verdict.fixedQualified => yellow(
+      'FIXED (QUALIFIED) — failure gone in $n/$n valid runs, with limitations',
+    ),
+    Verdict.unsafe => red('UNSAFE — live traffic was allowed; nothing is concluded'),
   };
   lines.add('${bold('Result:')} $verdict');
   if (!e.succeeded && e.reasons.isNotEmpty) {

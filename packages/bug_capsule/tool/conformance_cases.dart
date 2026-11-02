@@ -730,6 +730,27 @@ final verdictCases = <Map<String, Object?>>[
       },
     ],
   },
+  {
+    'name': 'live traffic allowed makes a reproduction unsafe',
+    'kind': 'replay',
+    'requested': 2,
+    'reports': [
+      {
+        ..._repro,
+        'divergences': ['replay.unsafe_live'],
+      },
+      _repro,
+    ],
+  },
+  {
+    'name': 'live traffic allowed makes a clean verify unsafe',
+    'kind': 'verify',
+    'requested': 2,
+    'reports': [
+      _ok(divergences: ['replay.unsafe_live']),
+      _ok(),
+    ],
+  },
 ];
 
 // ------------------------------------------------------------ interactions
@@ -1026,3 +1047,149 @@ Map<String, Object?> _ix(int t, String type, Map<String, Object?> data) {
     'data': {'dep': dep, ...data},
   };
 }
+
+// Verdict v2 (spec/verdict-v2.md): `verify` with a baseline and evidence.
+Map<String, Object?> _v2ok({
+  bool? assertion,
+  Map<String, bool> post = const {},
+  bool point = true,
+  List<String> divergences = const [],
+}) => {
+  ..._ok(divergences: divergences),
+  'evidence': {
+    'assertionPassed': ?assertion,
+    if (post.isNotEmpty) 'postconditions': post,
+    'failurePointPassed': point,
+  },
+};
+
+Map<String, Object?> _baseline(int attempts, int reproduced) => {
+  'revision': 'abc1234',
+  'attempts': attempts,
+  'reproduced': reproduced,
+};
+
+final verifyV2Cases = <Map<String, Object?>>[
+  {
+    'name':
+        'FIXED: reproducing baseline, enough clean attempts, assertion held',
+    'requested': 8,
+    'baseline': _baseline(3, 3),
+    'eligibility': 'eligible',
+    'reports': List.filled(8, _v2ok(assertion: true)),
+  },
+  {
+    'name': 'FIXED: postconditions held',
+    'requested': 6,
+    'baseline': _baseline(5, 5),
+    'eligibility': 'eligible',
+    'reports': List.filled(6, _v2ok(post: {'cart.total_positive': true})),
+  },
+  {
+    'name': 'R1 counter-example: flaky baseline never gives FIXED',
+    'requested': 20,
+    'baseline': _baseline(20, 11),
+    'eligibility': 'eligible',
+    'reports': List.filled(20, _v2ok(assertion: true)),
+  },
+  {
+    'name': 'baseline that never reproduced is inconclusive',
+    'requested': 8,
+    'baseline': _baseline(3, 0),
+    'eligibility': 'eligible',
+    'reports': List.filled(8, _v2ok(assertion: true)),
+  },
+  {
+    'name': 'no baseline is inconclusive',
+    'requested': 8,
+    'baseline': null,
+    'eligibility': 'eligible',
+    'reports': List.filled(8, _v2ok(assertion: true)),
+  },
+  {
+    'name': 'baseline with too few attempts is inconclusive',
+    'requested': 8,
+    'baseline': _baseline(2, 2),
+    'eligibility': 'eligible',
+    'reports': List.filled(8, _v2ok(assertion: true)),
+  },
+  {
+    'name': 'too few candidate attempts after a 3/3 baseline',
+    'requested': 5,
+    'baseline': _baseline(3, 3),
+    'eligibility': 'eligible',
+    'reports': List.filled(5, _v2ok(assertion: true)),
+  },
+  {
+    'name': 'pre-v2 SDK reports carry no evidence: inconclusive',
+    'requested': 8,
+    'baseline': _baseline(3, 3),
+    'eligibility': 'eligible',
+    'reports': List.filled(8, _ok()),
+  },
+  {
+    'name': 'only the failure point was passed: FIXED_QUALIFIED',
+    'requested': 8,
+    'baseline': _baseline(3, 3),
+    'eligibility': 'eligible',
+    'reports': List.filled(8, _v2ok()),
+  },
+  {
+    'name': 'disabled code path: failure point never passed, no evidence',
+    'requested': 8,
+    'baseline': _baseline(3, 3),
+    'eligibility': 'eligible',
+    'reports': List.filled(8, _v2ok(point: false)),
+  },
+  {
+    'name': 'partial capsule with strong evidence: FIXED_QUALIFIED',
+    'requested': 8,
+    'baseline': _baseline(3, 3),
+    'eligibility': 'partial',
+    'reports': List.filled(8, _v2ok(assertion: true)),
+  },
+  {
+    'name': 'ineligible capsule is inconclusive',
+    'requested': 8,
+    'baseline': _baseline(3, 3),
+    'eligibility': 'ineligible',
+    'reports': List.filled(8, _v2ok(assertion: true)),
+  },
+  {
+    'name': 'a postcondition that did not hold is still failing',
+    'requested': 8,
+    'baseline': _baseline(3, 3),
+    'eligibility': 'eligible',
+    'reports': [
+      ...List.filled(7, _v2ok(post: {'cart.total_positive': true})),
+      _v2ok(post: {'cart.total_positive': false}),
+    ],
+  },
+  {
+    'name': 'candidate still reproduces',
+    'requested': 8,
+    'baseline': _baseline(3, 3),
+    'eligibility': 'eligible',
+    'reports': List.filled(8, _repro),
+  },
+  {
+    'name': 'live traffic allowed is unsafe even with a good baseline',
+    'requested': 8,
+    'baseline': _baseline(3, 3),
+    'eligibility': 'eligible',
+    'reports': [
+      _v2ok(assertion: true, divergences: ['replay.unsafe_live']),
+      ...List.filled(7, _v2ok(assertion: true)),
+    ],
+  },
+];
+
+/// (baseline reproduced, baseline attempts) pairs for requiredAttempts vectors.
+const requiredAttemptCases = [
+  [3, 3],
+  [5, 5],
+  [10, 10],
+  [11, 20],
+  [0, 5],
+  [30, 30],
+];
