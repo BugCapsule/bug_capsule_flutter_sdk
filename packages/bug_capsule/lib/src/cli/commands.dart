@@ -301,6 +301,157 @@ Map<String, String> _defines(ArgResults args, String? sha, bool dirty) => {
       d.substring(0, d.indexOf('=')): d.substring(d.indexOf('=') + 1),
 };
 
+/// Replays the capsule on its own commit, built clean in a worktree (also
+/// when the working tree is at that commit with an uncommitted fix). Null
+/// when there is no such build: no git SHA, a commit missing here, or
+/// prebuilt artifacts.
+Future<BaselineResult?> baselineFor(
+  LoadedCapsule loaded,
+  ArgResults args, {
+  required String project,
+  required ProjectConfig config,
+  required String runtime,
+  required Device? device,
+  required Map<String, String> artifacts,
+}) async {
+  final sha = loaded.capsule.manifest.gitSha;
+  final runs = int.parse(args['baseline-runs'] as String);
+  void unavailable(String why) => stdout.writeln(
+    yellow('! no baseline: $why; FIXED cannot be concluded'),
+  );
+  if (artifacts.isNotEmpty) {
+    unavailable('prebuilt artifacts replay one build only');
+    return null;
+  }
+  if (sha == null) {
+    unavailable('the capsule has no git SHA (build with BUGCAPSULE_GIT_SHA)');
+    return null;
+  }
+  final harness = [
+    runtime,
+    args['strategy'],
+    !(args['lenient-network'] as bool),
+    args['settle'],
+    runs,
+  ].join('|');
+  final cache = BaselineCache(project);
+  final key = baselineKey(
+    capsuleBytes: loaded.bytes,
+    revision: sha,
+    harness: harness,
+  );
+  final cached = cache.read(key);
+  if (cached != null) {
+    stdout.writeln(
+      '${bold('Baseline')} ${shortId(sha)}: ${cached.reproduced}/${cached.attempts} reproduced ${dim('(cached)')}',
+    );
+    return cached;
+  }
+  final git = await gitInfo(project);
+  if (git == null || !await commitExists(git.root, sha)) {
+    unavailable('commit ${shortId(sha)} is not in this repository');
+    return null;
+  }
+  final dir = await pinnedProjectDir(git, project, sha);
+  stdout.writeln('${bold('Baseline')} ${shortId(sha)} ${dim('($dir)')}');
+  final run = await replayOnTree(
+    loaded,
+    args,
+    config: config,
+    runtime: runtime,
+    device: device,
+    artifacts: artifacts,
+    projectDir: dir,
+    buildSha: sha,
+    dirty: false,
+    kind: ReplayKind.replay,
+    attempts: runs,
+  );
+  final result = BaselineResult(
+    revision: sha,
+    attempts: runs,
+    reproduced: run.summary.evaluation.reproductions,
+  );
+  // Only a complete baseline is reused.
+  if (run.summary.evaluation.attempts.length == runs) {
+    cache.write(key, result);
+  }
+  stdout.writeln(
+    '${bold('Baseline')} ${result.reproduced}/${result.attempts} reproduced',
+  );
+  return result;
+}
+
+/// Builds [projectDir], launches it and replays [attempts] times.
+Future<({ReplaySummary summary, String target, AppRelease? release})>
+replayOnTree(
+  LoadedCapsule loaded,
+  ArgResults args, {
+  required ProjectConfig config,
+  required String runtime,
+  required Device? device,
+  required Map<String, String> artifacts,
+  required String projectDir,
+  required String? buildSha,
+  required bool dirty,
+  required ReplayKind kind,
+  required int attempts,
+}) async {
+  final server = await ReplayServer.start(lan: args['lan'] as bool);
+  final launcher = AppLauncher.forOptions(
+    LaunchOptions(
+      runtime: runtime,
+      config: config,
+      projectDir: projectDir,
+      target: args['target'] as String,
+      device: device,
+      deviceQuery: args['device'] as String?,
+      dartDefines: _defines(args, buildSha, dirty),
+      flavor: args['flavor'] as String?,
+      verbose: args['verbose'] as bool,
+      buildSha: buildSha,
+      dirty: dirty,
+      artifacts: artifacts,
+    ),
+  );
+  final interrupt = _onInterrupt(() async {
+    await launcher.dispose();
+    await server.close();
+  });
+  try {
+    await launcher.prepare(server);
+    if (device == null) {
+      stdout.writeln('${bold('Target')} ${launcher.target}');
+    }
+    final summary = await replayCapsule(
+      loaded: loaded,
+      launcher: launcher,
+      server: server,
+      kind: kind,
+      attempts: attempts,
+      strategy: ReplayStrategy.values.byName(args['strategy'] as String),
+      settleTimeoutMs: (double.parse(args['settle'] as String) * 1000)
+          .round(),
+      strictNetwork: !(args['lenient-network'] as bool),
+      idleCompression: args['compress-idle'] as bool,
+      buildSha: buildSha,
+      runtime: runtime,
+      attemptTimeout: _attemptTimeout(args, config),
+      patch: _patchArchive(args),
+    );
+    return (
+      summary: summary,
+      target: launcher.target,
+      release: launcher.release,
+    );
+  } finally {
+    await interrupt.cancel();
+    await launcher.dispose();
+    await server.close();
+    await Processes.stopAll();
+  }
+}
+
 class ReplayCommand extends Command<int> {
   ReplayCommand(this.kind) {
     _addLaunchOptions(argParser);
@@ -422,7 +573,7 @@ class ReplayCommand extends Command<int> {
     var runs = attempts;
     BaselineResult? baseline;
     if (v2) {
-      baseline = await _baseline(
+      baseline = await baselineFor(
         loaded,
         args,
         project: project,
@@ -457,7 +608,7 @@ class ReplayCommand extends Command<int> {
             pin: kind == ReplayKind.replay ? args['pin'] as bool : false,
           );
     if (v2) stdout.writeln(bold('Candidate'));
-    final run = await _replayOn(
+    final run = await replayOnTree(
       loaded,
       args,
       config: config,
@@ -490,157 +641,6 @@ class ReplayCommand extends Command<int> {
             (args['accept-qualified'] as bool)
         ? 0
         : code;
-  }
-
-  /// Replays the capsule on its own commit, built clean in a worktree (also
-  /// when the working tree is at that commit with an uncommitted fix). Null
-  /// when there is no such build: no git SHA, a commit missing here, or
-  /// prebuilt artifacts.
-  Future<BaselineResult?> _baseline(
-    LoadedCapsule loaded,
-    ArgResults args, {
-    required String project,
-    required ProjectConfig config,
-    required String runtime,
-    required Device? device,
-    required Map<String, String> artifacts,
-  }) async {
-    final sha = loaded.capsule.manifest.gitSha;
-    final runs = int.parse(args['baseline-runs'] as String);
-    void unavailable(String why) => stdout.writeln(
-      yellow('! no baseline: $why; FIXED cannot be concluded'),
-    );
-    if (artifacts.isNotEmpty) {
-      unavailable('prebuilt artifacts replay one build only');
-      return null;
-    }
-    if (sha == null) {
-      unavailable('the capsule has no git SHA (build with BUGCAPSULE_GIT_SHA)');
-      return null;
-    }
-    final harness = [
-      runtime,
-      args['strategy'],
-      !(args['lenient-network'] as bool),
-      args['settle'],
-      runs,
-    ].join('|');
-    final cache = BaselineCache(project);
-    final key = baselineKey(
-      capsuleBytes: loaded.bytes,
-      revision: sha,
-      harness: harness,
-    );
-    final cached = cache.read(key);
-    if (cached != null) {
-      stdout.writeln(
-        '${bold('Baseline')} ${shortId(sha)}: ${cached.reproduced}/${cached.attempts} reproduced ${dim('(cached)')}',
-      );
-      return cached;
-    }
-    final git = await gitInfo(project);
-    if (git == null || !await commitExists(git.root, sha)) {
-      unavailable('commit ${shortId(sha)} is not in this repository');
-      return null;
-    }
-    final dir = await pinnedProjectDir(git, project, sha);
-    stdout.writeln('${bold('Baseline')} ${shortId(sha)} ${dim('($dir)')}');
-    final run = await _replayOn(
-      loaded,
-      args,
-      config: config,
-      runtime: runtime,
-      device: device,
-      artifacts: artifacts,
-      projectDir: dir,
-      buildSha: sha,
-      dirty: false,
-      kind: ReplayKind.replay,
-      attempts: runs,
-    );
-    final result = BaselineResult(
-      revision: sha,
-      attempts: runs,
-      reproduced: run.summary.evaluation.reproductions,
-    );
-    // Only a complete baseline is reused.
-    if (run.summary.evaluation.attempts.length == runs) {
-      cache.write(key, result);
-    }
-    stdout.writeln(
-      '${bold('Baseline')} ${result.reproduced}/${result.attempts} reproduced',
-    );
-    return result;
-  }
-
-  /// Builds [projectDir], launches it and replays [attempts] times.
-  Future<({ReplaySummary summary, String target, AppRelease? release})>
-  _replayOn(
-    LoadedCapsule loaded,
-    ArgResults args, {
-    required ProjectConfig config,
-    required String runtime,
-    required Device? device,
-    required Map<String, String> artifacts,
-    required String projectDir,
-    required String? buildSha,
-    required bool dirty,
-    required ReplayKind kind,
-    required int attempts,
-  }) async {
-    final server = await ReplayServer.start(lan: args['lan'] as bool);
-    final launcher = AppLauncher.forOptions(
-      LaunchOptions(
-        runtime: runtime,
-        config: config,
-        projectDir: projectDir,
-        target: args['target'] as String,
-        device: device,
-        deviceQuery: args['device'] as String?,
-        dartDefines: _defines(args, buildSha, dirty),
-        flavor: args['flavor'] as String?,
-        verbose: args['verbose'] as bool,
-        buildSha: buildSha,
-        dirty: dirty,
-        artifacts: artifacts,
-      ),
-    );
-    final interrupt = _onInterrupt(() async {
-      await launcher.dispose();
-      await server.close();
-    });
-    try {
-      await launcher.prepare(server);
-      if (device == null) {
-        stdout.writeln('${bold('Target')} ${launcher.target}');
-      }
-      final summary = await replayCapsule(
-        loaded: loaded,
-        launcher: launcher,
-        server: server,
-        kind: kind,
-        attempts: attempts,
-        strategy: ReplayStrategy.values.byName(args['strategy'] as String),
-        settleTimeoutMs: (double.parse(args['settle'] as String) * 1000)
-            .round(),
-        strictNetwork: !(args['lenient-network'] as bool),
-        idleCompression: args['compress-idle'] as bool,
-        buildSha: buildSha,
-        runtime: runtime,
-        attemptTimeout: _attemptTimeout(args, config),
-        patch: _patchArchive(args),
-      );
-      return (
-        summary: summary,
-        target: launcher.target,
-        release: launcher.release,
-      );
-    } finally {
-      await interrupt.cancel();
-      await launcher.dispose();
-      await server.close();
-      await Processes.stopAll();
-    }
   }
 
   Future<void> _report(
@@ -715,6 +715,13 @@ class GateCommand extends Command<int> {
             'Outcomes that fail the gate: reproduced, flaky, error '
             '(error: a capsule could not run).',
       )
+      ..addFlag(
+        'verdict-v1',
+        negatable: false,
+        help:
+            'Old rules: no recorded baseline or evidence needed. Refused in CI '
+            'unless BUGCAPSULE_ALLOW_VERDICT_V1=1.',
+      )
       ..addOption('junit', help: 'Write JUnit XML to this file.')
       ..addFlag(
         'json',
@@ -771,6 +778,14 @@ class GateCommand extends Command<int> {
     if (unknown.isNotEmpty) {
       throw UsageException(
         '--fail-on takes ${GateOutcomes.failOnValues.join(', ')} (got ${unknown.join(', ')})',
+        usage,
+      );
+    }
+    if ((args['verdict-v1'] as bool) &&
+        Platform.environment['CI'] == 'true' &&
+        Platform.environment['BUGCAPSULE_ALLOW_VERDICT_V1'] != '1') {
+      throw UsageException(
+        '--verdict-v1 is refused in CI (set BUGCAPSULE_ALLOW_VERDICT_V1=1 to override)',
         usage,
       );
     }
@@ -939,6 +954,7 @@ class GateCommand extends Command<int> {
     required int attempts,
     required GitInfo? git,
   }) async {
+    final v2 = !(args['verdict-v1'] as bool);
     final project = args['project'] as String;
     final (config, runtime) = _runtimeFor(args, project);
     final artifacts = _artifacts(args);
@@ -1010,7 +1026,34 @@ class GateCommand extends Command<int> {
           continue;
         }
         final mismatch = runtimeMismatch(loaded.capsule, runtime);
-        final ReplaySummary summary;
+        // Verdict v2: the baseline is the newest complete `bugcapsule run`
+        // recorded for the capsule.
+        BaselineResult? baseline;
+        var runs = attempts;
+        if (v2 && mismatch == null) {
+          try {
+            baseline = recordedBaseline(await client.listRuns(item.capsuleId));
+          } on Object catch (e) {
+            // Unverifiable, not a gate error: the capsule stays inconclusive.
+            stdout.writeln(
+              yellow('  ! could not read recorded runs: $e'),
+            );
+          }
+          if (baseline == null) {
+            stdout.writeln(
+              yellow(
+                '  ! no recorded baseline: run `bugcapsule run ${shortId(item.capsuleId)}` once; this capsule stays INCONCLUSIVE',
+              ),
+            );
+          } else if (baseline.reproduced == baseline.attempts) {
+            final needed = requiredCandidateAttempts(
+              baseline.reproduced,
+              baseline.attempts,
+            );
+            if (runs < needed) runs = needed;
+          }
+        }
+        ReplaySummary summary;
         if (mismatch != null) {
           summary = incompatibleSummary(
             ReplayKind.verify,
@@ -1024,7 +1067,7 @@ class GateCommand extends Command<int> {
             launcher: launcher,
             server: server,
             kind: ReplayKind.verify,
-            attempts: attempts,
+            attempts: runs,
             strategy: ReplayStrategy.values.byName(args['strategy'] as String),
             settleTimeoutMs: (double.parse(args['settle'] as String) * 1000)
                 .round(),
@@ -1034,6 +1077,17 @@ class GateCommand extends Command<int> {
             runtime: runtime,
             attemptTimeout: _attemptTimeout(args, config),
             patch: _patchArchive(args),
+          );
+        }
+        if (v2 && mismatch == null) {
+          summary = summary.withEvaluation(
+            evaluateVerifyV2(
+              requestedAttempts: runs,
+              candidate: summary.reports,
+              baseline: baseline,
+              eligibility: loaded.capsule.manifest.eligibility.status,
+            ),
+            baseline: baseline,
           );
         }
         String? runId;
@@ -1201,7 +1255,26 @@ class _RegressRun extends Command<int> {
         'runs',
         abbr: 'n',
         defaultsTo: '2',
-        help: 'Attempts per test.',
+        help: 'Attempts per test (raised to what each baseline requires).',
+      )
+      ..addOption(
+        'baseline-runs',
+        defaultsTo: '$minBaselineAttempts',
+        help:
+            "Attempts on a test capsule's own commit when its entry has no "
+            'baseline yet (verdict v2). The result is kept in the entry.',
+      )
+      ..addFlag(
+        'accept-qualified',
+        negatable: false,
+        help: 'Count FIXED (QUALIFIED) as a pass: weak evidence or a partial capsule.',
+      )
+      ..addFlag(
+        'verdict-v1',
+        negatable: false,
+        help:
+            'Old rules: pass when no attempt failed, no baseline. Refused in '
+            'CI unless BUGCAPSULE_ALLOW_VERDICT_V1=1.',
       )
       ..addFlag('include-quarantined', negatable: false);
   }
@@ -1235,6 +1308,55 @@ class _RegressRun extends Command<int> {
     final device = runtime == 'flutter'
         ? await pickDevice(args['device'] as String?)
         : null;
+    final v1 = args['verdict-v1'] as bool;
+    if (v1 &&
+        Platform.environment['CI'] == 'true' &&
+        Platform.environment['BUGCAPSULE_ALLOW_VERDICT_V1'] != '1') {
+      stderr.writeln(
+        red(
+          '--verdict-v1 is refused in CI (set BUGCAPSULE_ALLOW_VERDICT_V1=1 to override)',
+        ),
+      );
+      return 64;
+    }
+    // Verdict v2: every test needs its capsule's commit to reproduce first.
+    // A baseline is kept in the test's entry, so later runs (and CI, which
+    // has no local cache) reuse it; each is built before the candidate.
+    final baselines = <Object?, BaselineResult?>{};
+    if (!v1) {
+      for (final t in selected) {
+        final loaded = await loadCapsule('$project/${t['file']}');
+        final stored = t['baseline'];
+        final sha = loaded.capsule.manifest.gitSha;
+        if (stored is Map && sha != null && stored['revision'] == sha) {
+          baselines[t['file']] = BaselineResult.fromJson(
+            stored.cast<String, Object?>(),
+          );
+          continue;
+        }
+        if (runtimeMismatch(loaded.capsule, runtime) != null) continue;
+        stdout.writeln(
+          '\n${bold('Baseline for ${t['name']}')} ${dim(shortId('${t['capsuleId']}'))}',
+        );
+        final b = await baselineFor(
+          loaded,
+          args,
+          project: project,
+          config: config,
+          runtime: runtime,
+          device: device,
+          artifacts: artifacts,
+        );
+        baselines[t['file']] = b;
+        if (b != null) {
+          t['baseline'] = {
+            ...b.toJson()..remove('cached'),
+            'at': DateTime.now().toUtc().toIso8601String(),
+          };
+        }
+      }
+      suite.save(tests);
+    }
     final first = await loadCapsule('$project/${selected.first['file']}');
     final (projectDir, sha, dirty) = artifacts.isNotEmpty
         ? (project, null, false)
@@ -1275,10 +1397,21 @@ class _RegressRun extends Command<int> {
         );
         final loaded = await loadCapsule('$project/${t['file']}');
         final mismatch = runtimeMismatch(loaded.capsule, runtime);
-        final s = mismatch != null
+        final baseline = baselines[t['file']];
+        var runs = int.parse(args['runs'] as String);
+        if (!v1 &&
+            baseline != null &&
+            baseline.reproduced == baseline.attempts) {
+          final needed = requiredCandidateAttempts(
+            baseline.reproduced,
+            baseline.attempts,
+          );
+          if (runs < needed) runs = needed;
+        }
+        var s = mismatch != null
             ? incompatibleSummary(
                 ReplayKind.verify,
-                int.parse(args['runs'] as String),
+                runs,
                 mismatch,
                 runtime: runtime,
               )
@@ -1287,7 +1420,7 @@ class _RegressRun extends Command<int> {
                 launcher: launcher,
                 server: server,
                 kind: ReplayKind.verify,
-                attempts: int.parse(args['runs'] as String),
+                attempts: runs,
                 strategy: ReplayStrategy.values.byName(
                   args['strategy'] as String,
                 ),
@@ -1300,6 +1433,17 @@ class _RegressRun extends Command<int> {
                 attemptTimeout: _attemptTimeout(args, config),
             patch: _patchArchive(args),
               );
+        if (!v1 && mismatch == null) {
+          s = s.withEvaluation(
+            evaluateVerifyV2(
+              requestedAttempts: runs,
+              candidate: s.reports,
+              baseline: baseline,
+              eligibility: loaded.capsule.manifest.eligibility.status,
+            ),
+            baseline: baseline,
+          );
+        }
         final String result;
         switch (s.verdict) {
           case Verdict.incompatible:
@@ -1308,6 +1452,14 @@ class _RegressRun extends Command<int> {
             result = 'stale';
           case Verdict.fixed:
             result = 'pass';
+          case Verdict.fixedQualified when args['accept-qualified'] as bool:
+            result = 'pass';
+          case Verdict.fixedQualified:
+            result = 'qualified';
+            failed++;
+          case Verdict.unsafe:
+            result = 'unsafe';
+            failed++;
           case Verdict.flaky:
             t['status'] = 'quarantined';
             result = 'flaky';
@@ -1316,9 +1468,7 @@ class _RegressRun extends Command<int> {
             failed++;
           case Verdict.inconclusive ||
               Verdict.reproduced ||
-              Verdict.notReproduced ||
-              Verdict.fixedQualified ||
-              Verdict.unsafe:
+              Verdict.notReproduced:
             // A regression test only passes on a valid run without the failure.
             result = 'inconclusive';
             failed++;
@@ -1329,6 +1479,8 @@ class _RegressRun extends Command<int> {
           'attempts': s.requestedAttempts,
           'validAttempts': s.evaluation.validAttempts,
           'reproductions': s.reproductions,
+          'verdict': s.verdict.name,
+          if (s.verdictV2) 'verdictVersion': 2,
           'gitSha': sha,
           if (s.evaluation.reasons.isNotEmpty)
             'reasons': s.evaluation.reasons.take(10).toList(),

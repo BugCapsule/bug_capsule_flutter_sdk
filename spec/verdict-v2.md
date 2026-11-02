@@ -3,8 +3,18 @@
 Status: **accepted 2026-11-02** with the defaults below (BC-ENT-010). The
 vectors are the `verifyV2` and `requiredAttempts` sections of
 `spec/fixtures/conformance/verdicts.json`; every evaluator must pass them.
-The Dart CLI implements it for `bugcapsule verify`; `regress run` and `gate`
-still use v1 rules (follow-up).
+The Dart CLI applies it in `verify`, `regress run` and `gate`.
+
+| Command | Where the baseline comes from |
+|---|---|
+| `verify` | Replays the capsule's commit (built clean in a worktree); cached 7 days |
+| `regress run` | The test's entry in `bugcapsule/regressions` (`baseline`), else as `verify`, then stored in the entry so CI reuses it |
+| `gate` | The newest complete `bugcapsule run` recorded on the backend for the capsule (CI gates a build of the release, so it can't rebuild the bug) |
+
+`gate` keeps its `--fail-on` policy: a FLAKY baseline or candidate fails it
+by default; unverifiable capsules (INCONCLUSIVE, FIXED_QUALIFIED, UNSAFE, all
+stored as inconclusive) fail it only with `--fail-on unverified` (or
+`error`).
 
 ## Why
 

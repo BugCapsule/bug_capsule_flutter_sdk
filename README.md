@@ -330,7 +330,7 @@ bugcapsule inspect <id|file|share-url>            # failure, eligibility, networ
 bugcapsule run <id> -d <simulator> -n 3          # replays on the capsule's commit (temporary git worktree)
 bugcapsule verify <id>                            # baseline on the capsule's commit, then your working tree
 bugcapsule regress add <id>                       # keep it as a regression test
-bugcapsule regress run                            # in CI: exit 1 when a regression fails
+bugcapsule regress run                            # in CI: exit 1 when a regression fails or can't be verified
 bugcapsule gate --release com.shop.app@1.5.0+60 --platform android   # release gate in CI
 bugcapsule share <id>                             # expiring download link
 bugcapsule capture --on | --off | --sample-rate 0.05   # kill switch and production sampling
@@ -358,8 +358,12 @@ and evidence that the failing path ran: the capsule's own
 `BugCapsule.check(...)` held, or a postcondition you registered with
 `BugCapsule.expect('name', () => ...)` held. Without a baseline (no git SHA,
 commit not in the repo, prebuilt artifacts) the result is `INCONCLUSIVE`.
-`--verdict-v1` keeps the old rules (refused in CI unless
-`BUGCAPSULE_ALLOW_VERDICT_V1=1`).
+`regress run` applies the same rules per test and keeps each test's baseline
+in its entry, so CI doesn't rebuild old commits. `gate` takes the baseline
+from the newest complete `bugcapsule run` recorded for the capsule; a capsule
+without one stays `INCONCLUSIVE` and blocks the gate only with
+`--fail-on unverified`. `--verdict-v1` keeps the old rules on all three
+commands (refused in CI unless `BUGCAPSULE_ALLOW_VERDICT_V1=1`).
 
 An attempt only counts as clean when every recorded input was replayed and
 nothing important diverged (an unregistered action, a request without a
