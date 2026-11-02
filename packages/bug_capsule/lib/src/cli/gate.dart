@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../core/replay_protocol.dart';
+import '../core/verdict.dart' show BaselineResult;
 import 'replay.dart';
 import 'term.dart';
 
@@ -105,7 +106,10 @@ abstract final class GateOutcomes {
   static const couldNotRun = {'inconclusive', 'incompatible', 'error'};
 
   /// Values of `--fail-on`.
-  static const failOnValues = ['reproduced', 'flaky', 'error'];
+  /// `unverified`: verdict v2 could not confirm the fix (no recorded
+  /// baseline, no positive evidence, qualified or unsafe), stored as
+  /// inconclusive.
+  static const failOnValues = ['reproduced', 'flaky', 'error', 'unverified'];
   static const defaultFailOn = ['reproduced', 'flaky'];
 
   /// Whether [outcome] fails the gate under [failOn].
@@ -113,6 +117,7 @@ abstract final class GateOutcomes {
     reproduced => failOn.contains('reproduced'),
     flaky => failOn.contains('flaky'),
     notReproduced => false,
+    'inconclusive' => failOn.contains('error') || failOn.contains('unverified'),
     _ => failOn.contains('error'),
   };
 }
@@ -131,6 +136,10 @@ int gateExitCode(Iterable<GateResult> results, Set<String> failOn) {
     return 2;
   }
   if (failOn.contains('error') && any((r) => r.couldNotRun)) return 3;
+  if (failOn.contains('unverified') &&
+      any((r) => r.outcome == 'inconclusive')) {
+    return 3;
+  }
   return 0;
 }
 
@@ -357,3 +366,30 @@ String gateJson({
   'results': [for (final r in results) r.toJson()],
   if (errors.isNotEmpty) 'errors': errors,
 });
+
+/// A recorded baseline for verdict v2: the newest complete `bugcapsule run`
+/// (kind replay, every requested attempt valid) the backend holds for the
+/// capsule. CI runs the gate on a build of the release, so the baseline comes
+/// from when the bug was reproduced, not from a rebuild. Null when there is
+/// none, which leaves the capsule INCONCLUSIVE.
+BaselineResult? recordedBaseline(List<Map<String, Object?>> runs) {
+  Map<String, Object?>? best;
+  DateTime? bestAt;
+  for (final r in runs) {
+    final attempts = r['attempts'];
+    if (r['kind'] != 'replay' || attempts is! int || attempts < 1) continue;
+    if (r['validAttempts'] != attempts) continue;
+    final at = DateTime.tryParse('${r['createdAt']}');
+    if (best == null || (at != null && (bestAt == null || at.isAfter(bestAt)))) {
+      best = r;
+      bestAt = at;
+    }
+  }
+  if (best == null) return null;
+  return BaselineResult(
+    revision: (best['gitSha'] as String?) ?? 'unknown',
+    attempts: best['attempts']! as int,
+    reproduced: (best['reproductions'] as int?) ?? 0,
+    cached: true,
+  );
+}
