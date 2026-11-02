@@ -563,6 +563,13 @@ _Connection _resolveConnection(BugCapsuleConfig config) {
         '[bugcapsule] both token and backend are set; using backend and ignoring token',
       );
     }
+    final refusal = explicitBackendRefusal(backend);
+    if (refusal != null) {
+      debugPrint(
+        '[bugcapsule] backend config refused: $refusal; nothing is uploaded',
+      );
+      return (backend: null, source: null, tokenError: null);
+    }
     return (
       backend: backend,
       source: BugCapsuleConnectionSource.backend,

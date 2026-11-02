@@ -197,7 +197,8 @@ class MonitoringHub implements TransactionSink {
           .toDouble();
 
   PropagationTargets get propagationTargets => PropagationTargets(
-    _remote?.tracePropagationTargets ?? options.tracePropagationTargets,
+    options.tracePropagationTargets,
+    narrowedBy: _remote?.tracePropagationTargets,
   );
 
   bool get _sessionTracking =>
