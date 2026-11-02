@@ -29,7 +29,7 @@ Payload (version 1):
 
 | Field | Type | Rule |
 |---|---|---|
-| `api` | string | Absolute `http` or `https` URL of the BugCapsule API. No user info, query or fragment. May have a path prefix (self-hosted behind a path). Trailing slashes are removed. |
+| `api` | string | Absolute `https` URL of the BugCapsule API, or `http` only to a loopback host (`localhost`, `127.0.0.0/8`, `[::1]`) or the Android emulator's host alias `10.0.2.2`, for local development. No user info, query or fragment. May have a path prefix (self-hosted behind a path). Trailing slashes are removed. |
 | `key` | string | The ingest credential: `bct_` (SDK token) or `bci_` (legacy ingest key) followed by 16–200 base64url characters. A `bcs_` secret key is always refused. |
 
 Unknown fields are ignored, so v1 can gain optional fields without a new

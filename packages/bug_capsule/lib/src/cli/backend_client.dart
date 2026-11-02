@@ -231,6 +231,15 @@ class BackendClient {
   Future<Map<String, Object?>> getCapsule(String id) =>
       _json('GET', '/v1/capsules/$id');
 
+  /// Runs recorded for a capsule, newest first.
+  Future<List<Map<String, Object?>>> listRuns(String id) async {
+    final body = await _json('GET', '/v1/capsules/$id/runs');
+    return [
+      for (final r in (body['items'] as List? ?? const []))
+        (r as Map).cast<String, Object?>(),
+    ];
+  }
+
   Future<List<int>> downloadCapsule(String id) async {
     final (_, bytes, _) = await _send('GET', _uri('/v1/capsules/$id/file'));
     return bytes;

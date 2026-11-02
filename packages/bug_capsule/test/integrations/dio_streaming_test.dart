@@ -183,10 +183,33 @@ Uint8List randomBytes(int n, int seed) {
 }
 
 void main() {
+  test(
+    'by default a binary body is recorded by size only, never its bytes',
+    () async {
+      final session = StreamSession();
+      final server = StreamingServer();
+      final dio = await dioFor(BugCapsuleDio(), session, server);
+      final response = await dio.get<ResponseBody>(
+        '/download',
+        options: Options(responseType: ResponseType.stream),
+      );
+      final sub = response.data!.stream.listen((_) {});
+      server.body.add(Uint8List.fromList(utf8.encode('token=bct_secret')));
+      await server.body.close();
+      await sub.asFuture<void>();
+      expect(session.http.single['bodyEncoding'], 'truncated');
+      expect(session.http.single['responseBody'], isNull);
+    },
+  );
+
   test('delivers the first chunk before the response completes', () async {
     final session = StreamSession();
     final server = StreamingServer();
-    final dio = await dioFor(BugCapsuleDio(), session, server);
+    final dio = await dioFor(
+      BugCapsuleDio(maxBinaryBytes: 64 * 1024),
+      session,
+      server,
+    );
 
     final response = await dio.get<ResponseBody>(
       '/download',
@@ -255,7 +278,11 @@ void main() {
     () async {
       final session = StreamSession(bodies: false);
       final server = StreamingServer(contentType: 'application/json');
-      final dio = await dioFor(BugCapsuleDio(), session, server);
+      final dio = await dioFor(
+        BugCapsuleDio(maxBinaryBytes: 64 * 1024),
+        session,
+        server,
+      );
 
       final response = await dio.get<ResponseBody>(
         '/feed',
@@ -287,7 +314,11 @@ void main() {
     () async {
       final session = StreamSession();
       final server = StreamingServer();
-      final dio = await dioFor(BugCapsuleDio(), session, server);
+      final dio = await dioFor(
+        BugCapsuleDio(maxBinaryBytes: 64 * 1024),
+        session,
+        server,
+      );
       final cancel = CancelToken();
 
       final response = await dio.get<ResponseBody>(
@@ -312,7 +343,11 @@ void main() {
   test('a stream error reaches the app and is recorded', () async {
     final session = StreamSession();
     final server = StreamingServer();
-    final dio = await dioFor(BugCapsuleDio(), session, server);
+    final dio = await dioFor(
+      BugCapsuleDio(maxBinaryBytes: 64 * 1024),
+      session,
+      server,
+    );
     final response = await dio.get<ResponseBody>(
       '/broken',
       options: Options(responseType: ResponseType.stream),

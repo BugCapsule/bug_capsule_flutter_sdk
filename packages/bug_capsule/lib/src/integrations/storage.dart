@@ -84,6 +84,12 @@ class BugCapsuleSharedPreferences extends BugCapsuleIntegration {
     if (data is! Map) return;
     for (final entry in data.entries) {
       final key = entry.key as String;
+      // The capsule is untrusted input: it may only restore what this
+      // integration would have captured (allowlist, deny list, SDK keys).
+      if (!_allowed(key)) {
+        session.replay?.diverge('restore.disallowed', key);
+        continue;
+      }
       if (entry.value is! Map) {
         // The whole entry was redacted (sensitive key): nothing to restore.
         session.replay?.diverge('storage.redacted', key);

@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'capsule.dart' show EligibilityStatus;
 import 'failure.dart';
 import 'replay_protocol.dart';
 
@@ -20,6 +23,14 @@ enum Verdict {
 
   /// Both outcomes among attempts that ran validly.
   flaky('flaky'),
+
+  /// verify (v2): baseline reproduced, every candidate attempt clean, but the
+  /// evidence is weak or the capsule is partial. Sent to the backend as
+  /// inconclusive, so it never satisfies a gate.
+  fixedQualified('inconclusive'),
+
+  /// Replay containment was not kept (live traffic allowed): no conclusion.
+  unsafe('inconclusive'),
 
   /// The capsule cannot run against this build.
   incompatible('incompatible'),
@@ -218,12 +229,15 @@ class RunEvaluation {
   bool get succeeded =>
       verdict == (kind == RunKind.replay ? Verdict.reproduced : Verdict.fixed);
 
-  /// 0 success, 1 the opposite, 2 flaky, 3 inconclusive / incompatible.
+  /// 0 success, 1 the opposite, 2 flaky, 3 inconclusive / incompatible,
+  /// 4 fixed with qualifications, 5 unsafe.
   int get exitCode => switch (verdict) {
     Verdict.reproduced || Verdict.fixed => 0,
     Verdict.notReproduced || Verdict.stillFailing => 1,
     Verdict.flaky => 2,
     Verdict.incompatible || Verdict.inconclusive => 3,
+    Verdict.fixedQualified => 4,
+    Verdict.unsafe => 5,
   };
 }
 
@@ -267,7 +281,12 @@ RunEvaluation evaluateRun(
   final r = attempts.where((a) => a.status == AttemptStatus.reproduced).length;
   final c = attempts.where((a) => a.status == AttemptStatus.clean).length;
   final Verdict verdict;
-  if (reports.any((x) => x.outcome == ReplayOutcome.incompatible)) {
+  if (reports.any(
+    (x) => x.divergences.any((d) => d.type == unsafeLiveDivergence),
+  )) {
+    reasons.add('live traffic was allowed during replay');
+    verdict = Verdict.unsafe;
+  } else if (reports.any((x) => x.outcome == ReplayOutcome.incompatible)) {
     verdict = Verdict.incompatible;
   } else if (n <= 0 || reports.length > n) {
     verdict = Verdict.inconclusive;
@@ -296,4 +315,194 @@ RunEvaluation evaluateRun(
     reasons: reasons.toList(),
     reasonCodes: {for (final a in attempts) ...a.reasonCodes}.toList()..sort(),
   );
+}
+
+// ------------------------------------------------------------- verdict v2
+
+/// Divergence a runner adds when the user let live traffic through
+/// (`--allow-live`): the attempt proves nothing either way.
+const unsafeLiveDivergence = 'replay.unsafe_live';
+
+/// Baseline attempts below this never support FIXED.
+const minBaselineAttempts = 3;
+
+/// Candidate attempts are never fewer than this, nor more than
+/// [maxCandidateAttempts].
+const minCandidateAttempts = 5;
+const maxCandidateAttempts = 30;
+
+/// The baseline build's result for a capsule (spec/verdict-v2.md).
+class BaselineResult {
+  const BaselineResult({
+    required this.revision,
+    required this.attempts,
+    required this.reproduced,
+    this.cached = false,
+  });
+
+  factory BaselineResult.fromJson(Map<String, Object?> j) => BaselineResult(
+    revision: j['revision'] as String,
+    attempts: j['attempts'] as int,
+    reproduced: j['reproduced'] as int,
+    cached: j['cached'] == true,
+  );
+
+  final String revision;
+  final int attempts;
+  final int reproduced;
+  final bool cached;
+
+  Map<String, Object?> toJson() => {
+    'revision': revision,
+    'attempts': attempts,
+    'reproduced': reproduced,
+    'cached': cached,
+  };
+}
+
+/// Lower bound of the Wilson 95% interval of [successes] / [n].
+double wilsonLower(int successes, int n) {
+  if (n <= 0) return 0;
+  const z = 1.959963984540054;
+  final p = successes / n;
+  final z2 = z * z;
+  final centre = p + z2 / (2 * n);
+  final margin = z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n));
+  return ((centre - margin) / (1 + z2 / n)).clamp(0.0, 1.0);
+}
+
+/// Candidate attempts so that a build still failing at the baseline's lower
+/// rate would pass every attempt with probability below 1%.
+int requiredCandidateAttempts(int baselineReproduced, int baselineAttempts) {
+  final low = wilsonLower(baselineReproduced, baselineAttempts);
+  if (low <= 0) return maxCandidateAttempts;
+  if (low >= 1) return minCandidateAttempts;
+  final n = (math.log(0.01) / math.log(1 - low)).ceil();
+  return n.clamp(minCandidateAttempts, maxCandidateAttempts);
+}
+
+/// `verify` under verdict v2: [candidate] are the candidate build's reports,
+/// [baseline] the baseline build's result (null when none could be built).
+///
+/// FIXED needs a baseline that reproduced in every one of at least
+/// [minBaselineAttempts] attempts, at least [requiredCandidateAttempts]
+/// candidate attempts all clean, strong positive evidence in each, and an
+/// eligible capsule. Weak evidence or a partial capsule gives
+/// [Verdict.fixedQualified]; no evidence at all is inconclusive.
+RunEvaluation evaluateVerifyV2({
+  required int requestedAttempts,
+  required List<ReplayReport> candidate,
+  required BaselineResult? baseline,
+  required EligibilityStatus eligibility,
+}) {
+  final v1 = evaluateRun(RunKind.verify, requestedAttempts, candidate);
+  final reasons = [...v1.reasons];
+  final codes = {...v1.reasonCodes};
+  RunEvaluation result(Verdict verdict, [String? reason, String? code]) {
+    if (reason != null) reasons.add(reason);
+    if (code != null) codes.add(code);
+    return RunEvaluation(
+      kind: RunKind.verify,
+      requestedAttempts: requestedAttempts,
+      verdict: verdict,
+      attempts: v1.attempts,
+      reasons: reasons,
+      reasonCodes: codes.toList()..sort(),
+    );
+  }
+
+  if (candidate.any(
+    (r) => r.divergences.any((d) => d.type == unsafeLiveDivergence),
+  )) {
+    return result(
+      Verdict.unsafe,
+      'live traffic was allowed during replay',
+      'replay.unsafe',
+    );
+  }
+  if (v1.verdict == Verdict.incompatible ||
+      v1.verdict == Verdict.stillFailing) {
+    return result(v1.verdict);
+  }
+  if (baseline == null) {
+    return result(
+      Verdict.inconclusive,
+      'no baseline: the capsule\'s build could not be replayed, so nothing shows this harness reproduces the failure',
+      'baseline.unavailable',
+    );
+  }
+  if (baseline.reproduced == 0) {
+    return result(
+      Verdict.inconclusive,
+      'the baseline build did not reproduce the failure in ${baseline.attempts} attempts',
+      'baseline.not_reproduced',
+    );
+  }
+  if (baseline.reproduced < baseline.attempts) {
+    return result(
+      Verdict.flaky,
+      'the baseline build reproduced in ${baseline.reproduced} of ${baseline.attempts} attempts',
+      'baseline.flaky',
+    );
+  }
+  if (baseline.attempts < minBaselineAttempts) {
+    return result(
+      Verdict.inconclusive,
+      'the baseline ran ${baseline.attempts} attempts; at least $minBaselineAttempts are needed',
+      'baseline.too_few',
+    );
+  }
+  final needed = requiredCandidateAttempts(
+    baseline.reproduced,
+    baseline.attempts,
+  );
+  if (requestedAttempts < needed) {
+    return result(
+      Verdict.inconclusive,
+      '$requestedAttempts candidate attempts; $needed are needed after a ${baseline.reproduced}/${baseline.attempts} baseline',
+      'attempts.too_few',
+    );
+  }
+  if (v1.verdict != Verdict.fixed) return result(v1.verdict);
+  if (eligibility == EligibilityStatus.ineligible) {
+    return result(
+      Verdict.inconclusive,
+      'the capsule is ineligible for replay',
+      'capsule.ineligible',
+    );
+  }
+  final levels = [
+    for (final a in v1.attempts) a.report.evidence?.level ?? EvidenceLevel.none,
+  ];
+  if (levels.any((l) => l == EvidenceLevel.none)) {
+    final failed = {
+      for (final a in v1.attempts) ...?a.report.evidence?.failedPostconditions,
+    };
+    if (failed.isNotEmpty) {
+      return result(
+        Verdict.stillFailing,
+        'postconditions did not hold: ${failed.join(', ')}',
+        'postcondition.failed',
+      );
+    }
+    return result(
+      Verdict.inconclusive,
+      'no positive evidence: nothing shows the failing path ran (update the SDK, or register a postcondition with BugCapsule.expect)',
+      'evidence.none',
+    );
+  }
+  final weak = levels.any((l) => l == EvidenceLevel.weak);
+  final partial = eligibility == EligibilityStatus.partial;
+  if (weak || partial) {
+    return result(
+      Verdict.fixedQualified,
+      [
+        if (weak)
+          'only shows the recorded failure point was passed (no assertion or postcondition held)',
+        if (partial) 'the capsule is partial: some inputs were not recorded',
+      ].join('; '),
+      weak ? 'evidence.weak' : 'capsule.partial',
+    );
+  }
+  return result(Verdict.fixed);
 }

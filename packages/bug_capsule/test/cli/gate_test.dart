@@ -25,6 +25,8 @@ List<int> _capsule(String id) {
           as Map<String, Object?>;
   final manifest = (doc['manifest'] as Map).cast<String, Object?>();
   manifest['capsuleId'] = id;
+  // Verdict v2 only calls an eligible capsule fixed.
+  manifest['eligibility'] = {'status': 'eligible', 'missing': <Object?>[]};
   manifest['sdk'] = {'name': 'bugcapsule-android', 'version': '0.5.0'};
   manifest['failure'] = {
     'kind': 'exception',
@@ -47,6 +49,23 @@ class FakeGateBackend {
   final List<Map<String, Object?>> reports = [];
   final List<Uri> planRequests = [];
   final List<String?> auth = [];
+
+  /// Recorded runs per capsule (verdict v2 baseline); by default every
+  /// capsule has a complete `bugcapsule run` that reproduced 3/3.
+  final Map<String, List<Map<String, Object?>>> recordedRuns = {};
+  List<Map<String, Object?>> recordedFor(String id) =>
+      recordedRuns[id] ??
+      [
+        {
+          'kind': 'replay',
+          'outcome': 'reproduced',
+          'attempts': 3,
+          'reproductions': 3,
+          'validAttempts': 3,
+          'gitSha': 'abc1234',
+          'createdAt': '2026-11-01T00:00:00Z',
+        },
+      ];
 
   String get url => 'http://127.0.0.1:${_server.port}';
 
@@ -88,6 +107,9 @@ class FakeGateBackend {
       return res.close();
     }
     final run = RegExp(r'^/v1/capsules/([^/]+)/runs$').firstMatch(path);
+    if (req.method == 'GET' && run != null) {
+      return json(200, {'items': recordedFor(run[1]!)});
+    }
     if (req.method == 'POST' && run != null) {
       if (runStatus >= 400) {
         return json(runStatus, {
@@ -120,6 +142,13 @@ ReplayReport _attempt(
   eventsExpected: 1,
   attemptId: s.attemptId,
   patch: patch,
+  // Verdict v2 evidence: the app's postcondition held after a clean replay.
+  evidence: reproduced
+      ? const ReplayEvidence()
+      : const ReplayEvidence(
+          postconditions: {'cart.total_positive': true},
+          failurePointPassed: true,
+        ),
 );
 
 /// Scripted attempts by capsule id: `pass`, `reproduce`, `flaky`, `throw`.
@@ -235,9 +264,11 @@ void main() {
 
   const identity = CapsulePatchIdentity(
     baseBuildId: 'base',
-    patchSetDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    patchSetDigest:
+        'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     engineAbi: 1,
-    hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    hostAbiHash:
+        'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   );
 
   test(
@@ -306,44 +337,49 @@ void main() {
       requirePatchedIdentity: required,
     );
 
-    test(
-      'checks each identity field across attempts within a single capsule',
-      () {
-        for (final wrong in [
-          const CapsulePatchIdentity(
-            baseBuildId: 'other',
-            patchSetDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-            engineAbi: 1,
-            hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-          ),
-          const CapsulePatchIdentity(
-            baseBuildId: 'base',
-            patchSetDigest: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
-            engineAbi: 1,
-            hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-          ),
-          const CapsulePatchIdentity(
-            baseBuildId: 'base',
-            patchSetDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-            engineAbi: 2,
-            hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-          ),
-          const CapsulePatchIdentity(
-            baseBuildId: 'base',
-            patchSetDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-            engineAbi: 1,
-            hostAbiHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
-          ),
-        ]) {
-          expect(
-            () => report([
-              result([identity, wrong]),
-            ]),
-            throwsStateError,
-          );
-        }
-      },
-    );
+    test('checks each identity field across attempts within a single capsule', () {
+      for (final wrong in [
+        const CapsulePatchIdentity(
+          baseBuildId: 'other',
+          patchSetDigest:
+              'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          engineAbi: 1,
+          hostAbiHash:
+              'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        ),
+        const CapsulePatchIdentity(
+          baseBuildId: 'base',
+          patchSetDigest:
+              'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          engineAbi: 1,
+          hostAbiHash:
+              'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        ),
+        const CapsulePatchIdentity(
+          baseBuildId: 'base',
+          patchSetDigest:
+              'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          engineAbi: 2,
+          hostAbiHash:
+              'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        ),
+        const CapsulePatchIdentity(
+          baseBuildId: 'base',
+          patchSetDigest:
+              'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          engineAbi: 1,
+          hostAbiHash:
+              'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+        ),
+      ]) {
+        expect(
+          () => report([
+            result([identity, wrong]),
+          ]),
+          throwsStateError,
+        );
+      }
+    });
     test('missing or unexecuted attempts cannot count as patch evidence', () {
       expect(
         () => report([
@@ -372,7 +408,8 @@ void main() {
         const base = CapsulePatchIdentity(
           baseBuildId: 'base',
           engineAbi: 1,
-          hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          hostAbiHash:
+              'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         );
         expect(
           () => report([
@@ -392,10 +429,13 @@ void main() {
     test('artifact-signature variants share the same exact patch identity', () {
       const variant = CapsulePatchIdentity(
         baseBuildId: 'base',
-        patchSetDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        patchSetDigest:
+            'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         engineAbi: 1,
-        hostAbiHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-        artifactDigest: 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+        hostAbiHash:
+            'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        artifactDigest:
+            'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
       );
       expect(
         report([
@@ -430,12 +470,17 @@ void main() {
       final junit = '${project.path}/out/gate.xml';
       expect(await gate(['--junit', junit, '--environment', 'staging']), 0);
       expect(launcher!.prepares, 1);
-      expect(launcher!.attempts, ['cap-1', 'cap-1', 'cap-2', 'cap-2']);
+      // Verdict v2: a 3/3 recorded baseline needs 8 clean attempts.
+      expect(launcher!.attempts, [
+        ...List.filled(8, 'cap-1'),
+        ...List.filled(8, 'cap-2'),
+      ]);
       expect(backend.runs.map((r) => r.$1), ['cap-1', 'cap-2']);
       for (final (_, run) in backend.runs) {
         expect(run['kind'], 'verify');
         expect(run['outcome'], 'not_reproduced');
-        expect(run['attempts'], 2);
+        expect(run['attempts'], 8);
+        expect((run['details'] as Map)['verdictVersion'], 2);
         expect(run['release'], 'com.shop.app@1.5.0+60');
         expect(run['environment'], 'staging');
       }
@@ -499,6 +544,71 @@ void main() {
       expect(backend.reports.last['passed'], isTrue);
     },
   );
+
+  test(
+    'verdict v2: no recorded baseline is inconclusive, and fails with --fail-on unverified',
+    () async {
+      backend
+        ..plan = [_item('cap-1', 'Cart total is negative')]
+        ..recordedRuns['cap-1'] = [];
+      expect(await gate([]), 0, reason: 'unverified does not block by default');
+      expect(backend.runs.last.$2['outcome'], 'inconclusive');
+      expect(
+        (backend.runs.last.$2['details'] as Map)['reasons'],
+        contains(startsWith('no baseline')),
+      );
+      expect(await gate(['--fail-on', 'reproduced,flaky,unverified']), 3);
+      expect(backend.reports.last['passed'], isFalse);
+    },
+  );
+
+  test(
+    'verdict v2: a build that misses a flaky bug no longer passes (R1)',
+    () async {
+      backend
+        ..plan = [_item('cap-1', 'Cart total is negative')]
+        ..recordedRuns['cap-1'] = [
+          {
+            'kind': 'replay',
+            'outcome': 'flaky',
+            'attempts': 3,
+            'reproductions': 2,
+            'validAttempts': 3,
+            'gitSha': 'abc1234',
+            'createdAt': '2026-11-01T00:00:00Z',
+          },
+        ];
+      // Every attempt on this build is clean, which v1 called fixed.
+      expect(await gate([]), 2);
+      expect(backend.runs.last.$2['outcome'], 'flaky');
+      expect(backend.reports.last['passed'], isFalse);
+    },
+  );
+
+  test('the recorded baseline is the newest complete bugcapsule run', () {
+    Map<String, Object?> r(
+      String kind,
+      int attempts,
+      int reproductions,
+      int valid,
+      String at,
+    ) => {
+      'kind': kind,
+      'attempts': attempts,
+      'reproductions': reproductions,
+      'validAttempts': valid,
+      'gitSha': 'sha-$at',
+      'createdAt': '2026-11-0${at}T00:00:00Z',
+    };
+    final b = recordedBaseline([
+      r('replay', 3, 3, 3, '1'),
+      r('replay', 5, 4, 5, '2'),
+      r('replay', 3, 3, 2, '3'), // incomplete: an attempt did not run validly
+      r('verify', 3, 0, 3, '4'), // a verify run is not a baseline
+    ])!;
+    expect([b.revision, b.attempts, b.reproduced], ['sha-2', 5, 4]);
+    expect(recordedBaseline([]), isNull);
+  });
 
   test('an item that cannot run fails only with error in --fail-on', () async {
     backend.plan = [_item('cap-1', 'Cart total is negative')];

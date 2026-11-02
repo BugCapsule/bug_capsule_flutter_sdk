@@ -13,7 +13,8 @@ export 'backend.dart'
         UploadStatus;
 export 'binding.dart';
 export 'config.dart';
-export 'connection_token.dart';
+export 'connection_token.dart'
+    hide explicitBackendRefusal, isLocalDevelopmentHost;
 export 'emergency/contract.dart'
     show
         EmergencyAction,

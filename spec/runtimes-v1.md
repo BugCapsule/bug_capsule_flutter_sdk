@@ -352,7 +352,10 @@ POST <base>/result     → ReplayReport JSON  (204; 409 wrong attemptId; 410 att
 * Fallback channel: a line `BUGCAPSULE_RESULT::{json}` on the app's stdout
   (Flutter), in the instrumentation status (`am instrument -r`, key
   `bugcapsule_result`) on Android, and in the XCUITest output on iOS. It is
-  only accepted from the process launched for the armed attempt.
+  only accepted from the process launched for the armed attempt, and only
+  when the report carries that attempt's `attemptId`: the prefix can appear
+  in any logged text (including strings replayed from a capsule), but the id
+  is random per attempt. Over HTTP the URL token already proves the sender.
 
 Per runtime transport of the base URL and **production protection**:
 

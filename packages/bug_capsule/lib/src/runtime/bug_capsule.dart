@@ -241,10 +241,39 @@ abstract final class BugCapsule {
     if (prepared != null) rt.hub!.submit(prepared, capsule: capsule);
   }
 
-  /// Raises [assertionId] when [condition] is false.
+  /// Raises [assertionId] when [condition] is false. During replay a passing
+  /// check of the capsule's assertion is the evidence a fix verification
+  /// needs (spec/verdict-v2.md).
   static void check(String assertionId, bool condition, [String message = '']) {
-    if (!condition) fail(assertionId, message);
+    if (!condition) {
+      fail(assertionId, message);
+    } else {
+      _rt?.engine?.checkPassed(assertionId);
+    }
   }
+
+  static final Map<String, bool Function()> _postconditions = {};
+
+  /// Registers a postcondition: what must be true after the scenario of a
+  /// capsule replays without its failure ("the cart total is positive").
+  /// Evaluated only in replay, after the replay settled; every registered
+  /// postcondition is reported, and `bugcapsule verify` needs them to hold
+  /// (or the capsule's own `check` to pass) to call a fix FIXED. Registering
+  /// the same [name] again replaces it.
+  static void expect(String name, bool Function() condition) =>
+      _postconditions[name] = condition;
+
+  /// Postcondition results; one that throws counts as not holding.
+  static Map<String, bool> _evaluatePostconditions() => {
+    for (final e in _postconditions.entries)
+      e.key: () {
+        try {
+          return e.value();
+        } catch (_) {
+          return false;
+        }
+      }(),
+  };
 
   static void log(String message, {String level = 'info'}) =>
       _rt?.record(EventTypes.log, {'level': level, 'message': message});
@@ -544,6 +573,12 @@ class _NoopSink implements TransactionSink {
   void transactionFinished(TransactionImpl transaction) {}
 }
 
+/// Replay runs in debug builds, or in profile builds compiled with
+/// `--dart-define=BUGCAPSULE_ALLOW_PROFILE_REPLAY=true`; never in release.
+const bool _replayAllowedInThisBuild =
+    kDebugMode ||
+    (kProfileMode && bool.fromEnvironment('BUGCAPSULE_ALLOW_PROFILE_REPLAY'));
+
 /// How [BugCapsuleConfig.token] and [BugCapsuleConfig.backend] resolve
 /// (spec/connection-token-v1.md): an explicit backend wins; an unusable
 /// token leaves no backend, so the app runs without BugCapsule instead of
@@ -562,6 +597,13 @@ _Connection _resolveConnection(BugCapsuleConfig config) {
       debugPrint(
         '[bugcapsule] both token and backend are set; using backend and ignoring token',
       );
+    }
+    final refusal = explicitBackendRefusal(backend);
+    if (refusal != null) {
+      debugPrint(
+        '[bugcapsule] backend config refused: $refusal; nothing is uploaded',
+      );
+      return (backend: null, source: null, tokenError: null);
     }
     return (
       backend: backend,
@@ -915,9 +957,10 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       debugPrint('[bugcapsule] could not read replay request: $e');
     }
     if (replayUrl != null) {
-      if (kReleaseMode) {
+      if (!_replayAllowedInThisBuild) {
         debugPrint(
-          '[bugcapsule] ignoring replay request: replay is disabled in release builds',
+          '[bugcapsule] ignoring replay request: replay runs only in debug builds '
+          '(or profile builds compiled with --dart-define=BUGCAPSULE_ALLOW_PROFILE_REPLAY=true)',
         );
       } else {
         debugPrint('[bugcapsule] replay mode: $replayUrl');
@@ -960,7 +1003,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     if (fromDefine.isNotEmpty) return fromDefine;
     final fromEnv = Platform.environment[ReplayProtocol.envUrl];
     if (fromEnv != null && fromEnv.isNotEmpty) return fromEnv;
-    if (kReleaseMode) return null;
+    if (!_replayAllowedInThisBuild) return null;
     try {
       final file = await CapsuleStore.replayRequestFile(root: root);
       if (!await file.exists()) return null;
@@ -2104,6 +2147,41 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
 
   // ---------------------------------------------------------------- replay
 
+  /// Replay failed before the engine could take over: the failure is already
+  /// reported. The app's own startup must not run, because without the engine
+  /// nothing stands between it and live services (BC-ENT-014).
+  void _refuseReplay(String reason) {
+    debugPrint(
+      '[bugcapsule] replay did not start, the app was not launched: $reason',
+    );
+    // Showing the reason is a courtesy; if it fails, the app still must not run.
+    try {
+      _showReplayRefusal(reason);
+    } catch (e) {
+      debugPrint('[bugcapsule] could not show the replay error: $e');
+    }
+  }
+
+  static void _showReplayRefusal(String reason) {
+    runApp(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: ColoredBox(
+          color: const Color(0xFF1E1E1E),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'BugCapsule replay did not start, so the app was not launched.\n\n$reason',
+                style: const TextStyle(color: Color(0xFFFFFFFF), fontSize: 14),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _startReplay(
     String url,
     FutureOr<void> Function() appRunner,
@@ -2126,7 +2204,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
           message: 'could not load capsule: $e',
         ),
       );
-      await appRunner();
+      _refuseReplay('could not load the capsule: $e');
       return;
     }
 
@@ -2135,7 +2213,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       settings: settings,
       actions: BugCapsule._actions,
       buildGitSha: config.gitSha,
-    );
+    )..postconditions = BugCapsule._evaluatePostconditions;
     random = Random(capsule.manifest.session.seed);
     // The capture's redaction rules, so request keys of redacted bodies match.
     _redactor = Redactor(
@@ -2162,7 +2240,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
         ),
       );
       engine = null;
-      await appRunner();
+      _refuseReplay('the capsule needs a state migration');
       return;
     }
     replay.precheck();
@@ -2185,7 +2263,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       );
       engine = null;
       interactions.replay = null;
-      await appRunner();
+      _refuseReplay(blocked);
       return;
     }
 

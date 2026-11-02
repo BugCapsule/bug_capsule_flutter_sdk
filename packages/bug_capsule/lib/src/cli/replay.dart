@@ -21,11 +21,38 @@ class ReplaySummary {
     this.reports,
     this.buildSha, {
     required this.requestedAttempts,
-  }) : evaluation = evaluateRun(
-         kind == ReplayKind.replay ? RunKind.replay : RunKind.verify,
-         requestedAttempts,
-         reports,
-       );
+    RunEvaluation? evaluation,
+    this.baseline,
+    this.verdictV2 = false,
+  }) : evaluation =
+           evaluation ??
+           evaluateRun(
+             kind == ReplayKind.replay ? RunKind.replay : RunKind.verify,
+             requestedAttempts,
+             reports,
+           );
+
+  /// The same attempts judged by [evaluation] (verdict v2), with the
+  /// [baseline] it used.
+  ReplaySummary withEvaluation(
+    RunEvaluation evaluation, {
+    BaselineResult? baseline,
+  }) => ReplaySummary(
+    kind,
+    reports,
+    buildSha,
+    requestedAttempts: requestedAttempts,
+    evaluation: evaluation,
+    baseline: baseline,
+    verdictV2: true,
+  );
+
+  /// The baseline a v2 `verify` compared against; null for `run`, v1 and
+  /// when none could be built.
+  final BaselineResult? baseline;
+
+  /// True when [evaluation] applied verdict v2.
+  final bool verdictV2;
 
   final ReplayKind kind;
   final List<ReplayReport> reports;
@@ -80,6 +107,8 @@ class ReplaySummary {
           ? environment.substring(0, 64)
           : environment,
     'details': {
+      if (verdictV2) 'verdictVersion': 2,
+      if (baseline != null) 'baseline': baseline!.toJson(),
       'verdict': verdict.name,
       'reasons': evaluation.reasons.take(50).toList(),
       'completedAttempts': attempts,
@@ -166,7 +195,9 @@ Future<ReplaySummary> replayCapsule({
     ..patchArtifact = patchArtifact
     ..patchKeyring = patch?.keyring
     ..patchKeyringSignature = patch?.keyringSignature;
-  final expectedPatch = patchArtifact == null ? null : patchSetDigestOf(patchArtifact);
+  final expectedPatch = patchArtifact == null
+      ? null
+      : patchSetDigestOf(patchArtifact);
   final reports = <ReplayReport>[];
   final budget =
       attemptTimeout ??
@@ -276,6 +307,12 @@ List<String> summaryLines(ReplaySummary s) {
     Verdict.flaky => yellow('FLAKY $k/$n'),
     Verdict.fixed => green('FIXED — failure gone in $n/$n valid runs'),
     Verdict.stillFailing => red('STILL FAILING $k/$n'),
+    Verdict.fixedQualified => yellow(
+      'FIXED (QUALIFIED) — failure gone in $n/$n valid runs, with limitations',
+    ),
+    Verdict.unsafe => red(
+      'UNSAFE — live traffic was allowed; nothing is concluded',
+    ),
   };
   lines.add('${bold('Result:')} $verdict');
   if (!e.succeeded && e.reasons.isNotEmpty) {
@@ -340,10 +377,14 @@ class PatchArchive {
 /// the runtime on the device does the verifying.
 String patchSetDigestOf(List<int> bundle) {
   const header = 12;
-  if (bundle.length < header || String.fromCharCodes(bundle.take(7)) != 'BCPATCH') {
+  if (bundle.length < header ||
+      String.fromCharCodes(bundle.take(7)) != 'BCPATCH') {
     throw const FormatException('not a .bcpatch artifact');
   }
-  final n = ByteData.sublistView(Uint8List.fromList(bundle.sublist(8, header))).getUint32(0, Endian.little);
-  final doc = jsonDecode(utf8.decode(bundle.sublist(header, header + n))) as Map;
+  final n = ByteData.sublistView(
+    Uint8List.fromList(bundle.sublist(8, header)),
+  ).getUint32(0, Endian.little);
+  final doc =
+      jsonDecode(utf8.decode(bundle.sublist(header, header + n))) as Map;
   return doc['patchSetDigest'] as String;
 }
