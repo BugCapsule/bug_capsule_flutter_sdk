@@ -488,7 +488,7 @@ void main() {
       expect(reports().single['errorCode'], isNull);
       expect(reports().single['runtime'], {
         'hotfix': {
-          'provider': 'shorebird',
+          'provider': 'test_provider',
           'available': true,
           'releaseVersion': '2.4.1+42',
           'currentPatch': 3,
@@ -503,7 +503,7 @@ void main() {
         'runtime only', () async {
       final provider = FakeHotfixProvider(
         const HotfixStatus(
-          provider: 'shorebird',
+          provider: 'test_provider',
           available: true,
           state: HotfixState.upToDate,
         ),
@@ -517,7 +517,7 @@ void main() {
 
       clock = clock.add(const Duration(seconds: 61));
       provider.status = const HotfixStatus(
-        provider: 'shorebird',
+        provider: 'test_provider',
         available: false,
         state: HotfixState.unavailable,
       );
@@ -538,7 +538,7 @@ void main() {
 
       clock = clock.add(const Duration(seconds: 61));
       provider.status = const HotfixStatus(
-        provider: 'shorebird',
+        provider: 'test_provider',
         available: true,
         state: HotfixState.outdated,
         currentPatch: 3,
@@ -550,7 +550,7 @@ void main() {
       clock = clock.add(const Duration(seconds: 61));
       provider
         ..status = const HotfixStatus(
-          provider: 'shorebird',
+          provider: 'test_provider',
           available: true,
           state: HotfixState.restartRequired,
           currentPatch: 3,
@@ -577,7 +577,7 @@ void main() {
     test('a status that cannot be reported is logged and dropped', () async {
       final provider = FakeHotfixProvider(
         const HotfixStatus(
-          provider: 'Shorebird',
+          provider: 'TestProvider',
           available: true,
           state: HotfixState.upToDate,
         ),
@@ -588,7 +588,7 @@ void main() {
       );
       await pumpEventQueue();
       provider.status = const HotfixStatus(
-        provider: 'shorebird',
+        provider: 'test_provider',
         available: true,
         state: HotfixState.upToDate,
         currentPatch: 0,
@@ -616,7 +616,7 @@ void main() {
       expect(result, isA<HotfixDownloadFailed>());
       expect((result as HotfixDownloadFailed).reason, 'provider_error');
       expect(result.status.state, HotfixState.failed);
-      expect(result.status.provider, 'shorebird');
+      expect(result.status.provider, 'test_provider');
       expect(result.status.currentPatch, 3);
       expect(reported(), containsPair('state', 'failed'));
       expect(reported(), containsPair('currentPatch', 3));
@@ -648,7 +648,7 @@ void main() {
       host.isReplaying = true;
       clock = clock.add(const Duration(seconds: 61));
       provider.status = const HotfixStatus(
-        provider: 'shorebird',
+        provider: 'test_provider',
         available: true,
         state: HotfixState.outdated,
       );

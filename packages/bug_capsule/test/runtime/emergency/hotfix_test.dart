@@ -8,7 +8,7 @@ import 'fakes.dart';
 /// `BugCapsule.emergency.hotfix` wrapper on its own.
 
 HotfixStatus _status({
-  String provider = 'shorebird',
+  String provider = 'test_provider',
   bool available = true,
   HotfixState state = HotfixState.upToDate,
   String? releaseVersion = '2.4.1+42',
@@ -36,7 +36,7 @@ void main() {
           '2.4.1',
         ),
         {
-          'provider': 'shorebird',
+          'provider': 'test_provider',
           'available': true,
           'releaseVersion': '2.4.1+42',
           'currentPatch': 3,
@@ -58,12 +58,12 @@ void main() {
     });
 
     test('a provider must match ^[a-z][a-z0-9_]{0,31}\$', () {
-      for (final ok in ['shorebird', 'a', 'my_push2', 'a' * 32]) {
+      for (final ok in ['test_provider', 'a', 'my_push2', 'a' * 32]) {
         expect(hotfixRuntimeJson(_status(provider: ok), null)['provider'], ok);
       }
       for (final bad in [
         '',
-        'Shorebird',
+        'TestProvider',
         '2push',
         '_x',
         'code-push',

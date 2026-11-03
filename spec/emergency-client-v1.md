@@ -237,14 +237,14 @@ revision (`0` before any), `errorCode: null`, and a `runtime` object:
 {"environment":"production","platform":"FLUTTER_ANDROID","installationId":"…","appVersion":"2.4.1+42","sdkVersion":"0.6.0",
  "revision":42,"status":"RUNTIME","errorCode":null,
  "runtime":{
-   "hotfix":{"provider":"shorebird","available":true,"releaseVersion":"2.4.1+42","currentPatch":3,"nextPatch":4,"state":"restart_required"},
+   "hotfix":{"provider":"custom_provider","available":true,"releaseVersion":"2.4.1+42","currentPatch":3,"nextPatch":4,"state":"restart_required"},
    "update":{"provider":"google_play","flow":"flexible","state":"downloaded","availableVersion":"2.4.2","requiredVersion":"2.4.2"}}}
 → 204
 ```
 
 | Field | Rule |
 |---|---|
-| `hotfix.provider`, `update.provider` | `^[a-z][a-z0-9_]{0,31}$`. Shipped adapters use `shorebird`, `google_play`, `app_store`. |
+| `hotfix.provider`, `update.provider` | `^[a-z][a-z0-9_]{0,31}$`. Examples: `custom_provider`, `google_play`, `app_store`. |
 | `hotfix.available` | The installed build carries the provider's patch runtime. A build made without it reports `false`. |
 | `hotfix.releaseVersion` | The release patches apply to, or null. At most 64 characters. |
 | `hotfix.currentPatch` | The patch the running process uses; null on the base release. |
@@ -285,11 +285,13 @@ whether a patch was downloaded, and it never reports a downloaded patch as
 active. A downloaded patch becomes active on the next start. The adapter
 reports `restart_required` and leaves the timing to the app.
 
-* The shipped adapter is for Shorebird, in a separate package. It works only in
-  builds created with `shorebird release`. Any other build reports
-  `available: false`; such a build can only be fixed by a store release.
-* Code push delivers Dart code only. Changes to native code or plugins need a
-  store release.
+The hotfix reporting interface is implemented by `BugCapsulePatchHotfix` for
+the BugCapsule engine. No external hotfix implementation is bundled.
+BugCapsule signed patches use the separate
+`bug_capsule_patch` runtime, `BugCapsuleConfig.patchBinding` and `PatchUpdater`.
+`BugCapsulePatchHotfix` reports status through this interface; it does not
+download patches. Signed artifact delivery and receipts use the patch protocol.
+Changes outside registered patch capabilities require a store release.
 
 **Update adapter (Android and iOS).** It covers an app that has to move to a
 newer store build, usually because a decision says `REQUIRE_UPDATE` with a

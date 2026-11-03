@@ -239,7 +239,7 @@ void main() {
         appVersion: '2.4.1+42',
         hotfixProvider: FakeHotfixProvider(
           const HotfixStatus(
-            provider: 'shorebird',
+            provider: 'test_provider',
             available: true,
             state: HotfixState.restartRequired,
             currentPatch: 3,
@@ -252,7 +252,7 @@ void main() {
     expect(answered, isTrue);
     const runtime = {
       'hotfix': {
-        'provider': 'shorebird',
+        'provider': 'test_provider',
         'available': true,
         'releaseVersion': '2.4.1+42',
         'currentPatch': 3,
