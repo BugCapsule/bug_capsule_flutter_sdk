@@ -16,6 +16,7 @@ import 'actions.dart';
 import 'backend.dart';
 import 'binding.dart';
 import 'config.dart';
+import 'error_fallback.dart';
 import 'connection_token.dart';
 import 'consent.dart';
 import 'emergency/contract.dart' show EmergencyDecision;
@@ -364,6 +365,7 @@ abstract final class BugCapsule {
   static void suppressPointer(int pointer) =>
       _rt?.suppressedPointers.add(pointer);
   static bool get overlayEnabled =>
+      !kReleaseMode &&
       (_rt?.config.showOverlay ?? false) &&
       !isReplaying &&
       (_rt?.isRecording ?? false);
@@ -838,6 +840,8 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
   bool _observing = false;
   bool _pointerRouteInstalled = false;
   FlutterExceptionHandler? _previousFlutterError;
+  ErrorWidgetBuilder? _previousErrorWidgetBuilder;
+  ErrorWidgetBuilder? _installedErrorWidgetBuilder;
   bool Function(Object, StackTrace)? _previousPlatformError;
   bool _handlersInstalled = false;
   bool _disposed = false;
@@ -1550,6 +1554,18 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
   void _installErrorHandlers() {
     if (_handlersInstalled) return;
     _handlersInstalled = true;
+    if (config.presentBuildErrors && !isReplaying) {
+      _previousErrorWidgetBuilder = ErrorWidget.builder;
+      ErrorWidget.builder = _installedErrorWidgetBuilder = (details) {
+        // FlutterError.onError already reports this failure. Do not report twice.
+        try {
+          return config.errorWidgetBuilder?.call(details) ??
+              const BugCapsuleErrorFallback();
+        } catch (_) {
+          return const BugCapsuleErrorFallback();
+        }
+      };
+    }
     final previousFlutterError = _previousFlutterError = FlutterError.onError;
     FlutterError.onError = (details) {
       if (!details.silent) {
@@ -2638,6 +2654,10 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
       GestureBinding.instance.pointerRouter.removeGlobalRoute(_onPointer);
     }
     if (_handlersInstalled) {
+      if (_installedErrorWidgetBuilder != null &&
+          identical(ErrorWidget.builder, _installedErrorWidgetBuilder)) {
+        ErrorWidget.builder = _previousErrorWidgetBuilder!;
+      }
       FlutterError.onError = _previousFlutterError;
       PlatformDispatcher.instance.onError = _previousPlatformError;
     }
