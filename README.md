@@ -185,7 +185,7 @@ bugCapsuleDio.attach(dio);                   // after any custom adapter
 final router = GoRouter(initialLocation: bugCapsuleRouter.initialLocation('/'), routes: [...]);
 bugCapsuleRouter.attach(router);
 
-// Optional QA capture button:
+// Optional QA capture button (also requires showOverlay: true in config):
 MaterialApp.router(builder: (context, child) => BugCapsuleOverlay(child: child!), ...);
 ```
 
@@ -308,7 +308,7 @@ No Dart or Flutter installation is needed for the CLI. On first use it downloads
 and verifies a standalone executable for macOS (Apple Silicon or Intel), Linux
 (ARM64 or x64), or Windows x64. Later runs use the cached executable, including
 offline inspection. Direct executable downloads are available in the
-[CLI release](https://github.com/BugCapsule/bug_capsule_flutter_sdk/releases/tag/v0.4.1-beta.10).
+[CLI release](https://github.com/BugCapsule/bug_capsule_flutter_sdk/releases/tag/v0.4.1-beta.11).
 
 Replay needs the toolchain of the app being tested: Flutter for Flutter apps,
 Android SDK/JDK for Android, Xcode on macOS for iOS, or Node/Playwright for web.
@@ -490,6 +490,54 @@ Redaction is pattern-based. It does **not** find personal data that isn't a
 credential (names, emails, addresses) or secrets in URL paths. Inspect real
 capsules with `bugcapsule inspect` before a wider rollout. More:
 [Privacy and redaction](https://docs.bugcapsule.com/privacy.html).
+
+### Consent and local data
+
+```dart
+// Collect nothing until the user agrees:
+BugCapsule.init(
+  config: const BugCapsuleConfig(token: 'bcsdk.v1.…', collectionEnabled: false),
+  appRunner: () => runApp(const MyApp()),
+);
+
+// When the user accepts, withdraws, or asks to erase their data:
+await BugCapsule.setCollectionEnabled(true);
+await BugCapsule.setCollectionEnabled(false);
+await BugCapsule.clearLocalData();
+```
+
+- `setCollectionEnabled(false)` stops recording and monitoring at once,
+  uploads nothing more, and deletes queued capsules, queued events, saved
+  captures and crash journals. An app that starts with collection off
+  captures nothing and does not contact the backend.
+- `setCollectionEnabled(true)` takes effect at the next launch: capture is set
+  up before the app starts, so it does not restart in a running process.
+  Until then `status` says so.
+- The choice is stored on the device under the SDK storage root and wins over
+  `collectionEnabled` in the config, which is only the default for a device
+  where no choice was made (default `true`). If it can't be stored, it lasts
+  for the process only.
+- `clearLocalData()` deletes everything the SDK collected on the device
+  (queued capsules and events, saved captures, crash journals, the cached
+  project settings, the monitoring install id and session) and the in-memory
+  event buffer, last failure and breadcrumbs. Recording, if on, continues
+  from a fresh start; an upload already on the wire finishes. The consent
+  choice and emergency policies are kept.
+- Both work before `init` (once the Flutter binding is up).
+- `BugCapsule.collectionEnabled` reports the current choice; `status` shows
+  `disabled` with reason `collection_disabled` while collection is off.
+- Saved captures (`savedCaptures()`, for in-app QA tools) keep the newest 20
+  and are deleted after 7 days (`savedCaptureMaxAge`), at startup and
+  whenever they are listed.
+- Backups: on Android the SDK keeps its files in `noBackupFilesDir`, out of
+  Auto Backup (files an older SDK left in `files/bugcapsule` move there on
+  the first launch). On iOS, add
+  [`bug_capsule_native`](https://pub.dev/packages/bug_capsule_native): it
+  excludes the storage root from iCloud and device backups and sets its file
+  protection to `completeUntilFirstUserAuthentication`. Without it the root
+  (`Library/Application Support/bugcapsule`) is included in backups.
+- Native crash reports held by `bug_capsule_native`'s platform SDKs are
+  stored by those SDKs and are not deleted by `clearLocalData`.
 
 ## Emergency recovery (feature guards)
 
@@ -702,3 +750,23 @@ This SDK and its bundled CLI are available under the MIT License. See [LICENSE](
 
 Opt-in PNG frames are stored inside capsules and displayed against event time.
 See [capture, privacy, limits and platform examples](spec/screenshots-v1.md).
+### Background operation and failed screens
+
+Initialization adds no capture UI by default, including debug and QA builds.
+`BugCapsuleOverlay` requires `showOverlay: true` and stays hidden in production
+capture mode and all Flutter release builds, including release builds configured
+with `CaptureMode.qa` or `BUGCAPSULE_MODE=qa`.
+Explicit feedback widgets are still opt-in.
+
+Flutter build failures automatically display a neutral message in the failed
+widget's place instead of the gray/red error widget. Exception details are kept
+out of that message; the existing error pipeline reports them in the background,
+subject to configured monitoring, consent, sampling and upload availability.
+Customize/localize the message with `BugCapsuleConfig(errorWidgetBuilder: ...)`,
+or preserve your app's own error presentation with `presentBuildErrors: false`.
+The SDK restores the previous builder when disposed unless the app replaced it.
+
+This fallback covers widget build failures. Async, network and platform errors
+continue through reporting without replacing healthy UI. Native process crashes
+cannot display an in-process fallback. Recovery of application state remains the
+app's responsibility.
