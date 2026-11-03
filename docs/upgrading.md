@@ -22,7 +22,7 @@ package, `bug_capsule`. The API is unchanged; only the dependency and the
 imports change.
 
 - In `pubspec.yaml`, replace every `bug_capsule_*` dependency with
-  `bug_capsule` (`flutter pub add bug_capsule`).
+  `bug_capsule` (`flutter pub add bug_capsule:0.4.1-beta.11`).
 - Replace every `package:bug_capsule_*/…` import with
   `import 'package:bug_capsule/bug_capsule.dart';`.
 - CLI: `dart pub global deactivate bug_capsule_cli`, then
