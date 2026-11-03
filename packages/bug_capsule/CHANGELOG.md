@@ -1,4 +1,8 @@
-## Unreleased
+## 0.4.1-beta.11 — 2026-11-03
+
+- Add Verdict v2 evidence and baseline verification; contain replay and CLI filesystem/process/network operations.
+- Narrow remote configuration to app policy, redact credentials, and omit network bodies by default in production.
+- Make capture UI opt-in and unavailable in release builds; present safe, customizable widget-build error fallbacks.
 
 - Local data lifecycle (BC-ENT-038): `BugCapsule.clearLocalData()` deletes the upload outbox, queued monitoring envelopes, saved captures, crash journals, the cached remote config and the monitoring install id and session, plus the in-memory buffer, last failure and breadcrumbs; recording continues from a fresh start. `BugCapsule.setCollectionEnabled(bool)` is a consent switch persisted under the storage root, defaulting to the new `BugCapsuleConfig.collectionEnabled` (default true): off stops capture, monitoring, uploads and config fetches and deletes collected data, and an app started with it off never contacts the backend; on takes effect at the next launch. `BugCapsule.collectionEnabled` reads it, and `status` reports `disabled` with reason `collection_disabled`. Both work before `init`.
 - Saved captures expire after `BugCapsuleConfig.savedCaptureMaxAge` (7 days by default), at startup and whenever they are listed.
