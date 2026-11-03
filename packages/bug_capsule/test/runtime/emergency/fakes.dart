@@ -80,7 +80,7 @@ class FakeHotfixProvider implements HotfixProvider {
   FakeHotfixProvider([this.status = upToDate]);
 
   static const upToDate = HotfixStatus(
-    provider: 'shorebird',
+    provider: 'test_provider',
     available: true,
     state: HotfixState.upToDate,
     releaseVersion: '2.4.1+42',

@@ -58,8 +58,9 @@ class EmergencyConfig {
   /// dart-define).
   final String? appVersion;
 
-  /// A code push adapter such as `BugCapsuleShorebird` (package
-  /// `bug_capsule_shorebird`), available as `BugCapsule.emergency.hotfix`.
+  /// An optional hotfix reporting adapter, available as
+  /// `BugCapsule.emergency.hotfix`. Use BugCapsulePatchHotfix from
+  /// package:bug_capsule_patch to report the BugCapsule engine status.
   /// Its status is reported to the BugCapsule backend so a recovery can be
   /// followed to the installed builds (§7.6). Null: no hotfix adapter.
   final HotfixProvider? hotfixProvider;

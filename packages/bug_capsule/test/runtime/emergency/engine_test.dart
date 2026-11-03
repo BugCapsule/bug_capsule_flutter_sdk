@@ -789,7 +789,7 @@ void main() {
   group('runtime reports', () {
     Map<String, Object?> hotfix(String state, {int? current, int? next}) => {
       'hotfix': {
-        'provider': 'shorebird',
+        'provider': 'test_provider',
         'available': true,
         'releaseVersion': '2.4.1+42',
         'currentPatch': current,

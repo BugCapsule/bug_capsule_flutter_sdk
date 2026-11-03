@@ -44,7 +44,7 @@ timing, so races and data-dependent bugs come back.
 ## Requirements
 
 - A BugCapsule project. Sign in at [app.bugcapsule.com](https://app.bugcapsule.com).
-- Flutter 3.35+ and Dart 3.9+.
+- Flutter 3.41+ and Dart 3.10+ (bundled integration source; not yet published).
 - An iOS simulator (or Android emulator) and `git` for replay.
 
 ## Install
@@ -254,7 +254,7 @@ or mismatched interactions is never reported as fixed.
 |---|---|---|
 | WebSockets (`web_socket_channel` 3, `dart:io` `WebSocket`) | `BugCapsuleWebSocket` | Open sockets with `connect(uri)` (a `WebSocketChannel`) or `connectIo(url)`. Binary frames are kept as sizes only unless `captureBinary: true`. |
 | Platform channels (MethodChannel, EventChannel, BasicMessageChannel) | `BugCapsulePlatformChannels` | List the channels and their codecs. Plugins on the default messenger are covered because `BugCapsule.init` creates the binding. |
-| Firebase Auth and Firestore, geolocator, Google Maps, Stripe | `bug_capsule_firebase`, `bug_capsule_geolocator`, `bug_capsule_google_maps`, `bug_capsule_stripe` | Separate packages; see each README for the tested versions and operations. |
+| Firebase Auth and Firestore, geolocator, Google Maps, Stripe | `package:bug_capsule/firebase.dart`, `geolocator.dart`, `google_maps.dart`, `stripe.dart` | Included in this SDK; see the integration guides below for supported operations. |
 | Any other SDK | `NativeAdapter` | Wrap the operations your app uses with `call(...)` and `subscribe(...)`; check it with `AdapterConformance` from `package:bug_capsule/testing.dart`. |
 
 ```dart
@@ -594,39 +594,21 @@ How it works:
   capture is disabled or switched off remotely, and can be initialized before
   or after `BugCapsule.init`.
 
-### Hotfixes (Shorebird)
+### Signed patches with BugCapsule
 
-A guard switches a broken feature off; a hotfix fixes it. With a hotfix
-adapter, the module also tells the BugCapsule backend which patch each
-installation runs, so you can see whether a recovery can reach the installed
-builds and follow it once it ships. The adapter for Shorebird is the separate
-`bug_capsule_shorebird` package:
+Use `bug_capsule_patch` for the BugCapsule patch engine on Android and iOS.
+Register your module contracts and fallback implementations, pass a
+`BugCapsulePatchBinding` to `BugCapsuleConfig.patchBinding`, and use
+`PatchUpdater` with `HttpPatchTransport` to verify and stage signed artifacts.
+Patches activate on the next launch; call `markHealthy` after checking the app.
+This updates registered logic and surfaces, not arbitrary Dart or native code.
 
-```dart
-await BugCapsule.emergency.initialize(EmergencyConfig(
-  trustAnchor: 'bcek.v1.…',
-  hotfixProvider: BugCapsuleShorebird(),
-));
-
-final result = await BugCapsule.emergency.hotfix!.downloadAvailablePatch();
-if (result is HotfixRestartRequired) {
-  // The patch is active after the next start. When that is, is up to you.
-}
-```
-
-- `checkAvailability()`, `downloadAvailablePatch()` and `getStatus()` return
-  the provider's status: whether the build can be patched at all, the running
-  patch (`currentPatch`), a downloaded one waiting for the next start
-  (`nextPatch`) and the state (`up_to_date`, `outdated`, `downloading`,
-  `restart_required`, `unavailable`, `failed`). They never throw.
-- The SDK never restarts the app and never reports a downloaded patch as
-  active.
-- Only builds made with `shorebird release` can be patched; any other build
-  reports `available: false` and needs a store release. Code push changes Dart
-  code only.
-- Each new status is sent with the module's receipts (`RUNTIME`), at most one
-  per minute, and not during capsule replay. Other code push services can
-  implement `HotfixProvider`.
+See the [patch runtime guide](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/packages/bug_capsule_patch/README.md).
+Emergency feature guards and patch delivery have separate APIs. To report the
+engine status through Emergency Recovery, pass `BugCapsulePatchHotfix(patch)` as
+`EmergencyConfig.hotfixProvider`. This adapter reports status only; downloads
+are driven by `PatchUpdater` and signed channel metadata. No external code-push
+provider ships with this SDK.
 
 **The client guard is a user-experience measure, not a security control.** A
 modified or outdated app can ignore it. Anything that moves money or data must
@@ -638,8 +620,7 @@ Limits:
 - Android and iOS only. On web and desktop the module stays in failure mode
   and logs once.
 - Policies are not code push: they cannot change app behavior beyond the
-  guards you wrote. A code fix arrives through a store release or a hotfix
-  adapter.
+  guards you wrote. A code fix arrives through a store release or the BugCapsule patch runtime.
 - Guard decisions are recorded into capsules. While a capsule replays, each
   evaluation returns what the user saw, with `source: replay`, and the module
   makes no network calls. A feature the capsule has no decision for is allowed,
@@ -770,3 +751,35 @@ This fallback covers widget build failures. Async, network and platform errors
 continue through reporting without replacing healthy UI. Native process crashes
 cannot display an in-process fallback. Recovery of application state remains the
 app's responsibility.
+
+## Bundled service integrations
+
+Firebase, location, Google Maps and Stripe adapters are included in `bug_capsule`.
+Import the library you use and register its integration with `BugCapsule.init`:
+
+```dart
+import 'package:bug_capsule/bug_capsule.dart';
+import 'package:bug_capsule/google_maps.dart';
+
+await BugCapsule.init(integrations: [BugCapsuleGoogleMaps()]);
+```
+
+Guides: [Firebase](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/packages/bug_capsule/doc/integrations/firebase.md),
+[location](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/packages/bug_capsule/doc/integrations/geolocator.md),
+[Google Maps](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/packages/bug_capsule/doc/integrations/google_maps.md), [Stripe](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/packages/bug_capsule/doc/integrations/stripe.md).
+The repository copies of these guides are under `packages/bug_capsule/doc/integrations`.
+
+This source change is unreleased. Existing published SDK versions still use the
+separate adapter packages. When upgrading to the bundled release, remove those
+four dependencies and replace `package:bug_capsule_NAME/bug_capsule_NAME.dart`
+with `package:bug_capsule/NAME.dart`. Keep the same integration constructors.
+Adapter identifiers and protocol versions are unchanged so existing capsules
+continue to match their recorded dependencies.
+
+The bundled SDK requires Dart 3.10+ and Flutter 3.41+. Its dependency graph now
+includes Firebase plugins and the location, Maps and Stripe platform interfaces,
+even when their libraries are not imported. Firebase native build requirements
+therefore apply to all consumers; do not initialize Firebase unless your app uses
+it. Maps, geolocator and Stripe apps still install and configure their actual
+service plugins. Adapters are activated only when registered.
+`bug_capsule_native` and `bug_capsule_patch` remain separate native packages.

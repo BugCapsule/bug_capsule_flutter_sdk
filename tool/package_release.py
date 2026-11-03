@@ -14,7 +14,7 @@ if runtime_version is None or runtime_version.group(1) != version:
 stage = root / "dist" / ("bug_capsule-" + version)
 if stage.exists(): shutil.rmtree(stage)
 stage.mkdir(parents=True, exist_ok=True)
-for name in ["lib", "bin", "tool", "example", "README.md", "CHANGELOG.md", "LICENSE", "pubspec.yaml", "patch_toolchain_manifest.json"]:
+for name in ["lib", "doc", "bin", "tool", "example", "README.md", "CHANGELOG.md", "LICENSE", "pubspec.yaml", "patch_toolchain_manifest.json"]:
     item = source / name
     if item.is_dir():
         if (stage / name).exists(): shutil.rmtree(stage / name)

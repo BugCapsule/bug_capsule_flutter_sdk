@@ -1,3 +1,12 @@
+## Unreleased
+
+- Bundle Firebase, geolocator, Google Maps and Stripe adapters in the core SDK
+  with dedicated library imports. Remove the four standalone workspace packages.
+- Remove the external hotfix integration and its dependency. Use BugCapsule Patch
+  for signed updates; retain the reporting interface used by BugCapsulePatchHotfix.
+- Require Dart 3.10 and Flutter 3.41. Firebase native dependencies now apply to
+  all SDK consumers. See README migration and integration guides.
+
 ## 0.4.1-beta.11 — 2026-11-03
 
 - Add Verdict v2 evidence and baseline verification; contain replay and CLI filesystem/process/network operations.
@@ -16,7 +25,7 @@
 - Release-health sessions report `patchBaseBuildId` and `patchSetDigest`, so patch rollouts can be judged from real sessions. A session recovered on the next launch reports the patch it ran, not the current one.
 - Emergency recovery: guard decisions are recorded into capsules and replay returns them, so a replay takes the path the user took (`spec/emergency-client-v1.md` §7.8). `manifest.capabilities["emergency.decisions"]` says whether a capsule holds every decision. Subjects are written as a hash, never as they are.
 - Emergency recovery (feature guards): `BugCapsule.emergency` fetches signed emergency policies (ES256, verified against the trust anchor in `EmergencyConfig`), caches and re-verifies them across launches, refreshes them in the foreground with backoff, and answers `evaluate`, `isFeatureAllowed` and `getPolicy` synchronously. Per-key failure modes (`failOpen` by default, `failClosed`, `useLastValidPolicy`), anti-replay of older revisions, receipts, `changes` and `status`. Android and iOS only; works with capture disabled or remotely switched off; allows everything during capsule replay. Implements `spec/emergency-client-v1.md`. Adds a dependency on `pointycastle`.
-- Emergency recovery: hotfix adapters and runtime reports (`spec/emergency-client-v1.md` §7.6, §7.7). `EmergencyConfig.hotfixProvider` takes a `HotfixProvider` (`checkAvailability`, `downloadAvailablePatch`, `getStatus`, with `HotfixStatus`, `HotfixState`, `HotfixAvailability` and the sealed `HotfixResult`); `BugCapsule.emergency.hotfix` calls it and reports every status it returns to the BugCapsule backend as a `RUNTIME` receipt (highest accepted revision, never the same status twice in a row and at most one per 60 s, coalesced to the latest; `APPLIED` and `FAILED` receipts carry the latest one). Invalid statuses are logged and not sent; nothing is reported during capsule replay. The SDK never restarts the app or reports a downloaded patch as active. The Shorebird adapter is the new `bug_capsule_shorebird` package.
+- Emergency recovery: hotfix adapters and runtime reports (`spec/emergency-client-v1.md` §7.6, §7.7). `EmergencyConfig.hotfixProvider` takes a `HotfixProvider` (`checkAvailability`, `downloadAvailablePatch`, `getStatus`, with `HotfixStatus`, `HotfixState`, `HotfixAvailability` and the sealed `HotfixResult`); `BugCapsule.emergency.hotfix` calls it and reports every status it returns to the BugCapsule backend as a `RUNTIME` receipt (highest accepted revision, never the same status twice in a row and at most one per 60 s, coalesced to the latest; `APPLIED` and `FAILED` receipts carry the latest one). Invalid statuses are logged and not sent; nothing is reported during capsule replay. The SDK never restarts the app or reports a downloaded patch as active.
 - Crash capsules keep at most 98 app labels, so the two crash labels fit and an app with 99 or more labels no longer loses its crash capsule to validation.
 
 ## 0.4.1-beta.7 — 2026-10-27
