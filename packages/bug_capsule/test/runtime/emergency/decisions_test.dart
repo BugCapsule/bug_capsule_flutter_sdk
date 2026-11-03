@@ -465,11 +465,25 @@ void main() {
         })();
         final r = (await BugCapsule.capture())!;
         final raw = CapsuleCodec.decode(await r.file.readAsBytes());
-        // No frame here, so no anchor: move the session after time zero.
+        // No frame here, so capture anchors to its write time. Normalize
+        // the recorded timeline instead of assuming capture took <100 ms:
+        // a busy runner can otherwise leave the action before replay time 0.
+        final firstT = raw.events.fold<int>(
+          raw.checkpoint.t,
+          (first, event) => event.t < first ? event.t : first,
+        );
+        final offset = firstT - 1;
         capsule = Capsule(
-          manifest: raw.manifest,
-          checkpoint: raw.checkpoint.shift(-100),
-          events: [for (final e in raw.events) e.shift(-100)],
+          manifest: CapsuleManifest.fromJson({
+            ...raw.manifest.toJson(),
+            'failure': raw.manifest.failure?.shift(offset).toJson(),
+          }),
+          checkpoint: raw.checkpoint.shift(offset),
+          events: [for (final e in raw.events) e.shift(offset)],
+        );
+        expect(
+          capsule.events.where((e) => e.type == EventTypes.action),
+          isNotEmpty,
         );
         await BugCapsule.resetForTest();
         BugCapsule.debugOverrides = null;
