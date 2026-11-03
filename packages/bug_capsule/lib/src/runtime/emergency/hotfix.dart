@@ -41,7 +41,7 @@ final class HotfixStatus {
     this.error,
   });
 
-  /// `^[a-z][a-z0-9_]{0,31}$`, e.g. `shorebird`.
+  /// `^[a-z][a-z0-9_]{0,31}$`, e.g. `custom_provider`.
   final String provider;
 
   /// The build carries the provider's patch runtime.
@@ -178,8 +178,8 @@ final class HotfixUnavailable extends HotfixResult {
   String toString() => 'HotfixUnavailable($status)';
 }
 
-/// A code push service that patches the Dart code of a release (§7.7), such
-/// as Shorebird (`bug_capsule_shorebird`). Pass one as
+/// Hotfix reporting interface (§7.7), implemented by BugCapsulePatchHotfix
+/// in package:bug_capsule_patch. Pass an implementation as
 /// `EmergencyConfig.hotfixProvider`.
 ///
 /// A provider never restarts the app and never reports a downloaded patch

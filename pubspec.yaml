@@ -7,12 +7,7 @@ environment:
 
 workspace:
   - packages/bug_capsule
-  - packages/bug_capsule_firebase
-  - packages/bug_capsule_geolocator
   - packages/bug_capsule_native
-  - packages/bug_capsule_google_maps
-  - packages/bug_capsule_stripe
-  - packages/bug_capsule_shorebird
   - packages/bug_capsule_patch
   - packages/bug_capsule_patch/example
   - packages/bug_capsule_patch_gen

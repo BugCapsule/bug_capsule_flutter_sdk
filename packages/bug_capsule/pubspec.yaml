@@ -1,14 +1,14 @@
 name: bug_capsule
 description: Record and replay Flutter bugs with portable capsules, error monitoring, state and network integrations, and a CLI for verifying fixes.
-version: 0.4.1-beta.11
+version: 0.4.1-beta.12
 homepage: https://bugcapsule.com
 documentation: https://docs.bugcapsule.com
 repository: https://github.com/BugCapsule/bug_capsule_flutter_sdk
 resolution: workspace
 
 environment:
-  sdk: ^3.9.0
-  flutter: ">=3.35.0"
+  sdk: ^3.10.0
+  flutter: ">=3.41.0"
 
 executables:
   bugcapsule: bugcapsule
@@ -16,6 +16,12 @@ executables:
 dependencies:
   flutter:
     sdk: flutter
+  cloud_firestore: ^7.1.0
+  firebase_auth: ^7.0.1
+  firebase_core: ^5.1.0
+  geolocator_platform_interface: ^4.4.1
+  google_maps_flutter_platform_interface: ^2.17.0
+  stripe_platform_interface: ^14.2.0
   args: ^2.6.0
   bloc: ^9.0.0
   clock: ^1.1.1
@@ -32,6 +38,8 @@ dependencies:
   web_socket_channel: ^3.0.0
 
 dev_dependencies:
+  fake_cloud_firestore: ^4.5.0
+  firebase_auth_mocks: ^0.16.0
   fake_async: ^1.3.1
   flutter_test:
     sdk: flutter
