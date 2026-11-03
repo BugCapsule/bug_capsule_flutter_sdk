@@ -17,7 +17,7 @@ camera.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.10
+  bug_capsule: ^0.4.1-beta.11
   bug_capsule_google_maps: ^0.1.0-dev.1
   google_maps_flutter: ^2.19.0
 ```

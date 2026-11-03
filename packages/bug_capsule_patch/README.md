@@ -6,7 +6,7 @@ does not replace arbitrary Dart code, install plugins or change permissions.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.10
+  bug_capsule: ^0.4.1-beta.11
   bug_capsule_patch: ^0.1.0-dev.1
 ```
 

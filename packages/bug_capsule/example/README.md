@@ -8,7 +8,7 @@ To run it in a new Flutter app:
 ```sh
 flutter create bug_capsule_example
 cd bug_capsule_example
-flutter pub add bug_capsule
+flutter pub add bug_capsule:0.4.1-beta.11
 ```
 
 Replace `lib/main.dart` with this example's `main.dart`, then run:
