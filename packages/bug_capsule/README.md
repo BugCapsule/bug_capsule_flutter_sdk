@@ -44,18 +44,18 @@ timing, so races and data-dependent bugs come back.
 ## Requirements
 
 - A BugCapsule project. Sign in at [app.bugcapsule.com](https://app.bugcapsule.com).
-- Flutter 3.41+ and Dart 3.10+ (bundled integration source; not yet published).
+- Flutter 3.41+ and Dart 3.10+.
 - An iOS simulator (or Android emulator) and `git` for replay.
 
 ## Install
 
-Current Flutter SDK release: [0.4.1-beta.11](https://pub.dev/packages/bug_capsule/versions/0.4.1-beta.11).
+Current Flutter SDK release: [0.4.1-beta.12](https://pub.dev/packages/bug_capsule/versions/0.4.1-beta.12).
 This release hides the capture overlay by default and in all Flutter release
 builds, and adds a safe message for widget build failures while preserving
 background error reporting. Rebuild your app after upgrading.
 
 ```bash
-flutter pub add bug_capsule:^0.4.1-beta.11
+flutter pub add bug_capsule:^0.4.1-beta.12
 ```
 
 Everything ships in this one package, with one import:
@@ -440,7 +440,7 @@ More: [docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.ht
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.11
+  bug_capsule: ^0.4.1-beta.12
   bug_capsule_native: ^0.1.0-beta.2
 ```
 
@@ -769,8 +769,8 @@ Guides: [Firebase](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/ma
 [Google Maps](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/packages/bug_capsule/doc/integrations/google_maps.md), [Stripe](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/packages/bug_capsule/doc/integrations/stripe.md).
 The repository copies of these guides are under `packages/bug_capsule/doc/integrations`.
 
-This source change is unreleased. Existing published SDK versions still use the
-separate adapter packages. When upgrading to the bundled release, remove those
+Starting with `0.4.1-beta.12`, these integrations ship in the core SDK. Older
+SDK versions use separate adapter packages. When upgrading, remove those
 four dependencies and replace `package:bug_capsule_NAME/bug_capsule_NAME.dart`
 with `package:bug_capsule/NAME.dart`. Keep the same integration constructors.
 Adapter identifiers and protocol versions are unchanged so existing capsules

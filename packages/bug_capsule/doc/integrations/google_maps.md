@@ -15,13 +15,12 @@ camera.
 
 ## Install
 
-The bundled integration is unreleased. Use the reviewed source checkout until
-a version containing it is published.
+Included in `bug_capsule` starting with version `0.4.1-beta.12`. Remove the
+old standalone adapter dependency before upgrading.
 
 ```yaml
 dependencies:
-  bug_capsule:
-    path: /path/to/bug_capsule_flutter_sdk/packages/bug_capsule
+  bug_capsule: ^0.4.1-beta.12
   google_maps_flutter: ^2.19.0
 ```
 

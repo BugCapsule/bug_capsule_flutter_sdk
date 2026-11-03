@@ -1,4 +1,4 @@
-## Unreleased
+## 0.4.1-beta.12 — 2026-11-03
 
 - Bundle Firebase, geolocator, Google Maps and Stripe adapters in the core SDK
   with dedicated library imports. Remove the four standalone workspace packages.
