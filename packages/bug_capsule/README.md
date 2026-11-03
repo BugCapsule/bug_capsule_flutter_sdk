@@ -49,13 +49,13 @@ timing, so races and data-dependent bugs come back.
 
 ## Install
 
-Current Flutter SDK release: [0.4.1-beta.8](https://pub.dev/packages/bug_capsule/versions/0.4.1-beta.8).
+Current Flutter SDK release: [0.4.1-beta.11](https://pub.dev/packages/bug_capsule/versions/0.4.1-beta.11).
 This release hides the capture overlay by default and in all Flutter release
 builds, and adds a safe message for widget build failures while preserving
 background error reporting. Rebuild your app after upgrading.
 
 ```bash
-flutter pub add bug_capsule:^0.4.1-beta.8
+flutter pub add bug_capsule:^0.4.1-beta.11
 ```
 
 Everything ships in this one package, with one import:
@@ -299,7 +299,7 @@ not need to match the Flutter SDK version.
 Install the multi-runtime CLI with npm (Node.js 20 or newer):
 
 ```sh
-npm install -g @bugcapsule/cli@0.4.0-beta.3
+npm install -g @bugcapsule/cli@0.4.0-beta.6
 bugcapsule --version
 bugcapsule login
 ```
@@ -440,8 +440,8 @@ More: [docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.ht
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.8
-  bug_capsule_native: ^0.1.0-beta.1
+  bug_capsule: ^0.4.1-beta.11
+  bug_capsule_native: ^0.1.0-beta.2
 ```
 
 Native crashes are reported on the next launch, in the same issues and

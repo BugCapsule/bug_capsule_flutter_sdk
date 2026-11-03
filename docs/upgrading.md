@@ -3,7 +3,7 @@
 Before any upgrade, read [Installation and upgrades](https://docs.bugcapsule.com/installation.html)
 for how to keep your regression suite green across versions.
 
-## To 0.5 (capsule spec v2)
+## To 0.4.1-beta.7 and later (capsule spec v2)
 
 - Capsules that record WebSockets, platform channels or native adapters are
   written as spec v2. Older CLIs and backends reject them (`specVersion 2 is
@@ -22,11 +22,11 @@ package, `bug_capsule`. The API is unchanged; only the dependency and the
 imports change.
 
 - In `pubspec.yaml`, replace every `bug_capsule_*` dependency with
-  `bug_capsule` (`flutter pub add bug_capsule`).
+  `bug_capsule` (`flutter pub add bug_capsule:0.4.1-beta.11`).
 - Replace every `package:bug_capsule_*/…` import with
   `import 'package:bug_capsule/bug_capsule.dart';`.
 - CLI: `dart pub global deactivate bug_capsule_cli`, then
-  `dart pub global activate bug_capsule`.
+  `npm install -g @bugcapsule/cli@0.4.0-beta.6`.
 - Capsules still report `sdk.name: bug_capsule_flutter`, so BugCapsule and
   older CLIs read them as before.
 
