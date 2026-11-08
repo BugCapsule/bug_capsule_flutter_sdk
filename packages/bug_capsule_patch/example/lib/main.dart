@@ -104,10 +104,17 @@ Future<Directory> _exchangeDir() async {
 /// Applies whatever the delivery harness dropped. Takes effect next launch.
 List<String> processInbox(BugCapsulePatch patch, Directory exchange) {
   final log = <String>[];
+  // The app owns its inbox: on Android 11+ a directory created by adb is not
+  // listable by the app. An unreadable inbox is logged, never fatal.
   final inbox = Directory('${exchange.path}/inbox');
-  if (!inbox.existsSync()) return log;
-  final files = inbox.listSync().whereType<File>().toList()
-    ..sort((a, b) => a.path.compareTo(b.path));
+  final List<File> files;
+  try {
+    inbox.createSync(recursive: true);
+    files = inbox.listSync().whereType<File>().toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
+  } on FileSystemException catch (e) {
+    return log..add('inbox unreadable: ${e.osError?.message ?? e.message}');
+  }
   for (final f in files) {
     final name = f.uri.pathSegments.last;
     try {
