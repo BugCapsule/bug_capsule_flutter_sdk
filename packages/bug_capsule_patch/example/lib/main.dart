@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 
+import 'package:bug_capsule/bug_capsule.dart';
 import 'package:bug_capsule_patch/bug_capsule_patch.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -149,18 +151,19 @@ Future<void> main() async {
       ? jsonDecode(remoteFile.readAsStringSync()) as Map<String, Object?>
       : null;
   final platform = Platform.isAndroid ? 'flutter_android' : 'flutter_ios';
+  PatchConfig patchConfig() => PatchConfig(
+    storeDir: '${support.path}/bcpatch',
+    projectId: remote?['projectId'] as String? ?? 'demo',
+    applicationId: applicationId,
+    environment: environment,
+    platform: platform,
+    distributionProfile: 'development',
+    baseBuildId: baseBuildId,
+    installationId: 'device-1',
+    trustRoots: labTrustRoots(remote, trustAnchor),
+  );
   BugCapsulePatch openPatch() => BugCapsulePatch.open(
-    PatchConfig(
-      storeDir: '${support.path}/bcpatch',
-      projectId: remote?['projectId'] as String? ?? 'demo',
-      applicationId: applicationId,
-      environment: environment,
-      platform: platform,
-      distributionProfile: 'development',
-      baseBuildId: baseBuildId,
-      installationId: 'device-1',
-      trustRoots: labTrustRoots(remote, trustAnchor),
-    ),
+    patchConfig(),
     modules: [coupon],
     surfaces: labSurfaces,
   );
@@ -201,7 +204,43 @@ Future<void> main() async {
     }
     return;
   }
-  final patch = openPatch();
+  // Test-only, opt-in: a local acceptance run turns on BugCapsule monitoring so
+  // the SDK's own release-health sessions carry the running patch identity.
+  // The binding then owns the one runtime of this process.
+  final monitoringFile = File('${exchange.path}/monitoring-config.json');
+  final monitoring = monitoringFile.existsSync()
+      ? jsonDecode(monitoringFile.readAsStringSync()) as Map<String, Object?>
+      : null;
+  BugCapsulePatchBinding? binding;
+  NativeProbe? probe;
+  if (monitoring != null) {
+    binding = BugCapsulePatchBinding(
+      patchConfig(),
+      modules: [coupon],
+      surfaces: labSurfaces,
+    );
+    probe = NativeProbe.install();
+    await BugCapsule.init(
+      config: BugCapsuleConfig(
+        backend: BugCapsuleBackendConfig(
+          url: monitoring['backendUrl']! as String,
+          ingestKey: monitoring['ingestKey']! as String,
+        ),
+        mode: CaptureMode.qa,
+        gitSha: 'patchlab',
+        autoCaptureOnFailure: false,
+        patchBinding: binding,
+        monitoring: MonitoringOptions(
+          release:
+              monitoring['release'] as String? ??
+              'dev.bugcapsule.patchlab.flutter@1.0+1',
+          environment: 'staging',
+        ),
+      ),
+      appRunner: () {},
+    );
+  }
+  final patch = binding?.patch ?? openPatch();
   final watch = Stopwatch()..start();
   final result = patch.call(coupon, sample);
   final micros = watch.elapsedMicroseconds;
@@ -257,6 +296,7 @@ Future<void> main() async {
     'running': before['running'],
     'inbox': inbox,
     'health': health,
+    'monitoring': binding == null ? 'off' : 'on',
     'status': patch.available ? patch.status() : null,
   };
   runApp(PatchLab(record, patch));
@@ -299,12 +339,100 @@ Future<void> main() async {
       'receiptsSent': sent,
     };
     record['status'] = patch.status();
+    if (binding != null) {
+      // Telemetry runs end the release-health session in order and send it
+      // before the result is recorded: the harness then stops the process,
+      // which must not read as an abnormal session. Wait until the app is
+      // resumed (so no later resume opens another session), end and send it,
+      // then close monitoring.
+      var resumed = false;
+      for (var i = 0; i < 100 && !resumed; i++) {
+        resumed =
+            WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+        if (!resumed) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+      }
+      record['resumed'] = resumed;
+      record['nativeCrash'] =
+          probe?.started ?? {'started': false, 'reporter': 'none'};
+      // Acceptance only, telemetry mode only: a one-shot genuine native crash
+      // (abort) while this session is open. The flag is removed first, so the
+      // next launch runs normally and the SDK's native crash handling is what
+      // reports it.
+      final crashFlag = File('${exchange.path}/crash-once');
+      if (!resumed) {
+        // Fail visibly: the harness rejects a record without a resumed app.
+        record['lifecycleError'] =
+            'app not resumed within 5 s; session left open';
+      } else {
+        if (crashFlag.existsSync()) {
+          crashFlag.deleteSync();
+          deliberateNativeAbort();
+        }
+        BugCapsule.endSession();
+        record['sessionFlushed'] = await BugCapsule.flush(
+          const Duration(seconds: 10),
+        );
+        await BugCapsule.close();
+      }
+    }
   }
   File('${exchange.path}/results.jsonl').writeAsStringSync(
     '${jsonEncode(record)}\n',
     mode: FileMode.append,
     flush: true,
   );
+}
+
+/// Acceptance only: a real SIGABRT in this process (no Dart error handling).
+void deliberateNativeAbort() {
+  final libc = Platform.isAndroid
+      ? DynamicLibrary.open('libc.so')
+      : DynamicLibrary.process();
+  libc.lookupFunction<Void Function(), void Function()>('abort')();
+}
+
+/// Telemetry runs record what the native crash handling reported at start
+/// (handler installed, previous run crashed); it delegates everything.
+class NativeProbe implements NativeCrashReporter {
+  NativeProbe._(this._inner);
+
+  /// Wraps the reporter `bug_capsule_native` registered. Without one, the
+  /// recorded state says so.
+  static NativeProbe? install() {
+    final inner = NativeCrashReporter.instance;
+    if (inner == null) return null;
+    final probe = NativeProbe._(inner);
+    NativeCrashReporter.instance = probe;
+    return probe;
+  }
+
+  final NativeCrashReporter _inner;
+  Map<String, Object?> started = {'started': false};
+
+  @override
+  Future<NativeCrashStart> start(NativeCrashSettings settings) async {
+    final s = await _inner.start(settings);
+    started = {
+      'started': true,
+      'handlerInstalled': s.handlerInstalled,
+      'lastRunCrashed': s.lastRunCrashed,
+    };
+    return s;
+  }
+
+  @override
+  Future<void> collectPending() => _inner.collectPending();
+
+  @override
+  Future<void> stop() => _inner.stop();
+
+  @override
+  void updateScope(String scopeJson) => _inner.updateScope(scopeJson);
+
+  @override
+  Stream<NativeCrashEvent> get events => _inner.events;
 }
 
 class PatchLab extends StatelessWidget {
