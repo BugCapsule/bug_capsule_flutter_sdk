@@ -5,6 +5,7 @@ import 'package:bug_capsule_patch/bug_capsule_patch.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'performance_harness.dart';
+import 'smoke.dart';
 import 'trust_config.dart';
 
 const baseBuildId = String.fromEnvironment(
@@ -204,8 +205,33 @@ Future<void> main() async {
           'reason': patch.unavailableReason,
         };
   final inbox = patch.available ? processInbox(patch, exchange) : <String>[];
-  final smokeOk = result.value.total.isNotEmpty;
-  if (patch.available && smokeOk) patch.markHealthy('first_screen');
+  // Only a patched result that passes the app's own smoke check is healthy.
+  var health = <String, Object?>{'checked': false};
+  if (patch.available && result.source == PatchSource.patched) {
+    final why = smokeFailure(
+      lines: [
+        for (final l in sample.lines) (qty: l.qty, unitCents: l.unitCents),
+      ],
+      couponPercent: sample.couponPercent,
+      subtotal: result.value.subtotal,
+      discount: result.value.discount,
+      total: result.value.total,
+      label: result.value.label,
+    );
+    if (why != null) {
+      health = {'checked': true, 'ok': false, 'reason': why};
+    } else {
+      try {
+        health = {
+          'checked': true,
+          'ok': true,
+          'markHealthy': patch.markHealthy('first_screen'),
+        };
+      } on Object catch (e) {
+        health = {'checked': true, 'ok': true, 'markHealthyError': '$e'};
+      }
+    }
+  }
   final record = {
     'at': DateTime.now().toUtc().toIso8601String(),
     'mode': const bool.fromEnvironment('dart.vm.product') ? 'release' : 'debug',
@@ -223,6 +249,7 @@ Future<void> main() async {
     'state': before['state'],
     'running': before['running'],
     'inbox': inbox,
+    'health': health,
     'status': patch.available ? patch.status() : null,
   };
   runApp(PatchLab(record, patch));
