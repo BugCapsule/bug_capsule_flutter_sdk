@@ -31,6 +31,10 @@ environment:
 dependencies:
   bug_capsule:
     path: ../../bug_capsule
+  # Native crash reporting (the Android and iOS SDKs' crash bridges). On iOS
+  # it needs Swift Package Manager (see flutter.config below).
+  bug_capsule_native:
+    path: ../../bug_capsule_native
   bug_capsule_patch:
     path: ..
   flutter:
@@ -57,6 +61,9 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  config:
+    # bug_capsule_native links the BugCapsule iOS SDK only through SPM.
+    enable-swift-package-manager: true
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
