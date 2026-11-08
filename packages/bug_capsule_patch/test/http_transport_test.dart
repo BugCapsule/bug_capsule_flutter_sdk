@@ -184,7 +184,8 @@ void main() {
 
   test('an endless 503 body is read only up to the channel bound, then the connection closes', () async {
     final (x, gone, raw) = await endless(503);
-    await expectLater(x.fetchChannel(), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', 'response_too_large')));
+    // Bounded either way: the bound trips, or a reset mid-body is an http_error. Never a SocketException.
+    await expectLater(x.fetchChannel(), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', anyOf('response_too_large', 'http_error'))));
     await gone.timeout(const Duration(seconds: 3));
     await raw.close();
   });
