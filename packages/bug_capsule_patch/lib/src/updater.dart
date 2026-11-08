@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'http_transport.dart';
 import 'native.dart';
 import 'runtime.dart';
 
@@ -27,10 +28,13 @@ abstract interface class PatchTransport {
 enum PatchUpdateState { upToDate, restartRequired, notInCohort, quarantined, failed }
 
 final class PatchUpdateResult {
-  const PatchUpdateResult(this.state, {this.artifactDigest, this.reason});
+  const PatchUpdateResult(this.state, {this.artifactDigest, this.reason, this.retryAfter});
   final PatchUpdateState state;
   final String? artifactDigest;
   final String? reason;
+
+  /// The server's hint for the next check, when it gave one.
+  final Duration? retryAfter;
 }
 
 /// Check, download, verify, stage. Never restarts the app and never changes
@@ -57,9 +61,26 @@ final class PatchUpdater {
       return result;
     } on NativeError catch (e) {
       return PatchUpdateResult(PatchUpdateState.failed, reason: e.code);
+    } on PatchHttpException catch (e) {
+      if (e.reason == 'channel_invalidated') return _invalidated(e);
+      return PatchUpdateResult(PatchUpdateState.failed, reason: 'transport: $e', retryAfter: e.retryAfter);
     } on Object catch (e) {
       return PatchUpdateResult(PatchUpdateState.failed, reason: 'transport: $e');
     }
+  }
+
+  /// No channel, so nothing is staged or activated; only trust can change, and
+  /// only through a keyring the pinned roots verify.
+  PatchUpdateResult _invalidated(PatchHttpException e) {
+    var reason = 'channel_invalidated';
+    if (e.keyringDocument != null) {
+      try {
+        patch.applyKeyring(e.keyringDocument!, e.keyringSignature!);
+      } on NativeError catch (k) {
+        reason = 'channel_invalidated; keyring_rejected:${k.code}';
+      }
+    }
+    return PatchUpdateResult(PatchUpdateState.failed, reason: reason, retryAfter: e.retryAfter);
   }
 
   Future<PatchUpdateResult> _act(Map<String, Object?> d) async {
