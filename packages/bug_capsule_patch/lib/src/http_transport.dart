@@ -175,6 +175,9 @@ final class HttpPatchTransport implements PatchTransport {
       rethrow;
     } on FormatException {
       body = null;
+    } on IOException {
+      // A reset while reading an error body is still just an unavailable server.
+      throw PatchHttpException('http_error', 503, retry);
     }
     if (body is! Map<String, Object?> || body['reason'] != 'channel_invalidated') throw PatchHttpException('http_error', 503, retry);
     Uint8List? doc;

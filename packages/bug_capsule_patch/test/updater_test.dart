@@ -155,6 +155,12 @@ void main() {
       patch.close();
     }, skip: skip);
 
+    test('the runtime carries E1: status reports degraded', () {
+      final patch = open(Directory.systemTemp.createTempSync('bcu-e1').path);
+      expect(patch.status()['degraded'], isFalse);
+      patch.close();
+    }, skip: skip);
+
     test('the next check after a 503 retries the channel (the ETag is not advanced)', () async {
       final patch = open(Directory.systemTemp.createTempSync('bcu503c').path);
       final net = Throwing503(bundle('valid'))..error = invalidated(null);
