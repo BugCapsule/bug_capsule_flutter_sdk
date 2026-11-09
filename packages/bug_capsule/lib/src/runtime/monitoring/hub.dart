@@ -154,7 +154,24 @@ class MonitoringHub implements TransactionSink {
   String? _lastScopeMirror;
   bool _lastRunCrashed = false;
   Future<void>? _pendingHandled;
+  bool _pendingHandedOn = true;
   final List<Future<void>> _crashCapsules = [];
+
+  /// Events of earlier runs waiting for their crash capsule, not queued yet.
+  /// The native SDK deleted them when it handed them on: this hub owns them.
+  final Set<PreparedEvent> _linking = {};
+  final Set<Future<void>> _linkingDone = {};
+
+  /// After [dispose], while earlier runs' native events are still being
+  /// collected: the native SDK deleted what it hands on, so those arriving
+  /// late are still queued (in the normal outbox, with its limits, redaction
+  /// and the remote controls read at arrival) for up to [lateNativeWindow].
+  /// This is a bounded grace, not durability: an answer after the window, or
+  /// one lost because the process exits first, is dropped (the window's end
+  /// is logged when the native SDK has not answered).
+  bool _lateNative = false;
+  bool _purged = false;
+  static const lateNativeWindow = Duration(seconds: 30);
 
   /// The mirrored-scope context naming the crash journal of the process.
   static const journalContext = 'bugcapsule_journal';
@@ -205,10 +222,10 @@ class MonitoringHub implements TransactionSink {
       options.enableAutoSessionTracking && (_remote?.sessionTracking ?? true);
 
   /// The backend's `monitoringEnabled` (and the kill switch) allow sending.
-  bool get _sendingAllowed =>
-      !_disposed &&
-      (_remote?.monitoringEnabled ?? true) &&
-      (_remote?.enabled ?? true);
+  bool get _sendingAllowed => !_disposed && _remoteAllowsSending;
+
+  bool get _remoteAllowsSending =>
+      (_remote?.monitoringEnabled ?? true) && (_remote?.enabled ?? true);
 
   String? get lastEventId => _lastEventId;
   bool get inForeground => _inForeground;
@@ -307,12 +324,14 @@ class MonitoringHub implements TransactionSink {
         const Duration(seconds: 2),
         (_) => _mirrorScope(),
       );
+      _pendingHandedOn = false;
       _pendingHandled = reporter
           .collectPending()
           // Events reach the listener a microtask after they are added.
           .then((_) => Future<void>.delayed(Duration.zero))
           .then((_) => Future.wait(List.of(_crashCapsules)))
-          .then((_) {}, onError: (Object _) {});
+          .then((_) {}, onError: (Object _) {})
+          .whenComplete(() => _pendingHandedOn = true);
       return started;
     } catch (e) {
       debugPrint('[bugcapsule] native crash reporting is off: $e');
@@ -326,6 +345,52 @@ class MonitoringHub implements TransactionSink {
   /// journals no event claimed can go.
   Future<void> get nativePendingHandled => _pendingHandled ?? Future.value();
 
+  /// Completes once earlier runs' native events were handed on and every one
+  /// waiting for its crash capsule was queued (events arriving meanwhile too).
+  Future<void> _nativeQueued() async {
+    await nativePendingHandled;
+    while (_linkingDone.isNotEmpty) {
+      await Future.wait(List.of(_linkingDone));
+    }
+  }
+
+  /// What [flush] could not know to be queued: native events not yet handed
+  /// on by the native SDK, and handed-on ones waiting for a crash capsule.
+  String _nativeUnqueued() => [
+    if (!_pendingHandedOn)
+      'native events of earlier runs still being collected',
+    if (_linking.isNotEmpty)
+      '${_linking.length} crash event(s) waiting for their crash capsule',
+  ].join(', ');
+
+  /// Queues events still waiting for their crash capsule without its id (the
+  /// capsule names the event in `monitoring.eventId`), so a close never drops
+  /// an event the native SDK already handed on.
+  void _queueLinkingUnlinked() {
+    if (_linking.isEmpty) return;
+    debugPrint(
+      '[bugcapsule] closing before the crash capsule of ${_linking.length} '
+      'earlier-run crash event(s) was ready: queued without capsuleId',
+    );
+    for (final prepared in List.of(_linking)) {
+      _linking.remove(prepared);
+      // No capsule exists: sampling applies as to any unlinked event
+      // (earlier-run native crashes are fatal and never sampled out).
+      _finish(prepared, linked: false);
+    }
+  }
+
+  /// Native event ids handed to a hub in this process: the native SDK
+  /// deletes what it hands out, so exactly one hub owns each.
+  static final Set<String> _claimedNative = {};
+
+  /// A new process in tests: no native event was handed on yet.
+  @visibleForTesting
+  static void resetClaimsForTest() => _claimedNative.clear();
+
+  static bool _claimNative(String? eventId) =>
+      eventId == null || _claimedNative.add(eventId);
+
   /// Queues a native event: crashes of an earlier run (fatal, never sampled
   /// out, their session was recovered separately) or a hang now ([live]:
   /// counted in this session, sampled like other errors). It goes through
@@ -333,10 +398,12 @@ class MonitoringHub implements TransactionSink {
   /// earlier run first gets the crash capsule built from its process's
   /// journal, and carries its `capsuleId`.
   void _submitNative(String json, {required bool live}) {
-    if (_disposed) return;
+    final late = _disposed;
+    if (late && (live || !_lateNative)) return;
     try {
       final event = ErrorEvent.fromJson((jsonDecode(json) as Map).cast());
       if (event == null) return;
+      if (!_claimNative(event.eventId)) return;
       // Our own marker, from the mirrored scope: never sent.
       final journal = event.contexts.remove(journalContext);
       final journalId = journal is Map ? journal['id'] as String? : null;
@@ -359,6 +426,7 @@ class MonitoringHub implements TransactionSink {
         sessionUpdate: live ? _sessions?.onError(crashed: fatal) : null,
       );
       if (!prepared.sampledOut) _lastEventId = event.eventId;
+      if (late) return _finish(prepared, linked: false, late: true);
       final build = fatal && !live
           ? host.crashCapsule?.call(
               event,
@@ -811,15 +879,25 @@ class MonitoringHub implements TransactionSink {
   void submit(PreparedEvent prepared, {Future<String?>? capsule}) {
     if (capsule == null) return _finish(prepared, linked: false);
     _lastEventId = prepared.event.eventId;
-    unawaited(
-      capsule.then((id) => id, onError: (Object _) => null).then((id) {
-        prepared.event.capsuleId = id;
-        _finish(prepared, linked: id != null);
-      }),
-    );
+    _linking.add(prepared);
+    late final Future<void> done;
+    done = capsule
+        .then((id) => id, onError: (Object _) => null)
+        .then((id) {
+          // Already queued without the capsule by a close: exactly once.
+          if (!_linking.remove(prepared)) return;
+          prepared.event.capsuleId = id;
+          _finish(prepared, linked: id != null);
+        })
+        .whenComplete(() => _linkingDone.remove(done));
+    _linkingDone.add(done);
   }
 
-  void _finish(PreparedEvent prepared, {required bool linked}) {
+  void _finish(
+    PreparedEvent prepared, {
+    required bool linked,
+    bool late = false,
+  }) {
     final items = <EnvelopeItem>[];
     if (linked || !prepared.sampledOut) {
       ErrorEvent? event = prepared.event;
@@ -842,7 +920,7 @@ class MonitoringHub implements TransactionSink {
     if (session != null) {
       items.add(EnvelopeItem(EnvelopeItemType.session, session));
     }
-    if (items.isNotEmpty) _enqueue(items);
+    if (items.isNotEmpty) _enqueue(items, late: late);
   }
 
   /// `captureException` / `captureMessage` from the app: no capsule.
@@ -1185,9 +1263,16 @@ class MonitoringHub implements TransactionSink {
     return out;
   }
 
-  void _enqueue(List<EnvelopeItem> items) {
+  /// [late]: an earlier run's native event reaching a stopped hub during
+  /// [lateNativeWindow]; the remote controls are read now, as for any event.
+  void _enqueue(List<EnvelopeItem> items, {bool late = false}) {
     final outbox = _outbox;
-    if (outbox == null || !_sendingAllowed) return;
+    if (outbox == null) return;
+    if (late
+        ? !(_lateNative && _remoteAllowsSending && !_purged)
+        : !_sendingAllowed) {
+      return;
+    }
     final List<int> bytes;
     try {
       bytes = EnvelopeCodec.encode([
@@ -1215,15 +1300,25 @@ class MonitoringHub implements TransactionSink {
   }
 
   /// Uploads queued envelopes; true when nothing is left (or nothing could be
-  /// sent at all: no backend, monitoring off).
+  /// sent at all: no backend, monitoring off). Earlier runs' native crash
+  /// events still being collected or waiting for their crash capsule are
+  /// waited for first: until they are queued nothing is known to be sent.
+  /// Everything shares one [timeout].
   Future<bool> flush({Duration timeout = const Duration(seconds: 10)}) async {
     final outbox = _outbox;
     final transport = this.transport;
     if (outbox == null || transport == null) return true;
+    final elapsed = Stopwatch()..start();
+    Duration left() {
+      final r = timeout - elapsed.elapsed;
+      return r.isNegative ? Duration.zero : r;
+    }
+
     try {
-      await _writes.timeout(timeout);
-      await host.ensureFreshConfig().timeout(timeout);
+      await host.ensureFreshConfig().timeout(left());
       if (!_canUpload) return false;
+      await _nativeQueued().timeout(left());
+      await _writes.timeout(left());
       await outbox
           .flush(
             upload: (bytes) async {
@@ -1237,10 +1332,14 @@ class MonitoringHub implements TransactionSink {
             },
             allowed: () => _canUpload,
           )
-          .timeout(timeout);
+          .timeout(left());
       return (await outbox.entries()).isEmpty;
     } catch (e) {
-      debugPrint('[bugcapsule] envelope flush failed: $e');
+      final unqueued = _nativeUnqueued();
+      debugPrint(
+        '[bugcapsule] envelope flush failed: $e'
+        '${unqueued.isEmpty ? '' : ' (not queued yet: $unqueued)'}',
+      );
       return false;
     }
   }
@@ -1278,6 +1377,7 @@ class MonitoringHub implements TransactionSink {
   }
 
   Future<void> purge() async {
+    _purged = true;
     await _outbox?.purge();
   }
 
@@ -1325,11 +1425,25 @@ class MonitoringHub implements TransactionSink {
 
   Future<void> dispose() async {
     if (_disposed) return;
+    // While sending is still allowed (never after the kill switch).
+    final keepLate = _sendingAllowed;
+    _queueLinkingUnlinked();
+    if (!_pendingHandedOn) {
+      debugPrint(
+        '[bugcapsule] stopping while native events of earlier runs are still '
+        'being collected: ${keepLate ? 'those arriving within ${lateNativeWindow.inSeconds} s are still queued' : 'monitoring is off, they are dropped'}',
+      );
+    }
     _disposed = true;
     if (identical(current, this)) current = null;
     _flushTimer?.cancel();
     _scopeMirrorTimer?.cancel();
-    await _nativeEvents?.cancel();
+    final events = _nativeEvents;
+    final pending = _pendingHandled;
+    // The native SDK may still answer a collect it already took from.
+    _lateNative =
+        events != null && pending != null && !_pendingHandedOn && keepLate;
+    if (!_lateNative) await events?.cancel();
     final native = _native;
     _native = null;
     if (native != null) {
@@ -1349,7 +1463,28 @@ class MonitoringHub implements TransactionSink {
       port.close();
     }
     await _writes;
-    await _outbox?.close();
+    if (!_lateNative) {
+      await _outbox?.close();
+      return;
+    }
+    unawaited(
+      pending!
+          .then<void>((_) {})
+          .timeout(
+            lateNativeWindow,
+            onTimeout: () => debugPrint(
+              '[bugcapsule] native events of earlier runs were not handed on '
+              'within ${lateNativeWindow.inSeconds} s of stopping: any '
+              'answer after this is not queued',
+            ),
+          )
+          .whenComplete(() async {
+            _lateNative = false;
+            await events?.cancel();
+            await _writes;
+            await _outbox?.close();
+          }),
+    );
   }
 }
 

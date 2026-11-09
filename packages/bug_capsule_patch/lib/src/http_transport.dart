@@ -7,10 +7,18 @@ import 'updater.dart';
 
 /// Refusal from the delivery endpoint, or a response outside its bounds.
 final class PatchHttpException implements Exception {
-  PatchHttpException(this.reason, [this.status]);
-  const PatchHttpException.timedOut() : reason = 'timed_out', status = null;
+  PatchHttpException(this.reason, [this.status, this.retryAfter, this.keyringDocument, this.keyringSignature]);
+  const PatchHttpException.timedOut() : reason = 'timed_out', status = null, retryAfter = null, keyringDocument = null, keyringSignature = null;
   final String reason;
   final int? status;
+
+  /// From `Retry-After` (seconds), when the server sent one.
+  final Duration? retryAfter;
+
+  /// A keyring delivered with a `503 channel_invalidated`. Untrusted bytes: the
+  /// runtime verifies it against the pinned roots before anything changes.
+  final Uint8List? keyringDocument;
+  final Uint8List? keyringSignature;
 
   @override
   String toString() => 'PatchHttpException($reason${status == null ? '' : ', HTTP $status'})';
@@ -149,6 +157,43 @@ final class HttpPatchTransport implements PatchTransport {
     _ => 'http_error',
   }, status);
 
+  static Duration? _retryAfter(HttpClientResponse res) {
+    final s = int.tryParse(res.headers.value('retry-after') ?? '');
+    return s == null || s < 0 ? null : Duration(seconds: s > 86400 ? 86400 : s);
+  }
+
+  /// A 503 may be `channel_invalidated`: the signed channel is withheld while
+  /// it is republished, but the root-signed keyring still travels with it.
+  /// The body is read under the channel bound; anything unexpected is a plain
+  /// `http_error`, and a malformed keyring is dropped rather than trusted.
+  Future<Never> _unavailable(HttpClientResponse res, Stopwatch elapsed, Duration limit) async {
+    final retry = _retryAfter(res);
+    Object? body;
+    try {
+      body = jsonDecode(utf8.decode(await _read(res, maxChannelBytes, elapsed, limit)));
+    } on PatchHttpException {
+      rethrow;
+    } on FormatException {
+      body = null;
+    } on IOException {
+      // A reset while reading an error body is still just an unavailable server.
+      throw PatchHttpException('http_error', 503, retry);
+    }
+    if (body is! Map<String, Object?> || body['reason'] != 'channel_invalidated') throw PatchHttpException('http_error', 503, retry);
+    Uint8List? doc;
+    Uint8List? sig;
+    final k = body['keyring'];
+    if (k is Map<String, Object?> && k['document'] is String && k['signature'] is String) {
+      try {
+        doc = base64Decode(k['document']! as String);
+        sig = base64Decode(k['signature']! as String);
+      } on FormatException {
+        doc = sig = null;
+      }
+    }
+    throw PatchHttpException('channel_invalidated', 503, retry, doc, sig);
+  }
+
   @override
   Future<SignedChannel?> fetchChannel({String? etag}) {
     final uri = _uri('/channel', {'platform': platform, 'distributionProfile': distributionProfile, 'baseBuildId': baseBuildId});
@@ -156,6 +201,7 @@ final class HttpPatchTransport implements PatchTransport {
       if (etag != null) req.headers.set(HttpHeaders.ifNoneMatchHeader, etag);
       final res = await _send(req, elapsed, limit);
       if (res.statusCode == 204 || res.statusCode == 304) return null;
+      if (res.statusCode == 503) await _unavailable(res, elapsed, limit);
       if (res.statusCode != 200) _refused(res.statusCode);
       final j = jsonDecode(utf8.decode(await _read(res, maxChannelBytes, elapsed, limit))) as Map<String, Object?>;
       final channel = j['channel']! as Map<String, Object?>;
