@@ -441,7 +441,7 @@ More: [docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.ht
 ```yaml
 dependencies:
   bug_capsule: ^0.4.1-beta.13
-  bug_capsule_native: ^0.1.0-beta.2
+  bug_capsule_native: ^0.1.0-beta.3
 ```
 
 Native crashes are reported on the next launch, in the same issues and
