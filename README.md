@@ -779,7 +779,7 @@ Guides: [Firebase](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/ma
 [Google Maps](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/packages/bug_capsule/doc/integrations/google_maps.md), [Stripe](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/packages/bug_capsule/doc/integrations/stripe.md).
 The repository copies of these guides are under `packages/bug_capsule/doc/integrations`.
 
-Starting with `0.4.1-beta.14`, these integrations ship in the core SDK. Older
+Starting with `0.4.1-beta.13`, these integrations ship in the core SDK. Older
 SDK versions use separate adapter packages. When upgrading, remove those
 four dependencies and replace `package:bug_capsule_NAME/bug_capsule_NAME.dart`
 with `package:bug_capsule/NAME.dart`. Keep the same integration constructors.
