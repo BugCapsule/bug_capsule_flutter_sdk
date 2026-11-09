@@ -1,4 +1,14 @@
+<p align="center">
+  <a href="https://bugcapsule.com">
+    <img src="https://raw.githubusercontent.com/BugCapsule/bug_capsule_flutter_sdk/main/assets/bugcapsule-wordmark.svg" alt="BugCapsule" width="360" />
+  </a>
+</p>
+
 # BugCapsule Flutter SDK
+
+| Package | Build | Version | Likes | Pub points |
+| :--- | :--- | :--- | :--- | :--- |
+| [bug_capsule](https://pub.dev/packages/bug_capsule) | [![Build](https://github.com/BugCapsule/bug_capsule_flutter_sdk/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BugCapsule/bug_capsule_flutter_sdk/actions/workflows/ci.yml) | [![pub version](https://img.shields.io/pub/v/bug_capsule?include_prereleases)](https://pub.dev/packages/bug_capsule/versions) | [![likes](https://img.shields.io/pub/likes/bug_capsule)](https://pub.dev/packages/bug_capsule/score) | [![pub points](https://img.shields.io/pub/points/bug_capsule)](https://pub.dev/packages/bug_capsule/score) |
 
 BugCapsule records what led up to a bug in your Flutter app and saves it as a
 portable `.bugcapsule` file. A developer can **replay** that file on a
@@ -49,13 +59,13 @@ timing, so races and data-dependent bugs come back.
 
 ## Install
 
-Current Flutter SDK release: [0.4.1-beta.13](https://pub.dev/packages/bug_capsule/versions/0.4.1-beta.13).
+Current Flutter SDK release: [0.4.1-beta.14](https://pub.dev/packages/bug_capsule/versions/0.4.1-beta.14).
 This release hides the capture overlay by default and in all Flutter release
 builds, and adds a safe message for widget build failures while preserving
 background error reporting. Rebuild your app after upgrading.
 
 ```bash
-flutter pub add bug_capsule:^0.4.1-beta.13
+flutter pub add bug_capsule:^0.4.1-beta.14
 ```
 
 Everything ships in this one package, with one import:
@@ -440,7 +450,7 @@ More: [docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.ht
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.13
+  bug_capsule: ^0.4.1-beta.14
   bug_capsule_native: ^0.1.0-beta.3
 ```
 
@@ -769,7 +779,7 @@ Guides: [Firebase](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/ma
 [Google Maps](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/packages/bug_capsule/doc/integrations/google_maps.md), [Stripe](https://github.com/BugCapsule/bug_capsule_flutter_sdk/blob/main/packages/bug_capsule/doc/integrations/stripe.md).
 The repository copies of these guides are under `packages/bug_capsule/doc/integrations`.
 
-Starting with `0.4.1-beta.13`, these integrations ship in the core SDK. Older
+Starting with `0.4.1-beta.14`, these integrations ship in the core SDK. Older
 SDK versions use separate adapter packages. When upgrading, remove those
 four dependencies and replace `package:bug_capsule_NAME/bug_capsule_NAME.dart`
 with `package:bug_capsule/NAME.dart`. Keep the same integration constructors.

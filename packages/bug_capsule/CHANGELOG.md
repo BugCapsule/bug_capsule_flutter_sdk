@@ -1,3 +1,8 @@
+## 0.4.1-beta.14 — 2026-11-09
+
+- Refresh the package README with the BugCapsule logo and live build, version, likes and pub points badges.
+- Documentation-only release; runtime behavior is unchanged from beta.13.
+
 ## 0.4.1-beta.13 — 2026-11-09
 
 - Flush waits within one timeout for native crashes and crash-capsule linking. Close preserves pending events without bypassing sampling or remote controls.
