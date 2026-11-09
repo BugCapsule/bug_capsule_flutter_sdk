@@ -97,6 +97,9 @@ class FakeNativeReporter implements NativeCrashReporter {
   NativeCrashSettings? settings;
   int stops = 0;
 
+  /// Holds earlier runs' events back until it completes (slow native SDK).
+  Future<void>? collectGate;
+
   @override
   Future<NativeCrashStart> start(NativeCrashSettings settings) async {
     this.settings = settings;
@@ -109,6 +112,8 @@ class FakeNativeReporter implements NativeCrashReporter {
   @override
   Future<void> collectPending() async {
     if (!live.hasListener) return;
+    final gate = collectGate;
+    if (gate != null) await gate;
     final taken = previous;
     previous = const [];
     for (final json in taken) {
@@ -156,10 +161,14 @@ void main() {
     List<BugCapsuleIntegration> integrations = const [],
     bool autoCapture = false,
     double productionSampleRate = 1,
+    Future<void> Function()? beforeCrashCapsule,
+    Future<List<int>> Function(Capsule)? encodeCapsule,
   }) async {
     BugCapsule.debugOverrides = BugCapsuleTestOverrides(
       storageDirectory: dir,
       transport: backend,
+      beforeCrashCapsule: beforeCrashCapsule,
+      encodeCapsule: encodeCapsule,
     );
     await BugCapsule.init(
       config: BugCapsuleConfig(
@@ -908,6 +917,226 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 600));
       await BugCapsule.flushUploads();
       expect(backend.capsules, hasLength(2));
+    });
+
+    group('earlier-run crashes still being processed', () {
+      FakeNativeReporter crashedNative() => FakeNativeReporter(
+        lastRunCrashed: true,
+        previous: [
+          nativeCrash(
+            release: 'com.shop.app@1.0.0+1',
+            timestamp: DateTime.now().toUtc().toIso8601String(),
+          ),
+        ],
+      );
+
+      test(
+        'flush waits for a native crash the native SDK hands on late, then sends it once',
+        () async {
+          await crashedSession();
+          final gate = Completer<void>();
+          NativeCrashReporter.instance = crashedNative()
+            ..collectGate = gate.future;
+          await start();
+          Timer(const Duration(milliseconds: 200), gate.complete);
+
+          expect(await BugCapsule.flush(), isTrue);
+          final events = backend.items('event');
+          expect(events, hasLength(1), reason: 'true means it was sent');
+          expect(events.single['capsuleId'], isNotNull);
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          expect(await BugCapsule.flush(), isTrue);
+          expect(backend.items('event'), hasLength(1), reason: 'exactly once');
+        },
+      );
+
+      test(
+        'close keeps a crash event whose crash capsule is still being built, sent once and linked',
+        () async {
+          await crashedSession();
+          final gate = Completer<void>();
+          NativeCrashReporter.instance = crashedNative();
+          await start(beforeCrashCapsule: () => gate.future);
+          Timer(const Duration(milliseconds: 200), gate.complete);
+
+          await BugCapsule.close();
+          final events = backend.items('event');
+          expect(events, hasLength(1), reason: 'close must not drop it');
+          expect(
+            events.single['eventId'],
+            '22222222-2222-4222-8222-222222222222',
+          );
+          expect(events.single['capsuleId'], isNotNull);
+          final crashed = [
+            for (final s in backend.items('session'))
+              if (s['status'] == 'crashed') s,
+          ];
+          expect(crashed, hasLength(1));
+        },
+      );
+
+      test(
+        'a close that runs out of time queues the event without capsuleId, once, for the next launch',
+        () async {
+          await crashedSession();
+          final gate = Completer<void>();
+          NativeCrashReporter.instance = crashedNative();
+          await start(beforeCrashCapsule: () => gate.future);
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+
+          final sw = Stopwatch()..start();
+          await MonitoringHub.current!.close(
+            timeout: const Duration(milliseconds: 300),
+          );
+          expect(sw.elapsed, lessThan(const Duration(seconds: 2)));
+          expect(backend.items('event'), isEmpty, reason: 'not sent in time');
+
+          // The capsule becomes ready after the close: no second event.
+          gate.complete();
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          await BugCapsule.resetForTest();
+          NativeCrashReporter.instance = null;
+          await start();
+          expect(await BugCapsule.flush(), isTrue);
+          final events = backend.items('event');
+          expect(events, hasLength(1), reason: 'kept on disk, sent once');
+          expect(
+            events.single['eventId'],
+            '22222222-2222-4222-8222-222222222222',
+          );
+          expect(events.single.containsKey('capsuleId'), isFalse);
+        },
+      );
+
+      test('a stuck native SDK bounds flush and close', () async {
+        NativeCrashReporter.instance = crashedNative()
+          ..collectGate = Completer<void>().future;
+        await start();
+
+        final sw = Stopwatch()..start();
+        expect(
+          await BugCapsule.flush(const Duration(milliseconds: 300)),
+          isFalse,
+          reason: 'the crash is not known to be sent',
+        );
+        expect(sw.elapsed, lessThan(const Duration(seconds: 2)));
+        await MonitoringHub.current!.close(
+          timeout: const Duration(milliseconds: 300),
+        );
+        expect(sw.elapsed, lessThan(const Duration(seconds: 3)));
+        expect(backend.items('event'), isEmpty);
+      });
+
+      test(
+        'a native answer arriving after close (already deleted natively) is queued and sent once at the next launch',
+        () async {
+          await crashedSession();
+          final gate = Completer<void>();
+          final native = NativeCrashReporter.instance = crashedNative()
+            ..collectGate = gate.future;
+          await start();
+          await MonitoringHub.current!.close(
+            timeout: const Duration(milliseconds: 300),
+          );
+          expect(backend.items('event'), isEmpty);
+
+          // The native SDK answers the collect it took from before the close.
+          gate.complete();
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          expect(native.previous, isEmpty, reason: 'taken from the native SDK');
+          expect(backend.items('event'), isEmpty);
+
+          await BugCapsule.resetForTest(); // the next launch
+          NativeCrashReporter.instance = FakeNativeReporter();
+          await start();
+          expect(await BugCapsule.flush(), isTrue);
+          final events = backend.items('event');
+          expect(events, hasLength(1), reason: 'kept, then sent exactly once');
+          expect(
+            events.single['eventId'],
+            '22222222-2222-4222-8222-222222222222',
+          );
+          expect(events.single['level'], 'fatal');
+
+          await BugCapsule.resetForTest(); // and never again
+          await start();
+          expect(await BugCapsule.flush(), isTrue);
+          expect(backend.items('event'), hasLength(1));
+        },
+      );
+
+      test(
+        'a sampled-out error whose capsule is unfinished at close stays sampled out',
+        () async {
+          final encode = Completer<void>();
+          await start(
+            autoCapture: true,
+            monitoring: const MonitoringOptions(errorSampleRate: 0),
+            encodeCapsule: (c) async {
+              await encode.future;
+              return CapsuleCodec.encode(c);
+            },
+          );
+          BugCapsule.fail('checkout_stuck', 'spinner never stopped');
+          await MonitoringHub.current!.close(
+            timeout: const Duration(milliseconds: 300),
+          );
+          encode.complete();
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          await BugCapsule.resetForTest(); // what the close queued is sent now
+          await start();
+          expect(await BugCapsule.flush(), isTrue);
+          expect(backend.items('event'), isEmpty);
+          expect(
+            backend.items('session'),
+            isNotEmpty,
+            reason: 'queue was read',
+          );
+        },
+      );
+
+      test(
+        'monitoring turned off remotely after close: a late native answer is not queued',
+        () async {
+          await crashedSession();
+          final gate = Completer<void>();
+          NativeCrashReporter.instance = crashedNative()
+            ..collectGate = gate.future;
+          await start();
+          final hub = MonitoringHub.current!;
+          // Detaches the hub from the runtime (no purge reaches it later):
+          // only its own read of the remote controls can refuse the event.
+          await BugCapsule.close();
+
+          backend.monitoringEnabled = false;
+          await hub.host.refreshConfig();
+          gate.complete();
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+
+          await BugCapsule.resetForTest();
+          backend.monitoringEnabled = true;
+          NativeCrashReporter.instance = FakeNativeReporter();
+          await start();
+          expect(await BugCapsule.flush(), isTrue);
+          expect(backend.items('event'), isEmpty);
+        },
+      );
+
+      test(
+        'monitoring turned off remotely: flush does not wait for native events',
+        () async {
+          backend.monitoringEnabled = false;
+          NativeCrashReporter.instance = crashedNative()
+            ..collectGate = Completer<void>().future;
+          await start();
+
+          final sw = Stopwatch()..start();
+          expect(await BugCapsule.flush(), isFalse);
+          expect(sw.elapsed, lessThan(const Duration(seconds: 1)));
+          await BugCapsule.close();
+          expect(backend.envelopes, isEmpty);
+        },
+      );
     });
 
     test('closing BugCapsule stops the native reporter', () async {
