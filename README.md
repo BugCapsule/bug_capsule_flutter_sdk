@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://bugcapsule.com">
-    <img src="https://raw.githubusercontent.com/BugCapsule/bug_capsule_flutter_sdk/main/assets/bugcapsule-wordmark.svg" alt="BugCapsule" width="360" />
+    <img src="https://raw.githubusercontent.com/BugCapsule/bug_capsule_flutter_sdk/683ab4bd0fce78e5e1d0fd4d0fa7532120e5ffd4/assets/bugcapsule-wordmark.svg" alt="BugCapsule" width="360" />
   </a>
 </p>
 
