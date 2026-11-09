@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:bug_capsule_patch/bug_capsule_patch.dart';
+import 'package:bug_capsule_patch/src/native.dart' show NativeError;
 import 'package:flutter_test/flutter_test.dart';
 
 /// Uses the shared vectors through the real runtime, with a fake network.
@@ -33,6 +34,32 @@ final class FakeTransport implements PatchTransport {
     if (offline) throw const SocketException('offline');
     posted.add(batch);
   }
+}
+
+/// Returns [next], or throws [error] like the HTTP transport on a 503.
+final class Throwing503 implements PatchTransport {
+  Throwing503(this.bundle);
+  final Uint8List bundle;
+  SignedChannel? next;
+  PatchHttpException? error;
+  int downloads = 0;
+  final etags = <String?>[];
+
+  @override
+  Future<SignedChannel?> fetchChannel({String? etag}) async {
+    etags.add(etag);
+    if (error != null) throw error!;
+    return next;
+  }
+
+  @override
+  Future<Uint8List> fetchArtifact(String digest) async {
+    downloads++;
+    return bundle;
+  }
+
+  @override
+  Future<void> postReceipts(Map<String, Object?> batch) async {}
 }
 
 void main() {
@@ -68,6 +95,84 @@ void main() {
   }
 
   Uint8List bundle(String name) => base64Decode(named('artifacts', name)['bundle']! as String);
+
+  group('503 channel_invalidated with a keyring (P0-3)', () {
+    final rings = jsonDecode(File('test/fixtures/keyrings.json').readAsStringSync()) as Map<String, Object?>;
+    Map<String, Object?> ring(String name) => (rings['keyrings']! as List<Object?>).cast<Map<String, Object?>>().firstWhere((e) => e['name'] == name);
+    PatchHttpException invalidated(String? name) => PatchHttpException(
+      'channel_invalidated',
+      503,
+      const Duration(seconds: 30),
+      name == null ? null : base64Decode(ring(name)['document']! as String),
+      name == null ? null : base64Decode(ring(name)['signature']! as String),
+    );
+    final signer = rings['signerChannel']! as Map<String, Object?>;
+    final signerChannel = SignedChannel(base64Decode(signer['document']! as String), base64Decode(signer['signature']! as String), etag: 'signer');
+
+    test('applies only a root-verified keyring, never stages, and the revocation survives a restart', () async {
+      final dir = Directory.systemTemp.createTempSync('bcu503').path;
+      var patch = open(dir);
+      final net = Throwing503(bundle('valid'));
+      final updater = PatchUpdater(patch, net);
+      // authorize arrives in a normal 200 with the signer's channel.
+      net.next = SignedChannel(signerChannel.document, signerChannel.signature, etag: 'a',
+          keyringDocument: base64Decode(ring('authorize')['document']! as String), keyringSignature: base64Decode(ring('authorize')['signature']! as String));
+      expect((await updater.checkForUpdate()).state, PatchUpdateState.restartRequired);
+      final staged = patch.status()['pending'];
+      for (final (name, code) in [('forged', 'bad_signature'), ('other project', 'wrong_target')]) {
+        net.error = invalidated(name);
+        final r = await updater.checkForUpdate();
+        expect(r.state, PatchUpdateState.failed);
+        expect(r.reason, 'channel_invalidated; keyring_rejected:$code', reason: name);
+        expect(r.retryAfter, const Duration(seconds: 30));
+      }
+      net.error = invalidated('revoke');
+      final r = await updater.checkForUpdate();
+      expect([r.state, r.reason], [PatchUpdateState.failed, 'channel_invalidated']);
+      expect(net.downloads, 1, reason: 'a 503 never downloads');
+      expect(patch.status()['pending'], staged, reason: 'a 503 never changes what is staged');
+      net.error = invalidated('stale');
+      expect((await updater.checkForUpdate()).reason, 'channel_invalidated; keyring_rejected:stale');
+      net.error = invalidated(null);
+      expect((await updater.checkForUpdate()).reason, 'channel_invalidated');
+      patch.close();
+
+      patch = open(dir);
+      // The revoked signer is refused after restart; a stale keyring still is too.
+      expect(() => patch.applyChannel(signerChannel.document, signerChannel.signature), throwsA(isA<NativeError>().having((e) => e.code, 'code', anyOf('untrusted_key', 'stale'))));
+      expect(() => patch.applyKeyring(base64Decode(ring('stale')['document']! as String), base64Decode(ring('stale')['signature']! as String)),
+          throwsA(isA<NativeError>().having((e) => e.code, 'code', 'stale')));
+      patch.close();
+      final fresh = Directory.systemTemp.createTempSync('bcu503b').path;
+      patch = open(fresh);
+      final u2 = PatchUpdater(patch, Throwing503(bundle('valid'))..error = invalidated('authorize'));
+      expect((await u2.checkForUpdate()).reason, 'channel_invalidated');
+      (u2.transport as Throwing503).error = invalidated('revoke');
+      expect((await u2.checkForUpdate()).reason, 'channel_invalidated');
+      patch.close();
+      patch = open(fresh);
+      expect(() => patch.applyChannel(signerChannel.document, signerChannel.signature), throwsA(isA<NativeError>().having((e) => e.code, 'code', 'untrusted_key').having((e) => e.message, 'message', contains('revoked'))));
+      patch.close();
+    }, skip: skip);
+
+    test('the runtime carries E1: status reports degraded', () {
+      final patch = open(Directory.systemTemp.createTempSync('bcu-e1').path);
+      expect(patch.status()['degraded'], isFalse);
+      patch.close();
+    }, skip: skip);
+
+    test('the next check after a 503 retries the channel (the ETag is not advanced)', () async {
+      final patch = open(Directory.systemTemp.createTempSync('bcu503c').path);
+      final net = Throwing503(bundle('valid'))..error = invalidated(null);
+      final updater = PatchUpdater(patch, net);
+      expect((await updater.checkForUpdate()).state, PatchUpdateState.failed);
+      net.error = null;
+      net.next = channel('valid');
+      expect((await updater.checkForUpdate()).state, PatchUpdateState.restartRequired);
+      expect(net.etags, [null, null], reason: 'no ETag recorded from a 503');
+      patch.close();
+    }, skip: skip);
+  });
 
   test('downloads, stages, and leaves the running generation alone', () async {
     final dir = Directory.systemTemp.createTempSync('bcu').path;

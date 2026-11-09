@@ -1,3 +1,9 @@
+## 0.4.1-beta.13 — 2026-11-09
+
+- Flush waits within one timeout for native crashes and crash-capsule linking. Close preserves pending events without bypassing sampling or remote controls.
+- Native events arriving after close can be queued during a bounded 30-second grace; process exit or later arrival is not covered by this grace.
+- Verified real crash reporting and server-driven signed rollback in Android release and iOS simulator apps.
+
 ## 0.4.1-beta.12 — 2026-11-03
 
 - Bundle Firebase, geolocator, Google Maps and Stripe adapters in the core SDK

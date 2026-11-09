@@ -176,8 +176,16 @@ void main() {
   });
 
   test('a channel error body closes the connection', () async {
-    final (x, gone, raw) = await endless(503);
+    final (x, gone, raw) = await endless(500);
     await expectLater(x.fetchChannel(), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', 'http_error')));
+    await gone.timeout(const Duration(seconds: 3));
+    await raw.close();
+  });
+
+  test('an endless 503 body is read only up to the channel bound, then the connection closes', () async {
+    final (x, gone, raw) = await endless(503);
+    // Bounded either way: the bound trips, or a reset mid-body is an http_error. Never a SocketException.
+    await expectLater(x.fetchChannel(), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', anyOf('response_too_large', 'http_error'))));
     await gone.timeout(const Duration(seconds: 3));
     await raw.close();
   });
@@ -207,6 +215,47 @@ void main() {
       reply(status);
       await expectLater(t.fetchArtifact(digest), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', reason)));
     }
+  });
+
+  group('503 channel_invalidated (P0-3)', () {
+    List<int> invalidated({Object? keyring, String reason = 'channel_invalidated'}) =>
+        utf8.encode(jsonEncode({'type': 'urn:bugcapsule:problem:unavailable', 'status': 503, 'code': 'unavailable', 'reason': reason, 'keyring': keyring}));
+    const problem = {'content-type': 'application/problem+json', 'retry-after': '30'};
+
+    test('carries the keyring bytes and Retry-After, and no channel', () async {
+      reply(503, invalidated(keyring: {'version': 3, 'document': base64Encode([7, 8]), 'signature': base64Encode([9])}), problem);
+      await expectLater(
+        t.fetchChannel(),
+        throwsA(isA<PatchHttpException>()
+            .having((e) => e.reason, 'reason', 'channel_invalidated')
+            .having((e) => e.status, 'status', 503)
+            .having((e) => e.retryAfter, 'retryAfter', const Duration(seconds: 30))
+            .having((e) => e.keyringDocument, 'doc', [7, 8])
+            .having((e) => e.keyringSignature, 'sig', [9])),
+      );
+    });
+
+    test('without a keyring, or with a malformed one, is still channel_invalidated and carries nothing', () async {
+      for (final k in <Object?>[null, 'nope', {'document': 1, 'signature': 'x'}, {'document': '%%%', 'signature': '***'}]) {
+        reply(503, invalidated(keyring: k), problem);
+        await expectLater(
+          t.fetchChannel(),
+          throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', 'channel_invalidated').having((e) => e.keyringDocument, 'doc', isNull)),
+        );
+      }
+    });
+
+    test('another 503, or a non-JSON body, stays http_error', () async {
+      reply(503, invalidated(reason: 'maintenance'), problem);
+      await expectLater(t.fetchChannel(), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', 'http_error').having((e) => e.retryAfter, 'retry', const Duration(seconds: 30))));
+      reply(503, utf8.encode('<html>bad gateway</html>'));
+      await expectLater(t.fetchChannel(), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', 'http_error')));
+    });
+
+    test('an oversized 503 body is refused by its declared length', () async {
+      reply(503, List.filled(HttpPatchTransport.maxChannelBytes + 1, 0x20), problem);
+      await expectLater(t.fetchChannel(), throwsA(isA<PatchHttpException>().having((e) => e.reason, 'reason', 'response_too_large')));
+    });
   });
 
   test('malformed channel JSON fails, never reaching the runtime', () async {

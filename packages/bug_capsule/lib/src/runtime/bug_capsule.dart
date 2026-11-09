@@ -87,6 +87,7 @@ class BugCapsuleTestOverrides {
     this.random,
     this.setupTimeout,
     this.encodeCapsule,
+    this.beforeCrashCapsule,
   });
 
   final Directory? storageDirectory;
@@ -100,6 +101,9 @@ class BugCapsuleTestOverrides {
 
   /// Deterministic encoding boundary for capture cancellation tests.
   final Future<List<int>> Function(Capsule)? encodeCapsule;
+
+  /// Awaited before an earlier run's crash capsule is built (slow builds).
+  final Future<void> Function()? beforeCrashCapsule;
 }
 
 /// Entry point of the BugCapsule SDK.
@@ -589,6 +593,8 @@ abstract final class BugCapsule {
     await _rt?.dispose();
     _rt = null;
     _consentBeforeInit = null;
+    // ignore: invalid_use_of_visible_for_testing_member
+    MonitoringHub.resetClaimsForTest();
     Scope.root.clear();
     // ignore: invalid_use_of_visible_for_testing_member
     await _emergency.resetForTest();
@@ -1470,6 +1476,7 @@ class _Runtime with WidgetsBindingObserver implements InteractionSession {
     required Future<CapsuleStore> storeFuture,
   }) async {
     try {
+      await _overrides?.beforeCrashCapsule?.call();
       final build = await (_overrides == null
           ? _buildInBackground(journal.path, request)
           : Future.sync(() => _buildFromJournal(journal.path, request)));
