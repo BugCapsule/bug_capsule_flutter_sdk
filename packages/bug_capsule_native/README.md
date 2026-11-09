@@ -16,8 +16,8 @@ they show up in the same issues and sessions as your Dart errors.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.11
-  bug_capsule_native: ^0.1.0-beta.2
+  bug_capsule: ^0.4.1-beta.13
+  bug_capsule_native: ^0.1.0-beta.3
 ```
 
 That's all: Flutter registers the plugin before `main`, and `BugCapsule.init`

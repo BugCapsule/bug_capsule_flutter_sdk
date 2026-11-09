@@ -1,3 +1,7 @@
+## 0.1.0-beta.3 — 2026-11-09
+
+- Pin Android SDK 0.4.1-beta.8 and iOS SDK 0.4.1-beta.7; require Flutter core 0.4.1-beta.13 for pending native crash handling.
+
 ## 0.1.0-beta.2 — 2026-11-03
 
 - iOS: registers as `BugCapsuleStorageProtection`, which excludes the BugCapsule storage root from iCloud and device backups (`NSURLIsExcludedFromBackupKey`) and sets `completeUntilFirstUserAuthentication` on it and its files (new method `protectStorage` on the existing channel). Android needs nothing: the root is already in `noBackupFilesDir`.
