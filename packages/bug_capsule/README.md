@@ -59,13 +59,13 @@ timing, so races and data-dependent bugs come back.
 
 ## Install
 
-Current Flutter SDK release: [0.4.1-beta.14](https://pub.dev/packages/bug_capsule/versions/0.4.1-beta.14).
+Current Flutter SDK release: [0.4.1](https://pub.dev/packages/bug_capsule/versions/0.4.1).
 This release hides the capture overlay by default and in all Flutter release
 builds, and adds a safe message for widget build failures while preserving
 background error reporting. Rebuild your app after upgrading.
 
 ```bash
-flutter pub add bug_capsule:^0.4.1-beta.14
+flutter pub add bug_capsule:^0.4.1
 ```
 
 Everything ships in this one package, with one import:
@@ -309,7 +309,7 @@ not need to match the Flutter SDK version.
 Install the multi-runtime CLI with npm (Node.js 20 or newer):
 
 ```sh
-npm install -g @bugcapsule/cli@0.4.0-beta.6
+npm install -g @bugcapsule/cli@0.4.0
 bugcapsule --version
 bugcapsule login
 ```
@@ -318,7 +318,7 @@ No Dart or Flutter installation is needed for the CLI. On first use it downloads
 and verifies a standalone executable for macOS (Apple Silicon or Intel), Linux
 (ARM64 or x64), or Windows x64. Later runs use the cached executable, including
 offline inspection. Direct executable downloads are available in the
-[CLI release](https://github.com/BugCapsule/bug_capsule_flutter_sdk/releases/tag/v0.4.1-beta.11).
+[CLI release](https://github.com/BugCapsule/bug_capsule_flutter_sdk/releases/tag/v0.4.1).
 
 Replay needs the toolchain of the app being tested: Flutter for Flutter apps,
 Android SDK/JDK for Android, Xcode on macOS for iOS, or Node/Playwright for web.
@@ -450,8 +450,8 @@ More: [docs.bugcapsule.com/monitoring](https://docs.bugcapsule.com/monitoring.ht
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.14
-  bug_capsule_native: ^0.1.0-beta.3
+  bug_capsule: ^0.4.1
+  bug_capsule_native: ^0.1.0
 ```
 
 Native crashes are reported on the next launch, in the same issues and

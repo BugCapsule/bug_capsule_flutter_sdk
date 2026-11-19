@@ -1,3 +1,7 @@
+## 0.1.0
+
+- Stable release for BugCapsule 0.4.1.
+
 ## 0.1.0-beta.3 — 2026-11-09
 
 - Pin Android SDK 0.4.1-beta.8 and iOS SDK 0.4.1-beta.7; require Flutter core 0.4.1-beta.13 for pending native crash handling.
