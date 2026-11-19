@@ -1,3 +1,7 @@
+## 0.1.0
+
+- Stable release for BugCapsule 0.4.1.
+
 ## 0.1.0-dev.2 — 2026-11-09
 
 - Harden HTTP delivery, signed keyring invalidation and receipt acknowledgement.

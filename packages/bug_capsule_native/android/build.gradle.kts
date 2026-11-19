@@ -1,8 +1,8 @@
 group = "dev.bugcapsule.bug_capsule_native"
-version = "0.1.0-beta.3"
+version = "0.1.0"
 
 // The BugCapsule Android SDK release with dev.bugcapsule.android.embedding.CrashBridge.
-val bugCapsuleAndroidVersion = "0.4.1-beta.8"
+val bugCapsuleAndroidVersion = "0.4.1"
 
 buildscript {
     val kotlinVersion = "2.4.0"
