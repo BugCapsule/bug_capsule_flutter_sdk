@@ -10,8 +10,8 @@ dependencies:
   bug_capsule_patch: ^0.1.0
 ```
 
-Requires Dart3.9+, Flutter3.35+, AndroidAPI23+ or iOS15+. The package includes
-Android arm64-v8a, armeabi-v7a and x86_64 libraries, iOSarm64, and iOS simulator
+Requires Dart 3.10+, Flutter 3.41+ (the minimums of `bug_capsule` 0.4.1), Android API 23+ or iOS 15+. The package includes
+Android arm64-v8a, armeabi-v7a and x86_64 libraries, iOS arm64, and iOS simulator
 arm64/x86_64. Try it in an isolated test application first.
 
 Register typed PatchModule contracts and compiled fallback implementations,
