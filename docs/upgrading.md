@@ -22,11 +22,11 @@ package, `bug_capsule`. The API is unchanged; only the dependency and the
 imports change.
 
 - In `pubspec.yaml`, replace the twelve legacy split core/integration dependencies with
-  `bug_capsule` (`flutter pub add bug_capsule:0.4.1-beta.12`).
+  `bug_capsule` (`flutter pub add bug_capsule:0.4.1`).
 - Replace imports from those twelve legacy packages with
   `import 'package:bug_capsule/bug_capsule.dart';`.
 - CLI: `dart pub global deactivate bug_capsule_cli`, then
-  `npm install -g @bugcapsule/cli@0.4.0-beta.6`.
+  `npm install -g @bugcapsule/cli@0.4.0`.
 - Capsules still report `sdk.name: bug_capsule_flutter`, so BugCapsule and
   older CLIs read them as before.
 
@@ -41,7 +41,7 @@ imports change.
 
 ## Bundled integrations in Flutter 0.4.1-beta.12
 
-1. Upgrade `bug_capsule` to `^0.4.1-beta.12` with Flutter 3.41+ and Dart 3.10+.
+1. Upgrade `bug_capsule` to `^0.4.1` with Flutter 3.41+ and Dart 3.10+.
 2. Remove `bug_capsule_firebase`, `bug_capsule_geolocator`,
    `bug_capsule_google_maps` and `bug_capsule_stripe` from your pubspec.
 3. Change imports to `package:bug_capsule/firebase.dart`, `geolocator.dart`,

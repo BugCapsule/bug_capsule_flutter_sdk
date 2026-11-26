@@ -14,7 +14,7 @@ own app; the differences are listed at the end.
 ## 2. CLI
 
 ```bash
-npm install -g @bugcapsule/cli@0.4.0-beta.6
+npm install -g @bugcapsule/cli@0.4.0
 bugcapsule login   # opens your browser: check the code, pick the project, approve
 ```
 

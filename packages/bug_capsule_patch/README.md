@@ -6,13 +6,13 @@ does not replace arbitrary Dart code, install plugins or change permissions.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.11
-  bug_capsule_patch: ^0.1.0-dev.1
+  bug_capsule: ^0.4.1
+  bug_capsule_patch: ^0.1.0
 ```
 
 Requires Dart3.9+, Flutter3.35+, AndroidAPI23+ or iOS15+. The package includes
 Android arm64-v8a, armeabi-v7a and x86_64 libraries, iOSarm64, and iOS simulator
-arm64/x86_64. This is a prerelease; use an isolated test application first.
+arm64/x86_64. Try it in an isolated test application first.
 
 Register typed PatchModule contracts and compiled fallback implementations,
 then create a BugCapsulePatchBinding using your immutable base build ID,

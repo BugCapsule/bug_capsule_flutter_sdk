@@ -20,7 +20,7 @@ old standalone adapter dependency before upgrading.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.12
+  bug_capsule: ^0.4.1
   google_maps_flutter: ^2.19.0
 ```
 
