@@ -22,14 +22,14 @@ jobs:
         os: [ubuntu-22.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: '3.13.7'
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - run: python tool/build_cli.py
@@ -49,7 +49,7 @@ jobs:
           import pathlib, subprocess
           binary = next(p.resolve() for p in pathlib.Path('dist/cli').iterdir() if p.suffix != '.sha256')
           subprocess.run(['python', 'tool/smoke_patch_cli.py', str(binary)], check=True)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cli-${{ matrix.os }}
           path: dist/cli/*
@@ -60,7 +60,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: cli-*
           merge-multiple: true
