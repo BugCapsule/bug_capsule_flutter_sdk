@@ -18,7 +18,7 @@ old standalone adapter dependency before upgrading.
 
 ```yaml
 dependencies:
-  bug_capsule: ^0.4.1-beta.12
+  bug_capsule: ^0.4.1
 ```
 
 ```dart
